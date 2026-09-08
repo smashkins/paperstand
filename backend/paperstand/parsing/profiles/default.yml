@@ -1,0 +1,82 @@
+# The `default` parser profile.
+#
+# It encodes the naming shapes that turn up in real collections of PDF
+# periodicals: date folders, numeric prefixes, handle prefixes, duplicate
+# suffixes, Italian and English month names, issue numbers with and without an
+# introducing token. Nothing here is code — a library that needs different rules
+# extends this profile or replaces it, in YAML.
+#
+# See docs/parser-profiles.md for the schema and for worked examples.
+
+# Regexes removed from the stem, in order, before anything else.
+strip:
+  # A numeric prefix some tools put in front of the name.
+  - '^\d+_\d+_'
+  # A handle-like prefix, "@something_" or "@something ".
+  - '^@[A-Za-z0-9_]+?[_\s]+'
+  # Duplicate copies: " (1)" and "_(1)".
+  - '(?P<dedup>[ _]\(\d{1,2}\))$'
+  # Duplicate copies: a trailing "-1", when it cannot be the tail of a date.
+  # The two lookbehinds keep "2026-03-17" and "2026-3-17" intact, and the
+  # digit alternation refuses "-01".."-12" right after a year, which is a
+  # month, not a copy counter. A file that really is the tenth to twelfth
+  # duplicate of the same name keeps its suffix; that is the safe way round.
+  - '(?<!\d{4}-\d)(?<!\d{4}-\d{2})(?P<dedup>-(?:[1-9]|1[3-9]|[2-9]\d))$'
+
+# Regex -> replacement pairs, applied in order after the strips.
+replace:
+  # Underscores are separators.
+  - ['[_]+', ' ']
+  # Every kind of dash becomes a plain hyphen.
+  - ["[‐‑‒–—―−]", '-']
+  # Every kind of apostrophe becomes a plain one.
+  - ["[‘’ʼ´]", "'"]
+  # Collapse runs of whitespace.
+  - ['\s+', ' ']
+
+# Month tables to enable. Bundled: it, en, fr, de, es, pt.
+languages: [it, en]
+
+# Articles that may be present on one side only when a title is matched, so a
+# configured "Il Mattutino" still recognises "Mattutino_...".
+articles: [il, lo, la, le, gli, l, the]
+
+# Words a derived title keeps lowercase unless they open it, so that a name
+# taken from a file name reads like a name and not like a headline. Only
+# entirely lowercase words are ever touched: anything already capitalised is
+# left exactly as it was written.
+lowercase_words: [
+  'il', 'lo', 'la', 'i', 'gli', 'le', 'l', 'un', 'uno', 'una',
+  'di', 'del', 'dello', 'della', 'dei', 'degli', 'delle', 'da', 'dal', 'dalla',
+  'in', 'nel', 'nella', 'con', 'su', 'sul', 'per', 'tra', 'fra', 'e',
+  'ed', 'a', 'al', 'alla', 'the', 'of', 'and', 'or', 'on', 'for',
+  'to', 'at', 'by', 'from', 'an',
+]
+
+# No pattern of its own: the default profile relies on the generic rules below.
+patterns: []
+
+# Generic date rules, tried in order. D1 YYYY-MM-DD, D2 DD-MM-YYYY,
+# D3 "D(-D)? <month> YYYY?", D4 "<month> D, YYYY", D5 YYYY-MM,
+# D6 "<month> YYYY", D7 an isolated year.
+date_rules: [D1, D2, D3, D4, D5, D6, D7]
+
+# When no rule yields a date, read it from the folders, then from the mtime.
+date_fallback: [folder, mtime]
+
+# Title resolution order: configured titles, then a pattern's `title` group,
+# then the nearest non-date folder, then the file name prefix.
+title_source: [config, pattern, folder, filename]
+
+# Issue numbers are read. The bare-integer rule N2 is switched off on its own
+# for libraries of kind `newspaper`, where a title may carry a number.
+number: true
+# ('no' is quoted: unquoted, YAML would read it as the boolean false.)
+number_tokens: ['numero', 'num', 'issue', 'nr', 'no', 'n', '#']
+
+# Years accepted as a date — and refused as an issue number.
+year_range: [1900, 2099]
+
+# With titles configured and none matching, the file goes to Unsorted rather
+# than inventing a title of its own. Its derived title is kept either way.
+unsorted: true
