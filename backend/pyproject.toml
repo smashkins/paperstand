@@ -1,0 +1,73 @@
+[project]
+name = "paperstand"
+version = "0.1.0"
+description = "Self-hosted reader for collections of PDF periodicals"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Vincenzo S." }]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pymupdf>=1.24",
+    "pillow>=11.0",
+    "pyyaml>=6.0",
+    "pydantic-settings>=2.6",
+]
+
+[project.scripts]
+paperstand = "paperstand.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/smashkins/paperstand"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.28",
+    "feedparser>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-PyYAML>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["paperstand"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["paperstand"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["paperstand", "tests"]
+strict = true
+warn_unused_configs = true
+warn_unreachable = true
+# PyMuPDF ships type hints but leaves its constructors unannotated; strict mode
+# would otherwise reject every `pymupdf.open()`.
+untyped_calls_exclude = ["pymupdf"]
+
+[[tool.mypy.overrides]]
+# feedparser ships no type information and has no stub package. It is a test
+# dependency only: the OPDS tests parse every feed with it because it is what a
+# reading app's parser is, and what matters there is that it accepts the bytes.
+module = ["feedparser"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,74 @@
+# Paperstand configuration — copy to <DATA_PATH>/paperstand.yml and edit.
+#
+# The file is entirely optional: with no configuration Paperstand discovers one
+# library per top-level folder under /library and derives titles from folder and
+# file names. Configuring titles is what turns a pile of PDFs into a catalogue,
+# because it lets Paperstand tell "La Gazzetta del Lago" from "La Gazzetta del Lago Valdora".
+
+# Folders skipped everywhere in the library, on top of the always-ignored
+# `@*`, `.*` and `#*` entries.
+ignore:
+  - comics
+
+libraries:
+  - name: Newspapers
+    path: Newspapers # relative to /library
+    kind: newspaper # newspaper | magazine
+    titles:
+      - Il Mattutino
+      - name: Cronaca 24 Pagine
+        aliases: [La Cronaca 24 Pagine, Cronaca24Pagine]
+      - Corriere del Ponte
+      - La Gazzetta del Lago
+      - La Gazzetta del Lago Valdora
+      - Giornale della Costa Alta
+      - W La Gazzetta del Lago
+      - The Daily Ledger
+
+  - name: Magazines
+    path: Magazines
+    kind: magazine
+    titles:
+      - Orizzonte
+      - Confini
+      - L'Almanacco
+# Optional parser profiles. A profile is a declarative description of how file
+# names are turned into a title, a date and an issue number; no naming rule
+# lives in Paperstand's code. The bundled `default` profile handles the shapes
+# listed in docs/parser-profiles.md, and a library picks one with `parser:`.
+#
+# A profile without `extends` starts empty, not from `default`. A list a child
+# sets replaces the parent's, unless its first element is "+", which appends.
+#
+# parsers:
+#   my-dailies:
+#     extends: default          # start from the bundled profile
+#     strip:                    # regexes removed from the stem, in order
+#       - "+"                   # keep the ones `default` already has...
+#       - '^scan[_ ]'           # ...and add this one
+#     replace:                  # [regex, replacement] pairs
+#       - ['[_]+', ' ']
+#     languages: [it, en]       # month tables: it, en, fr, de, es, pt
+#     months:                   # or a table of your own
+#       xx: {primo: 1, secondo: 2}
+#     articles: [il, lo, la, le, gli, l, the]
+#     lowercase_words: [di, della, the, of]
+#     patterns:                 # named groups; first match wins
+#       - '^(?P<title>.+?)\s+(?P<day>\d{1,2})\s*(?P<month>[a-z]+)\s*(?P<year>\d{4})?$'
+#       - '^(?P<title>.+?)\s+(?P<date>\d{4}-\d{2}-\d{2})$'
+#     date_rules: [D1, D2, D3, D4, D5, D6, D7]
+#     date_fallback: [folder, mtime]
+#     title_source: [config, pattern, folder, filename]
+#     number: false             # off for dailies, so "Cronaca 24 Pagine" keeps its 24
+#     number_tokens: ['numero', 'num', 'issue', 'nr', 'no', 'n', '#']
+#     year_range: [1900, 2099]
+#     unsorted: true            # false = use the derived title instead of Unsorted
+#
+# libraries:
+#   - name: Newspapers
+#     path: Newspapers
+#     kind: newspaper
+#     parser: my-dailies
+#     titles:
+#       - name: Confini
+#         pattern: '^Confini\s*N?\s*(?P<number>\d+)'   # per-title override

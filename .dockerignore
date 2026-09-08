@@ -1,0 +1,29 @@
+# Only two things reach a build stage: `frontend/`, and
+# `backend/{pyproject.toml,uv.lock,paperstand}`. Everything else is excluded so
+# that the context stays small and a change to a document or a screenshot cannot
+# invalidate a layer. `docs/` in particular carries the screenshots, which are
+# several megabytes and are needed by the README, never at runtime.
+.git
+.github
+.venv
+**/.venv
+**/__pycache__
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache
+**/node_modules
+frontend/.svelte-kit
+frontend/build
+backend/tests
+library
+data
+docs
+plans
+scripts
+*.md
+**/*.md
+.env
+.env.*
+!.env.example
+.DS_Store
+**/.DS_Store
