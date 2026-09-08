@@ -43,7 +43,7 @@ jobs:
 
       - name: Derive tags and labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/smashkins/paperstand
           # No bare `{{major}}` while the project is 0.x, and no raw `latest`.
