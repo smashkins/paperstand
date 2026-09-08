@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Live scan progress: `GET /api/scan/status` reports the running scan's phase,
+  its counters and the elapsed time while it works, refreshed every two seconds;
+  Settings shows the phase, the live counters, the elapsed time and a progress
+  bar — indeterminate while cataloguing, a fraction of the covers rendered once
+  the total is known.
+- `POST /api/scan` and `GET /api/scan/status` now document their bodies with
+  named OpenAPI schemas, and `GET /api/health` with its own; the frontend's
+  hand-written scan and health types are gone in favour of the generated ones.
 - The `default` profile reads two more real-world shapes: a year-stamped volume and a
   running issue number, `Title vYYYY cNNN` and `Title cNNN - vYYYY`, in either order.
 
