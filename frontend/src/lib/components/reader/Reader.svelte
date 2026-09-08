@@ -404,9 +404,9 @@
 	});
 
 	function onWindowPointerMove(event: PointerEvent) {
-		// A finger already reports its own activity through the gesture layer;
-		// treating its jitter as movement here is what made a tap flash the chrome.
-		if (event.pointerType === 'touch') return;
+		// A pointer with a button down — mouse, pen or finger — belongs to the
+		// gesture layer, which reports activity itself; only hovering is worth this.
+		if (event.buttons !== 0) return;
 		activity();
 	}
 
