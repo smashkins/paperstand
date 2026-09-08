@@ -251,8 +251,10 @@
 	// --------------------------------------------------------------- chrome
 
 	let hideTimer: ReturnType<typeof setTimeout> | null = null;
+	let held = false;
 
 	function activity() {
+		held = false;
 		chrome = true;
 		if (hideTimer !== null) clearTimeout(hideTimer);
 		// The strip and the shortcut panel are deliberate choices to keep the
@@ -268,11 +270,13 @@
 		// A press is in progress and has not said what it is yet; the
 		// auto-hide timer must not change the chrome underneath it, or
 		// `toggleChrome` would answer a state the reader never saw.
+		held = true;
 		if (hideTimer !== null) clearTimeout(hideTimer);
 		hideTimer = null;
 	}
 
 	function toggleChrome() {
+		held = false;
 		if (chrome) {
 			if (hideTimer !== null) clearTimeout(hideTimer);
 			hideTimer = null;
@@ -405,7 +409,10 @@
 
 	function onWindowPointerMove(event: PointerEvent) {
 		// A pointer with a button down — mouse, pen or finger — belongs to the
-		// gesture layer, which reports activity itself; only hovering is worth this.
+		// gesture layer, which reports activity itself; only hovering is worth this,
+		// and a press that has not resolved yet holds the chrome even after the
+		// button lifts, until `onTap` or `onActivity` says what it was.
+		if (held) return;
 		if (event.buttons !== 0) return;
 		activity();
 	}
