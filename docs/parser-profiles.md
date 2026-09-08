@@ -260,7 +260,7 @@ year (taken from the folders, `date_source: mixed`), the alias and the regional 
 ```
 Magazines/Circuito/Circuito_2026-03.pdf
 Magazines/Circuito/Circuito_March_2026.pdf
-Magazines/The Atlantic/The_Atlantic_March_17_2026.pdf
+Magazines/Bright Meadows/Bright_Meadows_March_17_2026.pdf
 ```
 
 ```yaml
@@ -274,7 +274,7 @@ libraries:
     path: Magazines
     kind: magazine
     parser: english
-    titles: [Circuito, The Atlantic]
+    titles: [Circuito, Bright Meadows]
 ```
 
 `D5` reads `2026-03`, `D6` reads `March 2026` and `D4` reads `March 17 2026`; the first two
