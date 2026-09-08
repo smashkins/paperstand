@@ -22,8 +22,10 @@ import datetime as dt
 import sqlite3
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from paperstand.config import LibraryConfig, PaperstandConfig, Settings, load_config
 from paperstand.db import (
@@ -77,6 +79,35 @@ ISSUE_COLUMNS = (
 #: The columns an existing row has rewritten when its file changed.
 UPDATABLE_COLUMNS = ISSUE_COLUMNS[1:-3]
 
+#: The two phases of a scan, in the order they run.
+ScanPhase = Literal["catalogue", "covers"]
+
+
+@dataclass(frozen=True, slots=True)
+class ScanProgress:
+    """An immutable snapshot of a scan already in progress.
+
+    Published through ``on_progress`` at every phase change, on every file of
+    the fast phase and on every rendered cover of the slow one. Frozen, so
+    handing one to a reader on another thread is a single attribute
+    assignment and needs no lock: the reader either sees the old snapshot or
+    the new one, never a mix of the two. ``started_at`` is carried rather
+    than an elapsed duration, because a duration frozen at publish time would
+    be stale by the time a poller reads it two seconds later; the caller
+    computes ``elapsed`` from ``started_at`` when it is read.
+    """
+
+    scan_id: int
+    phase: ScanPhase
+    started_at: str
+    files_seen: int = 0
+    added: int = 0
+    updated: int = 0
+    removed: int = 0
+    errors: int = 0
+    covers_done: int = 0
+    covers_total: int | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class ScanResult:
@@ -118,9 +149,15 @@ class Scanner:
     job to guarantee.
     """
 
-    def __init__(self, settings: Settings, database: Database) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        database: Database,
+        on_progress: Callable[[ScanProgress], None] | None = None,
+    ) -> None:
         self.settings = settings
         self.database = database
+        self.on_progress = on_progress
 
     # ------------------------------------------------------------------ public
 
@@ -144,8 +181,9 @@ class Scanner:
     def run(self, scan_id: int) -> ScanResult:
         """Run both phases of scan ``scan_id`` and close its row."""
         started = time.perf_counter()
+        started_at = utc_now()
         try:
-            result = self._run(scan_id, started)
+            result = self._run(scan_id, started, started_at)
         except Exception as error:  # a failed scan is reported, never raised
             log.exception("scan %d failed", scan_id)
             result = ScanResult(
@@ -159,12 +197,12 @@ class Scanner:
 
     # ----------------------------------------------------------------- phases
 
-    def _run(self, scan_id: int, started: float) -> ScanResult:
+    def _run(self, scan_id: int, started: float, started_at: str) -> ScanResult:
         config = load_config(
             self.settings.config_path,
             folder_names=top_level_folders(self.settings.library),
         )
-        result = self._fast_phase(scan_id, config)
+        result = self._fast_phase(scan_id, config, started_at)
         result = replace(result, duration=time.perf_counter() - started)
         log.info(
             "scan %d: fast phase in %.2fs — %s",
@@ -172,10 +210,44 @@ class Scanner:
             result.duration,
             result.summary(),
         )
-        result = self._slow_phase(result)
+        result = self._slow_phase(result, started_at)
         return replace(result, duration=time.perf_counter() - started)
 
-    def _fast_phase(self, scan_id: int, config: PaperstandConfig) -> ScanResult:
+    def _publish(
+        self,
+        scan_id: int,
+        phase: ScanPhase,
+        started_at: str,
+        *,
+        files_seen: int = 0,
+        added: int = 0,
+        updated: int = 0,
+        removed: int = 0,
+        errors: int = 0,
+        covers_done: int = 0,
+        covers_total: int | None = None,
+    ) -> None:
+        """Hand a snapshot to ``on_progress``, when there is one to hand it to."""
+        if self.on_progress is None:
+            return
+        self.on_progress(
+            ScanProgress(
+                scan_id=scan_id,
+                phase=phase,
+                started_at=started_at,
+                files_seen=files_seen,
+                added=added,
+                updated=updated,
+                removed=removed,
+                errors=errors,
+                covers_done=covers_done,
+                covers_total=covers_total,
+            )
+        )
+
+    def _fast_phase(
+        self, scan_id: int, config: PaperstandConfig, started_at: str
+    ) -> ScanResult:
         """Walk, parse what changed, remove what is gone, resolve duplicates."""
         root = self.settings.library
         connection = self.database.connection
@@ -199,11 +271,25 @@ class Scanner:
         unchanged: list[str] = []
         walk = Walk(root, config)
 
+        def snapshot(*, removed: int = 0) -> None:
+            self._publish(
+                scan_id,
+                "catalogue",
+                started_at,
+                files_seen=files_seen,
+                added=added,
+                updated=updated,
+                removed=removed,
+                errors=errors,
+            )
+
         with self.database.transaction():
+            snapshot()
             for found in walk:
                 files_seen += 1
                 library = config.library_for(found.rel_path)
                 if library is None:
+                    snapshot()
                     continue
                 stored = existing.pop(found.rel_path, None)
                 changed = stored is not None and (
@@ -211,6 +297,7 @@ class Scanner:
                 )
                 if stored is not None and not changed and not reparse_all:
                     unchanged.append(stored.id)
+                    snapshot()
                     continue
                 try:
                     self._upsert(
@@ -219,11 +306,13 @@ class Scanner:
                 except (sqlite3.Error, ValueError) as error:
                     errors += 1
                     log.warning("scan %d: cannot catalogue %s: %s", scan_id, found.rel_path, error)
+                    snapshot()
                     continue
                 if stored is None:
                     added += 1
                 else:
                     updated += 1
+                snapshot()
 
             connection.executemany(
                 "UPDATE issues SET last_seen_scan = ? WHERE id = ?",
@@ -248,6 +337,7 @@ class Scanner:
                 self._drop_empty_libraries(connection, config)
                 set_meta(connection, "config_hash", config.config_hash)
             self._mark_duplicates(connection)
+            snapshot(removed=removed)
 
         message = self._incomplete(scan_id, walk, kept)
         return ScanResult(
@@ -279,7 +369,7 @@ class Scanner:
         log.warning("scan %d: %s", scan_id, message)
         return message
 
-    def _slow_phase(self, result: ScanResult) -> ScanResult:
+    def _slow_phase(self, result: ScanResult, started_at: str) -> ScanResult:
         """Open every PDF whose cover is still missing, on a worker pool."""
         started = time.perf_counter()
         connection = self.database.connection
@@ -288,9 +378,25 @@ class Scanner:
             return result
 
         done = failed = 0
+        total = len(pending)
         workers = max(1, self.settings.cover_workers)
         cache_root = self.settings.cache_path
         root = self.settings.library
+
+        def snapshot() -> None:
+            self._publish(
+                result.scan_id,
+                "covers",
+                started_at,
+                files_seen=result.files_seen,
+                added=result.added,
+                updated=result.updated,
+                removed=result.removed,
+                errors=result.errors + failed,
+                covers_done=done,
+                covers_total=total,
+            )
+
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cover") as pool:
 
             def render(item: tuple[str, str]) -> tuple[str, CoverResult | CoverError]:
@@ -298,6 +404,7 @@ class Scanner:
                 return identifier, render_cover(root / rel_path, identifier, cache_root)
 
             rendered = pool.map(render, pending)
+            snapshot()
             for written, (identifier, outcome) in enumerate(rendered, start=1):
                 if isinstance(outcome, CoverError):
                     failed += 1
@@ -323,6 +430,7 @@ class Scanner:
                     )
                 if written % COVER_COMMIT_BATCH == 0:
                     connection.commit()
+                snapshot()
             connection.commit()
 
         elapsed = time.perf_counter() - started

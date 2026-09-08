@@ -12,14 +12,15 @@ hands back its id.
 
 from __future__ import annotations
 
+import datetime as dt
 import threading
 from typing import Any
 
 from paperstand.config import Settings
-from paperstand.db import Database
+from paperstand.db import Database, utc_now
 from paperstand.logging import get_logger
 from paperstand.render.pages import evict as evict_pages
-from paperstand.scanner.scanner import Scanner, ScanResult
+from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult
 
 log = get_logger(__name__)
 
@@ -37,13 +38,14 @@ class ScanScheduler:
 
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
-        self.scanner = Scanner(settings, database)
+        self.scanner = Scanner(settings, database, on_progress=self._on_progress)
         self._busy = threading.Lock()
         self._stop = threading.Event()
         self._loop: threading.Thread | None = None
         self._scan_thread: threading.Thread | None = None
         self._current: int | None = None
         self._last: ScanResult | None = None
+        self._progress: ScanProgress | None = None
 
     # ------------------------------------------------------------------ public
 
@@ -105,6 +107,7 @@ class ScanScheduler:
             self._busy.release()
             raise
         self._current = scan_id
+        self._progress = self._seed_progress(scan_id)
         thread = threading.Thread(
             target=self._run, args=(scan_id,), name=f"scan-{scan_id}", daemon=True
         )
@@ -122,18 +125,31 @@ class ScanScheduler:
             self._busy.release()
             raise
         self._current = scan_id
+        self._progress = self._seed_progress(scan_id)
         return self._finish(scan_id)
 
     def status(self) -> dict[str, Any]:
         """What ``GET /api/scan/status`` reports."""
-        last = self._last
         return {
             "running": self.running,
-            "current": self._current,
-            "last": scan_summary(last),
+            "current": progress_summary(self._progress),
+            "last": scan_summary(self._last),
         }
 
     # ----------------------------------------------------------------- private
+
+    def _seed_progress(self, scan_id: int) -> ScanProgress:
+        """A zero-counter snapshot, published the instant a scan is asked for.
+
+        Without this, a poller landing between ``request_scan`` returning and
+        the scan thread's first callback would see ``running: true`` with
+        ``current: null`` — a shape the design rules out.
+        """
+        return ScanProgress(scan_id=scan_id, phase="catalogue", started_at=utc_now())
+
+    def _on_progress(self, progress: ScanProgress) -> None:
+        """The callback handed to the scanner: keep the latest snapshot."""
+        self._progress = progress
 
     def _run(self, scan_id: int) -> None:
         """The body of a scan thread: run it, then hand the connection back."""
@@ -150,6 +166,7 @@ class ScanScheduler:
             return result
         finally:
             self._current = None
+            self._progress = None
             self._busy.release()
 
     def _sweep_page_cache(self) -> None:
@@ -195,6 +212,7 @@ class ScanScheduler:
             self._busy.release()
             return
         self._current = scan_id
+        self._progress = self._seed_progress(scan_id)
         log.info("starting the %s scan (%d)", reason, scan_id)
         self._finish(scan_id)
 
@@ -214,4 +232,30 @@ def scan_summary(result: ScanResult | None) -> dict[str, Any] | None:
         "errors": result.errors,
         "message": result.message,
         "duration": round(result.duration, 3),
+    }
+
+
+def progress_summary(progress: ScanProgress | None) -> dict[str, Any] | None:
+    """A scan already in progress, as the API reports it.
+
+    ``elapsed`` is computed here, from ``started_at``, rather than carried on
+    the snapshot itself — a duration frozen at publish time would be stale by
+    the time a poller two seconds later reads it.
+    """
+    if progress is None:
+        return None
+    started = dt.datetime.fromisoformat(progress.started_at)
+    elapsed = (dt.datetime.now(dt.UTC) - started).total_seconds()
+    return {
+        "scan_id": progress.scan_id,
+        "phase": progress.phase,
+        "started_at": progress.started_at,
+        "elapsed": round(max(0.0, elapsed), 3),
+        "files_seen": progress.files_seen,
+        "added": progress.added,
+        "updated": progress.updated,
+        "removed": progress.removed,
+        "errors": progress.errors,
+        "covers_done": progress.covers_done,
+        "covers_total": progress.covers_total,
     }
