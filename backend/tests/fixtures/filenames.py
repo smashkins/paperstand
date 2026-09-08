@@ -531,6 +531,32 @@ DISCOVERED: tuple[Expected, ...] = (
         rule="F2 title:filename",
         title_source="filename",
     ),
+    # Volume-and-issue numbering: the pattern captures the volume year and the
+    # issue number, so neither leaks into the generic date rules. A trailing
+    # month name still reaches D6 and yields month precision; without one, the
+    # pattern's own year stands alone at year precision.
+    Expected(
+        rel_path="Zines/Bright_Meadows_v2024_c02_Febbraio_2024.pdf",
+        title="Bright Meadows",
+        date="2024-02-01",
+        precision="month",
+        source="filename",
+        number=2,
+        derived="Bright Meadows",
+        rule="pattern[0] D6 title:pattern",
+        title_source="pattern",
+    ),
+    Expected(
+        rel_path="Zines/Bright_Meadows_c15_-_v2023.pdf",
+        title="Bright Meadows",
+        date="2023-01-01",
+        precision="year",
+        source="filename",
+        number=15,
+        derived="Bright Meadows",
+        rule="pattern[1] title:pattern",
+        title_source="pattern",
+    ),
     Expected(
         rel_path="Dailies/2026/03/17/TDL_2026-03-17.pdf",
         title="TDL",

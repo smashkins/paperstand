@@ -300,9 +300,7 @@ def test_a_pattern_capturing_a_number_does_not_leak_it_into_the_date() -> None:
     config = config_with(
         {
             "extends": "default",
-            "patterns": [
-                r"^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)"
-            ],
+            "patterns": [r"^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)"],
         }
     )
     issue = parse_with(config, "M/Bright_Meadows_v2024_c02_Febbraio_2024.pdf")

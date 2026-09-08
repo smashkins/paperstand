@@ -40,7 +40,7 @@ NEWSPAPER_TITLES = {
     "Unsorted",
 }
 MAGAZINE_TITLES = {"Orizzonte", "Confini", "L'Almanacco", "Unsorted"}
-ZINE_TITLES = {"Random Mag", "Something", "Circuito"}
+ZINE_TITLES = {"Random Mag", "Something", "Circuito", "Bright Meadows"}
 
 
 def query(settings: Settings, sql: str, params: Sequence[object] = ()) -> list[sqlite3.Row]:
@@ -171,7 +171,12 @@ def test_the_titles_carry_where_they_came_from(
         for row in query(settings, "SELECT name, source FROM titles WHERE library_id = 'zines'")
     }
 
-    assert sources == {"Circuito": "folder", "Random Mag": "filename", "Something": "filename"}
+    assert sources == {
+        "Circuito": "folder",
+        "Random Mag": "filename",
+        "Something": "filename",
+        "Bright Meadows": "pattern",
+    }
 
 
 def test_the_scan_is_recorded(scanned: tuple[Settings, ScanResult, SampleLibrary]) -> None:

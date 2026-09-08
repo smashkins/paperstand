@@ -453,6 +453,26 @@ def build_zines(builder: LibraryBuilder, year: int) -> None:
         group="Zines (flat)",
     )
 
+    # Volume-and-issue numbering: a year-stamped volume and a running issue
+    # number, in either order. `default` reads both with a pattern of its own,
+    # no naming rule required. A trailing month name still yields month
+    # precision; without one, the volume year stands alone at year precision.
+    month_it = MONTHS_IT[1]
+    builder.pdf(
+        f"Zines/Bright_Meadows_v{year}_c02_{month_it}_{year}.pdf",
+        title="Bright Meadows",
+        subtitle=f"Vol. {year} No. 2 - {month_it} {year}",
+        size=A4,
+        group="Zines (flat)",
+    )
+    builder.pdf(
+        f"Zines/Bright_Meadows_c15_-_v{year - 1}.pdf",
+        title="Bright Meadows",
+        subtitle=f"Vol. {year - 1} No. 15",
+        size=A4,
+        group="Zines (flat)",
+    )
+
 
 def build_noise(builder: LibraryBuilder, today: dt.date) -> None:
     """Files and folders that the walker has to skip."""

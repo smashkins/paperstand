@@ -53,8 +53,14 @@ lowercase_words: [
   'to', 'at', 'by', 'from', 'an',
 ]
 
-# No pattern of its own: the default profile relies on the generic rules below.
-patterns: []
+# Volume-and-issue numbering, common in real-world naming: a year-stamped
+# volume and a running issue number, in either order. Neither is anchored at
+# the end, so a trailing "<Month> YYYY" still reaches the generic date rules
+# below and yields month precision; without one, the pattern's own year
+# stands alone at year precision.
+patterns:
+  - '^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)'
+  - '^(?P<title>.+?)\s+c(?P<number>\d{1,5})(?!\d)\s*-\s*v(?P<year>\d{4})(?!\d)'
 
 # Generic date rules, tried in order. D1 YYYY-MM-DD, D2 DD-MM-YYYY,
 # D3 "D(-D)? <month> YYYY?", D4 "<month> D, YYYY", D5 YYYY-MM,

@@ -42,6 +42,7 @@ every page. It also writes a `.paperstand-sample-library` marker, which is the o
 | **Confini** | Issue numbers in two spellings, `Confini_n._8_2026` and `Confini_N_3_…`, and a subtitle after the number that has to be dropped from the title. |
 | **L'Almanacco** | The apostrophe, in every spelling that turns up: `L'Almanacco`, `LAlmanacco` and `L'_Almanacco`, the last with a space the parser has to close up. |
 | **Circuito** | A `#` before the number, and a flat folder with no year in it. |
+| **Bright Meadows** | Volume-and-issue numbering, in either order: `Bright_Meadows_v2024_c02_Febbraio_2024` (month precision, the volume year and a trailing month) and `Bright_Meadows_c15_-_v2023` (year precision, no month). The pattern's `number` group is what keeps the issue number out of the date — without it, `c02` reads as day 2. |
 | **Random Mag**, **Something** | No date in the name at all. One falls back to the folder, the other to the file's modification time. |
 
 ## Places

@@ -114,7 +114,12 @@ def test_titles_filter_by_kind_and_by_library(catalogue_client: TestClient) -> N
 
     assert newspapers and all(title["kind"] == "newspaper" for title in newspapers)
     assert zines and all(title["library_id"] == "zines" for title in zines)
-    assert {title["name"] for title in zines} == {"Random Mag", "Something", "Circuito"}
+    assert {title["name"] for title in zines} == {
+        "Random Mag",
+        "Something",
+        "Circuito",
+        "Bright Meadows",
+    }
 
 
 def test_a_title_carries_its_latest_issue_and_its_cover(catalogue_client: TestClient) -> None:
@@ -224,7 +229,7 @@ def test_issues_filter_by_title_library_year_and_range(catalogue_client: TestCli
     zines = catalogue_client.get("/api/issues", params={"library": "zines"}).json()
 
     assert all(item["library_id"] == "zines" for item in zines["items"])
-    assert zines["total"] == 3
+    assert zines["total"] == 5
     assert by_title["total"] == title["issue_count"]
     assert ranged["total"] == 7
     assert all(week.isoformat() <= item["issue_date"] for item in ranged["items"])
