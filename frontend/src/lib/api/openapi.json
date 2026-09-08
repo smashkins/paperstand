@@ -1,0 +1,2262 @@
+{
+	"components": {
+		"schemas": {
+			"Aspect": {
+				"description": "The page box of an issue, in PDF points.\n\nPresent as soon as the scanner has opened the file; ``null`` until then, so a\ncaller that wants to reserve the right amount of space for a cover has to\ncope with not knowing it yet.",
+				"properties": {
+					"page_h": {
+						"title": "Page H",
+						"type": "number"
+					},
+					"page_w": {
+						"title": "Page W",
+						"type": "number"
+					}
+				},
+				"required": [
+					"page_w",
+					"page_h"
+				],
+				"title": "Aspect",
+				"type": "object"
+			},
+			"Calendar": {
+				"description": "One year of a title, as a day → issue map.",
+				"properties": {
+					"days": {
+						"additionalProperties": {
+							"type": "string"
+						},
+						"title": "Days",
+						"type": "object"
+					},
+					"year": {
+						"title": "Year",
+						"type": "integer"
+					},
+					"years": {
+						"items": {
+							"$ref": "#/components/schemas/YearCount"
+						},
+						"title": "Years",
+						"type": "array"
+					}
+				},
+				"required": [
+					"year",
+					"years",
+					"days"
+				],
+				"title": "Calendar",
+				"type": "object"
+			},
+			"HTTPValidationError": {
+				"properties": {
+					"detail": {
+						"items": {
+							"$ref": "#/components/schemas/ValidationError"
+						},
+						"title": "Detail",
+						"type": "array"
+					}
+				},
+				"title": "HTTPValidationError",
+				"type": "object"
+			},
+			"Issue": {
+				"description": "One issue: a PDF in the library, as the catalogue understands it.",
+				"properties": {
+					"added_at": {
+						"title": "Added At",
+						"type": "string"
+					},
+					"aspect": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Aspect"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"cover_url": {
+						"title": "Cover Url",
+						"type": "string"
+					},
+					"date_precision": {
+						"enum": [
+							"day",
+							"month",
+							"year",
+							"none"
+						],
+						"title": "Date Precision",
+						"type": "string"
+					},
+					"date_source": {
+						"enum": [
+							"filename",
+							"mixed",
+							"folder",
+							"mtime",
+							"none"
+						],
+						"title": "Date Source",
+						"type": "string"
+					},
+					"file_url": {
+						"title": "File Url",
+						"type": "string"
+					},
+					"filename": {
+						"title": "Filename",
+						"type": "string"
+					},
+					"id": {
+						"title": "Id",
+						"type": "string"
+					},
+					"is_duplicate": {
+						"title": "Is Duplicate",
+						"type": "boolean"
+					},
+					"issue_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Date"
+					},
+					"issue_number": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Number"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"label": {
+						"title": "Label",
+						"type": "string"
+					},
+					"library_id": {
+						"title": "Library Id",
+						"type": "string"
+					},
+					"page_count": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Page Count"
+					},
+					"progress": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Progress"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"rel_path": {
+						"title": "Rel Path",
+						"type": "string"
+					},
+					"size": {
+						"title": "Size",
+						"type": "integer"
+					},
+					"thumb_url": {
+						"title": "Thumb Url",
+						"type": "string"
+					},
+					"title_id": {
+						"title": "Title Id",
+						"type": "string"
+					},
+					"title_name": {
+						"title": "Title Name",
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"title_id",
+					"title_name",
+					"library_id",
+					"kind",
+					"date_precision",
+					"date_source",
+					"label",
+					"filename",
+					"rel_path",
+					"size",
+					"cover_url",
+					"thumb_url",
+					"file_url",
+					"added_at",
+					"is_duplicate"
+				],
+				"title": "Issue",
+				"type": "object"
+			},
+			"IssueDetail": {
+				"description": "An issue, plus everything only its own page needs.",
+				"properties": {
+					"added_at": {
+						"title": "Added At",
+						"type": "string"
+					},
+					"aspect": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Aspect"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"cover_url": {
+						"title": "Cover Url",
+						"type": "string"
+					},
+					"date_precision": {
+						"enum": [
+							"day",
+							"month",
+							"year",
+							"none"
+						],
+						"title": "Date Precision",
+						"type": "string"
+					},
+					"date_source": {
+						"enum": [
+							"filename",
+							"mixed",
+							"folder",
+							"mtime",
+							"none"
+						],
+						"title": "Date Source",
+						"type": "string"
+					},
+					"derived_title": {
+						"title": "Derived Title",
+						"type": "string"
+					},
+					"file_url": {
+						"title": "File Url",
+						"type": "string"
+					},
+					"filename": {
+						"title": "Filename",
+						"type": "string"
+					},
+					"id": {
+						"title": "Id",
+						"type": "string"
+					},
+					"is_duplicate": {
+						"title": "Is Duplicate",
+						"type": "boolean"
+					},
+					"issue_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Date"
+					},
+					"issue_number": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Number"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"label": {
+						"title": "Label",
+						"type": "string"
+					},
+					"library_id": {
+						"title": "Library Id",
+						"type": "string"
+					},
+					"matched_rule": {
+						"title": "Matched Rule",
+						"type": "string"
+					},
+					"next_issue_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Next Issue Id"
+					},
+					"page_count": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Page Count"
+					},
+					"pages_url_template": {
+						"title": "Pages Url Template",
+						"type": "string"
+					},
+					"prev_issue_id": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Prev Issue Id"
+					},
+					"progress": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Progress"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"rel_path": {
+						"title": "Rel Path",
+						"type": "string"
+					},
+					"size": {
+						"title": "Size",
+						"type": "integer"
+					},
+					"thumb_url": {
+						"title": "Thumb Url",
+						"type": "string"
+					},
+					"title_id": {
+						"title": "Title Id",
+						"type": "string"
+					},
+					"title_name": {
+						"title": "Title Name",
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"title_id",
+					"title_name",
+					"library_id",
+					"kind",
+					"date_precision",
+					"date_source",
+					"label",
+					"filename",
+					"rel_path",
+					"size",
+					"cover_url",
+					"thumb_url",
+					"file_url",
+					"added_at",
+					"is_duplicate",
+					"derived_title",
+					"matched_rule",
+					"pages_url_template"
+				],
+				"title": "IssueDetail",
+				"type": "object"
+			},
+			"IssuePage": {
+				"description": "A page of issues, with the total the filters matched.",
+				"properties": {
+					"items": {
+						"items": {
+							"$ref": "#/components/schemas/Issue"
+						},
+						"title": "Items",
+						"type": "array"
+					},
+					"total": {
+						"title": "Total",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"items",
+					"total"
+				],
+				"title": "IssuePage",
+				"type": "object"
+			},
+			"Library": {
+				"description": "One configured library and what the catalogue holds for it.",
+				"properties": {
+					"id": {
+						"title": "Id",
+						"type": "string"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"name": {
+						"title": "Name",
+						"type": "string"
+					},
+					"path": {
+						"title": "Path",
+						"type": "string"
+					},
+					"title_count": {
+						"title": "Title Count",
+						"type": "integer"
+					},
+					"unsorted_count": {
+						"title": "Unsorted Count",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"path",
+					"kind",
+					"title_count",
+					"issue_count",
+					"unsorted_count"
+				],
+				"title": "Library",
+				"type": "object"
+			},
+			"Progress": {
+				"description": "Where the reader got to in an issue.",
+				"properties": {
+					"page": {
+						"title": "Page",
+						"type": "integer"
+					},
+					"page_count": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Page Count"
+					},
+					"updated_at": {
+						"title": "Updated At",
+						"type": "string"
+					}
+				},
+				"required": [
+					"page",
+					"updated_at"
+				],
+				"title": "Progress",
+				"type": "object"
+			},
+			"ProgressRecord": {
+				"description": "One row of the progress table, as its own endpoints return it.",
+				"properties": {
+					"issue_id": {
+						"title": "Issue Id",
+						"type": "string"
+					},
+					"page": {
+						"title": "Page",
+						"type": "integer"
+					},
+					"page_count": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Page Count"
+					},
+					"updated_at": {
+						"title": "Updated At",
+						"type": "string"
+					}
+				},
+				"required": [
+					"issue_id",
+					"page",
+					"updated_at"
+				],
+				"title": "ProgressRecord",
+				"type": "object"
+			},
+			"ProgressUpdate": {
+				"description": "The body of ``PUT /api/issues/{id}/progress``.",
+				"properties": {
+					"page": {
+						"description": "1-based page number; clamped to the issue's page count",
+						"minimum": 1.0,
+						"title": "Page",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"page"
+				],
+				"title": "ProgressUpdate",
+				"type": "object"
+			},
+			"Stats": {
+				"description": "What the catalogue holds and what it costs on disk.",
+				"properties": {
+					"covers_bytes": {
+						"title": "Covers Bytes",
+						"type": "integer"
+					},
+					"db_bytes": {
+						"title": "Db Bytes",
+						"type": "integer"
+					},
+					"duplicate_count": {
+						"title": "Duplicate Count",
+						"type": "integer"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"libraries": {
+						"items": {
+							"$ref": "#/components/schemas/Library"
+						},
+						"title": "Libraries",
+						"type": "array"
+					},
+					"pages_bytes": {
+						"title": "Pages Bytes",
+						"type": "integer"
+					},
+					"title_count": {
+						"title": "Title Count",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"libraries",
+					"title_count",
+					"issue_count",
+					"duplicate_count",
+					"covers_bytes",
+					"pages_bytes",
+					"db_bytes"
+				],
+				"title": "Stats",
+				"type": "object"
+			},
+			"Title": {
+				"description": "A periodical: the issues of one name inside one library.",
+				"properties": {
+					"cover_url": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Cover Url"
+					},
+					"first_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "First Date"
+					},
+					"id": {
+						"title": "Id",
+						"type": "string"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"last_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Last Date"
+					},
+					"latest_issue": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Issue"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"library_id": {
+						"title": "Library Id",
+						"type": "string"
+					},
+					"name": {
+						"title": "Name",
+						"type": "string"
+					},
+					"source": {
+						"enum": [
+							"config",
+							"folder",
+							"filename",
+							"pattern",
+							"unsorted"
+						],
+						"title": "Source",
+						"type": "string"
+					},
+					"thumb_url": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Thumb Url"
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"library_id",
+					"kind",
+					"source",
+					"issue_count"
+				],
+				"title": "Title",
+				"type": "object"
+			},
+			"TitleDetail": {
+				"description": "A title, plus the years its issues fall in, newest first.",
+				"properties": {
+					"cover_url": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Cover Url"
+					},
+					"first_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "First Date"
+					},
+					"id": {
+						"title": "Id",
+						"type": "string"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"last_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Last Date"
+					},
+					"latest_issue": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/Issue"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"library_id": {
+						"title": "Library Id",
+						"type": "string"
+					},
+					"name": {
+						"title": "Name",
+						"type": "string"
+					},
+					"source": {
+						"enum": [
+							"config",
+							"folder",
+							"filename",
+							"pattern",
+							"unsorted"
+						],
+						"title": "Source",
+						"type": "string"
+					},
+					"thumb_url": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Thumb Url"
+					},
+					"years": {
+						"items": {
+							"$ref": "#/components/schemas/YearCount"
+						},
+						"title": "Years",
+						"type": "array"
+					}
+				},
+				"required": [
+					"id",
+					"name",
+					"library_id",
+					"kind",
+					"source",
+					"issue_count",
+					"years"
+				],
+				"title": "TitleDetail",
+				"type": "object"
+			},
+			"Today": {
+				"description": "The storefront: one day of newspapers, and what to read next.",
+				"properties": {
+					"continue_reading": {
+						"items": {
+							"$ref": "#/components/schemas/Issue"
+						},
+						"title": "Continue Reading",
+						"type": "array"
+					},
+					"date": {
+						"title": "Date",
+						"type": "string"
+					},
+					"is_today": {
+						"title": "Is Today",
+						"type": "boolean"
+					},
+					"magazines": {
+						"items": {
+							"$ref": "#/components/schemas/Issue"
+						},
+						"title": "Magazines",
+						"type": "array"
+					},
+					"newspapers": {
+						"items": {
+							"$ref": "#/components/schemas/Issue"
+						},
+						"title": "Newspapers",
+						"type": "array"
+					},
+					"newspapers_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Newspapers Date"
+					},
+					"recently_added": {
+						"items": {
+							"$ref": "#/components/schemas/Issue"
+						},
+						"title": "Recently Added",
+						"type": "array"
+					}
+				},
+				"required": [
+					"date",
+					"is_today",
+					"newspapers",
+					"magazines",
+					"continue_reading",
+					"recently_added"
+				],
+				"title": "Today",
+				"type": "object"
+			},
+			"ValidationError": {
+				"properties": {
+					"ctx": {
+						"title": "Context",
+						"type": "object"
+					},
+					"input": {
+						"title": "Input"
+					},
+					"loc": {
+						"items": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "integer"
+								}
+							]
+						},
+						"title": "Location",
+						"type": "array"
+					},
+					"msg": {
+						"title": "Message",
+						"type": "string"
+					},
+					"type": {
+						"title": "Error Type",
+						"type": "string"
+					}
+				},
+				"required": [
+					"loc",
+					"msg",
+					"type"
+				],
+				"title": "ValidationError",
+				"type": "object"
+			},
+			"YearCount": {
+				"description": "How many issues of a title carry a date in one year.",
+				"properties": {
+					"count": {
+						"title": "Count",
+						"type": "integer"
+					},
+					"year": {
+						"title": "Year",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"year",
+					"count"
+				],
+				"title": "YearCount",
+				"type": "object"
+			}
+		}
+	},
+	"info": {
+		"description": "Self-hosted reader for collections of PDF periodicals.",
+		"title": "Paperstand",
+		"version": "0.1.0"
+	},
+	"openapi": "3.1.0",
+	"paths": {
+		"/api/health": {
+			"get": {
+				"description": "Report the service, the library, the database and the last scan.",
+				"operationId": "health_api_health_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"additionalProperties": true,
+									"title": "Response Health Api Health Get",
+									"type": "object"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Health",
+				"tags": [
+					"system"
+				]
+			}
+		},
+		"/api/issues": {
+			"get": {
+				"description": "A filtered, sorted page of issues, with the total behind it.",
+				"operationId": "list_issues_api_issues_get",
+				"parameters": [
+					{
+						"in": "query",
+						"name": "title",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Title"
+						}
+					},
+					{
+						"in": "query",
+						"name": "kind",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"enum": [
+										"newspaper",
+										"magazine"
+									],
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Kind"
+						}
+					},
+					{
+						"in": "query",
+						"name": "library",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Library"
+						}
+					},
+					{
+						"in": "query",
+						"name": "from",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"format": "date",
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "From"
+						}
+					},
+					{
+						"in": "query",
+						"name": "to",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"format": "date",
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "To"
+						}
+					},
+					{
+						"in": "query",
+						"name": "year",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"maximum": 9999,
+									"minimum": 1,
+									"type": "integer"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Year"
+						}
+					},
+					{
+						"in": "query",
+						"name": "sort",
+						"required": false,
+						"schema": {
+							"default": "date_desc",
+							"enum": [
+								"date_desc",
+								"date_asc",
+								"added_desc"
+							],
+							"title": "Sort",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"default": 50,
+							"maximum": 200,
+							"minimum": 1,
+							"title": "Limit",
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "offset",
+						"required": false,
+						"schema": {
+							"default": 0,
+							"minimum": 0,
+							"title": "Offset",
+							"type": "integer"
+						}
+					},
+					{
+						"in": "query",
+						"name": "include_duplicates",
+						"required": false,
+						"schema": {
+							"default": false,
+							"title": "Include Duplicates",
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/IssuePage"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "List Issues",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/issues/{issue_id}": {
+			"get": {
+				"description": "One issue, with what the parser made of it and its neighbours.",
+				"operationId": "get_issue_api_issues__issue_id__get",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/IssueDetail"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Get Issue",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/issues/{issue_id}/cover.jpg": {
+			"get": {
+				"description": "The issue's cover, rendered on demand when the cache has lost it.",
+				"operationId": "issue_cover",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/jpeg": {}
+						},
+						"description": "The image"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Cover",
+				"tags": [
+					"images"
+				]
+			},
+			"head": {
+				"description": "The issue's cover, rendered on demand when the cache has lost it.",
+				"operationId": "issue_cover_head",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/jpeg": {}
+						},
+						"description": "The image"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Cover",
+				"tags": [
+					"images"
+				]
+			}
+		},
+		"/api/issues/{issue_id}/file": {
+			"get": {
+				"description": "Stream an issue's PDF, honouring range and conditional requests.",
+				"operationId": "issue_file",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/pdf": {}
+						},
+						"description": "The whole document"
+					},
+					"206": {
+						"content": {
+							"application/pdf": {}
+						},
+						"description": "The requested range"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"416": {
+						"description": "The requested range is not satisfiable"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Issue File",
+				"tags": [
+					"files"
+				]
+			},
+			"head": {
+				"description": "Stream an issue's PDF, honouring range and conditional requests.",
+				"operationId": "issue_file_head",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/pdf": {}
+						},
+						"description": "The whole document"
+					},
+					"206": {
+						"content": {
+							"application/pdf": {}
+						},
+						"description": "The requested range"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"416": {
+						"description": "The requested range is not satisfiable"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Issue File",
+				"tags": [
+					"files"
+				]
+			}
+		},
+		"/api/issues/{issue_id}/pages/{page}.webp": {
+			"get": {
+				"description": "One page of an issue as a WebP image, rendered on demand.",
+				"operationId": "issue_page",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"in": "path",
+						"name": "page",
+						"required": true,
+						"schema": {
+							"title": "Page",
+							"type": "integer"
+						}
+					},
+					{
+						"description": "Snapped to the next width up",
+						"in": "query",
+						"name": "w",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"maximum": 100000,
+									"minimum": 1,
+									"type": "integer"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Snapped to the next width up",
+							"title": "W"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/webp": {}
+						},
+						"description": "The rendered page"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"404": {
+						"description": "No such issue, or no such page"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Page Image",
+				"tags": [
+					"images"
+				]
+			},
+			"head": {
+				"description": "One page of an issue as a WebP image, rendered on demand.",
+				"operationId": "issue_page_head",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"in": "path",
+						"name": "page",
+						"required": true,
+						"schema": {
+							"title": "Page",
+							"type": "integer"
+						}
+					},
+					{
+						"description": "Snapped to the next width up",
+						"in": "query",
+						"name": "w",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"maximum": 100000,
+									"minimum": 1,
+									"type": "integer"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Snapped to the next width up",
+							"title": "W"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/webp": {}
+						},
+						"description": "The rendered page"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"404": {
+						"description": "No such issue, or no such page"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Page Image",
+				"tags": [
+					"images"
+				]
+			}
+		},
+		"/api/issues/{issue_id}/progress": {
+			"delete": {
+				"description": "Forget where the reader got to.",
+				"operationId": "remove_progress_api_issues__issue_id__progress_delete",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Remove Progress",
+				"tags": [
+					"progress"
+				]
+			},
+			"get": {
+				"description": "Where the reader got to in one issue.",
+				"operationId": "get_progress_api_issues__issue_id__progress_get",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ProgressRecord"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Get Progress",
+				"tags": [
+					"progress"
+				]
+			},
+			"put": {
+				"description": "Store where the reader got to, clamped to the issue.",
+				"operationId": "put_progress_api_issues__issue_id__progress_put",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/ProgressUpdate"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ProgressRecord"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Put Progress",
+				"tags": [
+					"progress"
+				]
+			}
+		},
+		"/api/issues/{issue_id}/thumb.jpg": {
+			"get": {
+				"description": "The issue's thumbnail, rendered on demand when the cache has lost it.",
+				"operationId": "issue_thumb",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/jpeg": {}
+						},
+						"description": "The image"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Thumbnail",
+				"tags": [
+					"images"
+				]
+			},
+			"head": {
+				"description": "The issue's thumbnail, rendered on demand when the cache has lost it.",
+				"operationId": "issue_thumb_head",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "issue_id",
+						"required": true,
+						"schema": {
+							"title": "Issue Id",
+							"type": "string"
+						}
+					},
+					{
+						"description": "Cache buster: the PDF's mtime",
+						"in": "query",
+						"name": "v",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Cache buster: the PDF's mtime",
+							"title": "V"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"image/jpeg": {}
+						},
+						"description": "The image"
+					},
+					"304": {
+						"description": "The client's copy is current"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Thumbnail",
+				"tags": [
+					"images"
+				]
+			}
+		},
+		"/api/libraries": {
+			"get": {
+				"description": "Every configured library, with its title and issue counts.",
+				"operationId": "list_libraries_api_libraries_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/Library"
+									},
+									"title": "Response List Libraries Api Libraries Get",
+									"type": "array"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "List Libraries",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/progress": {
+			"get": {
+				"description": "Every issue with a stored position, most recently read first.",
+				"operationId": "list_progress_api_progress_get",
+				"parameters": [
+					{
+						"in": "query",
+						"name": "limit",
+						"required": false,
+						"schema": {
+							"default": 50,
+							"maximum": 200,
+							"minimum": 1,
+							"title": "Limit",
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/Issue"
+									},
+									"title": "Response List Progress Api Progress Get",
+									"type": "array"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "List Progress",
+				"tags": [
+					"progress"
+				]
+			}
+		},
+		"/api/scan": {
+			"post": {
+				"description": "Start a scan, unless one is already running.",
+				"operationId": "start_scan_api_scan_post",
+				"responses": {
+					"202": {
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Start Scan",
+				"tags": [
+					"scan"
+				]
+			}
+		},
+		"/api/scan/status": {
+			"get": {
+				"description": "Report whether a scan is running, and how the last one went.",
+				"operationId": "scan_status_api_scan_status_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"additionalProperties": true,
+									"title": "Response Scan Status Api Scan Status Get",
+									"type": "object"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Scan Status",
+				"tags": [
+					"scan"
+				]
+			}
+		},
+		"/api/stats": {
+			"get": {
+				"description": "What the catalogue holds, and what the caches cost on disk.",
+				"operationId": "stats_api_stats_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Stats"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Stats",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/titles": {
+			"get": {
+				"description": "Every title, with its latest issue and the span its issues cover.",
+				"operationId": "list_titles_api_titles_get",
+				"parameters": [
+					{
+						"in": "query",
+						"name": "kind",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"enum": [
+										"newspaper",
+										"magazine"
+									],
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Kind"
+						}
+					},
+					{
+						"in": "query",
+						"name": "library",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Library"
+						}
+					},
+					{
+						"in": "query",
+						"name": "sort",
+						"required": false,
+						"schema": {
+							"default": "name",
+							"enum": [
+								"name",
+								"latest"
+							],
+							"title": "Sort",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "include_unsorted",
+						"required": false,
+						"schema": {
+							"default": false,
+							"title": "Include Unsorted",
+							"type": "boolean"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/Title"
+									},
+									"title": "Response List Titles Api Titles Get",
+									"type": "array"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "List Titles",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/titles/{title_id}": {
+			"get": {
+				"description": "One title, with a per-year count of its issues.",
+				"operationId": "get_title_api_titles__title_id__get",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "title_id",
+						"required": true,
+						"schema": {
+							"title": "Title Id",
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/TitleDetail"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Get Title",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/titles/{title_id}/calendar": {
+			"get": {
+				"description": "One year of a title as a day → issue map, latest year by default.",
+				"operationId": "title_calendar_api_titles__title_id__calendar_get",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "title_id",
+						"required": true,
+						"schema": {
+							"title": "Title Id",
+							"type": "string"
+						}
+					},
+					{
+						"in": "query",
+						"name": "year",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"maximum": 9999,
+									"minimum": 1,
+									"type": "integer"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"title": "Year"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Calendar"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Title Calendar",
+				"tags": [
+					"catalogue"
+				]
+			}
+		},
+		"/api/today": {
+			"get": {
+				"description": "The day's newspapers, the latest magazines and what to read next.",
+				"operationId": "today_api_today_get",
+				"parameters": [
+					{
+						"description": "Defaults to today in TZ",
+						"in": "query",
+						"name": "date",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"format": "date",
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Defaults to today in TZ",
+							"title": "Date"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Today"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Today",
+				"tags": [
+					"catalogue"
+				]
+			}
+		}
+	}
+}
