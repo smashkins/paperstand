@@ -7,6 +7,7 @@ typed out by hand.
 
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import sqlite3
@@ -20,9 +21,9 @@ import yaml
 from PIL import Image
 
 from paperstand.config import Settings
-from paperstand.db import issue_id
+from paperstand.db import issue_id, open_database
 from paperstand.scanner.covers import CoverError, CoverResult, cover_paths, has_cover, render_cover
-from paperstand.scanner.scanner import ScanResult, scan_once
+from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
 from tests.conftest import SampleLibrary, quiet_settings, write_sample_config
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
@@ -613,3 +614,98 @@ def test_a_position_already_set_on_the_winner_is_never_overwritten(
 
     assert progress_of(settings, winner) == 3
     assert progress_of(settings, loser) == 5
+
+
+# --------------------------------------------------------------------- progress
+
+
+def run_with_progress(settings: Settings) -> tuple[ScanResult, list[ScanProgress]]:
+    """A full scan, with every ``on_progress`` snapshot kept in order."""
+    snapshots: list[ScanProgress] = []
+    database = open_database(settings.db_path)
+    try:
+        result = Scanner(settings, database, on_progress=snapshots.append).scan()
+    finally:
+        database.close()
+    return result, snapshots
+
+
+def test_a_scan_without_a_callback_behaves_exactly_as_scan_once(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """``on_progress`` defaults to ``None``, and nothing changes when it is."""
+    settings = prepare(sample_library.root, data_dir)
+    database = open_database(settings.db_path)
+    try:
+        result = Scanner(settings, database).scan()
+    finally:
+        database.close()
+
+    assert result.status == "ok"
+    assert result.added == sample_library.catalogued_files
+    assert result.covers_done == sample_library.catalogued_files
+
+
+def test_progress_snapshots_move_through_the_catalogue_phase_first(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+
+    _, snapshots = run_with_progress(settings)
+
+    catalogue = [snap for snap in snapshots if snap.phase == "catalogue"]
+    assert catalogue, "the fast phase must publish at least one snapshot"
+    assert catalogue[0].files_seen == 0
+    assert catalogue[0].added == 0
+    assert all(snap.covers_total is None for snap in catalogue)
+    # Every snapshot published inside the fast phase comes before every one
+    # published inside the slow phase: the two never interleave.
+    phases = [snap.phase for snap in snapshots]
+    assert phases == sorted(phases, key=lambda phase: phase != "catalogue")
+
+
+def test_progress_counters_never_go_backwards(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+
+    _, snapshots = run_with_progress(settings)
+
+    for previous, current in itertools.pairwise(snapshots):
+        assert current.files_seen >= previous.files_seen
+        assert current.added >= previous.added
+        assert current.updated >= previous.updated
+        assert current.errors >= previous.errors
+        if previous.phase == "covers" and current.phase == "covers":
+            assert current.covers_done >= previous.covers_done
+
+
+def test_covers_total_is_known_from_the_first_covers_snapshot_and_never_exceeded(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+
+    _, snapshots = run_with_progress(settings)
+
+    covers = [snap for snap in snapshots if snap.phase == "covers"]
+    assert covers, "the sample library always has covers to render"
+    total = covers[0].covers_total
+    assert total is not None and total > 0
+    for snap in covers:
+        assert snap.covers_total == total
+        assert snap.covers_done <= total
+
+
+def test_the_last_snapshot_agrees_with_the_scan_result(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    result, snapshots = run_with_progress(settings=prepare(sample_library.root, data_dir))
+
+    last = snapshots[-1]
+    assert last.scan_id == result.scan_id
+    assert last.files_seen == result.files_seen
+    assert last.added == result.added
+    assert last.updated == result.updated
+    assert last.removed == result.removed
+    assert last.errors == result.errors
+    assert last.covers_done == result.covers_done

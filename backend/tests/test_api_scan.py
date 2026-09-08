@@ -78,6 +78,36 @@ def test_a_second_scan_while_one_runs_is_a_conflict(
     assert wait_until(lambda: not sample_client.get("/api/scan/status").json()["running"])
 
 
+def test_status_reports_the_running_scan_s_progress(
+    sample_client: TestClient, gate: threading.Event
+) -> None:
+    """``current`` is a live snapshot, never a bare id, while a scan runs."""
+    accepted = sample_client.post("/api/scan")
+    scan_id = accepted.json()["scan_id"]
+
+    status = sample_client.get("/api/scan/status").json()
+
+    assert status["running"] is True
+    current = status["current"]
+    # Held at the gate before the walk has yielded a single file: the
+    # catalogue phase's own first snapshot, seeded the instant the scan was
+    # asked for — never `None` while `running` is `true`.
+    assert current["scan_id"] == scan_id
+    assert current["phase"] == "catalogue"
+    assert current["files_seen"] == 0
+    assert current["added"] == 0
+    assert current["covers_done"] == 0
+    assert current["covers_total"] is None
+    assert current["elapsed"] >= 0
+
+    gate.set()
+    assert wait_until(lambda: not sample_client.get("/api/scan/status").json()["running"])
+
+    settled = sample_client.get("/api/scan/status").json()
+    assert settled["current"] is None
+    assert settled["last"]["scan_id"] == scan_id
+
+
 def test_health_answers_while_a_scan_is_running(
     sample_client: TestClient, gate: threading.Event
 ) -> None:
