@@ -265,7 +265,7 @@
 	}
 
 	function holdChrome() {
-		// A centre tap is waiting to see whether it becomes a double tap; the
+		// A press is in progress and has not said what it is yet; the
 		// auto-hide timer must not change the chrome underneath it, or
 		// `toggleChrome` would answer a state the reader never saw.
 		if (hideTimer !== null) clearTimeout(hideTimer);
@@ -383,7 +383,7 @@
 			{
 				onTurn: turn,
 				onTap: toggleChrome,
-				onTapPending: holdChrome,
+				onHold: holdChrome,
 				onDoubleTap: (at) => zoomAround(zoom > MIN_ZOOM ? MIN_ZOOM : 2, at),
 				onPinch: (scale, centre) => {
 					// The midpoint travels with the fingers; the settle needs the

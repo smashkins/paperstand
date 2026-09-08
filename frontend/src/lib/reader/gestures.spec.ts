@@ -9,6 +9,7 @@ import {
 	midpoint,
 	SWIPE_DISTANCE,
 	swipeDirection,
+	TAP_TIME,
 	tapZone,
 	wheelFactor,
 	type Direction,
@@ -203,20 +204,60 @@ describe('attachGestures', () => {
 		detach();
 	});
 
-	it('a pending centre tap asks the chrome to hold still', () => {
-		const onTapPending = vi.fn();
+	it('a press holds the chrome still until the gesture is known', () => {
+		const onHold = vi.fn();
+		const onActivity = vi.fn();
 		const onTap = vi.fn();
-		const { node, tap } = stage();
-		const detach = attachGestures(node, { onTapPending, onTap });
+		const { node, send } = stage();
+		const detach = attachGestures(node, { onHold, onActivity, onTap });
 
-		tap(500, 1000);
-		expect(onTapPending).toHaveBeenCalledTimes(1);
+		send('pointerdown', { clientX: 500, clientY: 400, timeStamp: 0 });
+		expect(onHold).toHaveBeenCalledTimes(1);
+		expect(onActivity).not.toHaveBeenCalled();
 		expect(onTap).not.toHaveBeenCalled();
 
+		send('pointerup', { clientX: 500, clientY: 400, timeStamp: 20 });
 		vi.advanceTimersByTime(DOUBLE_TAP_TIME);
 
 		expect(onTap).toHaveBeenCalledTimes(1);
+		expect(onActivity).not.toHaveBeenCalled();
 		detach();
+	});
+
+	it('every gesture that is not a centre tap releases the hold through activity', () => {
+		// A pointer that never lifts: the browser, not the reader, ended it.
+		{
+			const onActivity = vi.fn();
+			const { node, send } = stage();
+			const detach = attachGestures(node, { onActivity });
+			send('pointerdown', { clientX: 500, clientY: 400, timeStamp: 0 });
+			send('pointercancel', { clientX: 500, clientY: 400, timeStamp: 20 });
+			expect(onActivity).toHaveBeenCalled();
+			detach();
+		}
+
+		// A press held past TAP_TIME without moving: too long to be a tap.
+		{
+			const onActivity = vi.fn();
+			const { node, send } = stage();
+			const detach = attachGestures(node, { onActivity });
+			send('pointerdown', { clientX: 500, clientY: 400, timeStamp: 0 });
+			send('pointerup', { clientX: 500, clientY: 400, timeStamp: TAP_TIME + 1 });
+			expect(onActivity).toHaveBeenCalled();
+			detach();
+		}
+
+		// A two-finger pinch that lifts one finger without either one moving.
+		{
+			const onActivity = vi.fn();
+			const { node, send } = stage();
+			const detach = attachGestures(node, { onActivity, onPinchEnd: vi.fn() });
+			send('pointerdown', { pointerId: 1, clientX: 300, clientY: 400, timeStamp: 0 });
+			send('pointerdown', { pointerId: 2, clientX: 500, clientY: 400, timeStamp: 10 });
+			send('pointerup', { pointerId: 1, clientX: 300, clientY: 400, timeStamp: 20 });
+			expect(onActivity).toHaveBeenCalled();
+			detach();
+		}
 	});
 
 	it('reports activity for an edge tap', () => {

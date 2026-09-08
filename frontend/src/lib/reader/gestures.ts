@@ -14,13 +14,13 @@
  * * a tap in the outer tenth of either edge to turn the page, and a tap in the
  *   middle to show or hide the chrome.
  *
- * Every one of those reports activity to keep the chrome's auto-hide timer
- * fresh, except the tap in the middle: it is held back to see whether a
- * second tap turns it into a double tap, and reporting activity early would
- * only show the chrome for `toggleChrome` to hide again a moment later. While
- * it waits, it asks the chrome to hold still instead — neither shown nor
- * hidden by anything else — so the toggle answers the state the reader
- * actually saw, not one the auto-hide timer changed underneath the tap.
+ * A press holds the chrome exactly where it is the moment it lands, because a
+ * tap can take up to `TAP_TIME` to resolve into a swipe, an edge tap, a
+ * double tap or a centre tap, and the auto-hide timer must not move the
+ * chrome out from under a finger that has not lifted yet. Every gesture then
+ * releases that hold: all but the centre tap report activity, which shows the
+ * chrome and restarts the timer, while the centre tap reports nothing and
+ * leaves the decision to `toggleChrome` once the double-tap window closes.
  *
  * The keyboard is the reader's own concern, but the two rules that decide
  * whether a key *reaches* it — is this target something that has its own idea
@@ -155,15 +155,16 @@ export function isInteractiveTarget(target: unknown): boolean {
 
 /** What the stage does when a gesture completes. Every one is optional. */
 export interface GestureHandlers {
+	/**
+	 * A press began: hold the chrome exactly where it is until the gesture
+	 * says what it was. Every gesture ends in `onActivity` or, for a centre
+	 * tap, in `onTap`.
+	 */
+	onHold?(): void;
 	/** A swipe, or a tap in one of the edge zones. */
 	onTurn?(direction: Direction): void;
 	/** A tap in the middle: show or hide the chrome. */
 	onTap?(): void;
-	/**
-	 * A centre tap landed and is waiting out the double-tap window: hold the
-	 * chrome exactly where it is until `onTap` decides.
-	 */
-	onTapPending?(): void;
 	/** Two taps in the same place: toggle the zoom around that point. */
 	onDoubleTap?(point: Point): void;
 	/** A pinch in progress. `scale` is relative to where the pinch started. */
@@ -240,6 +241,9 @@ export function attachGestures(
 
 	function onPointerDown(event: PointerEvent) {
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
+		// A second pointer landing mid-pinch calls this again; holding twice
+		// is no different from holding once.
+		handlers.onHold?.();
 		const point = local(event);
 		pointers.set(event.pointerId, {
 			id: event.pointerId,
@@ -294,11 +298,15 @@ export function attachGestures(
 				pinching = false;
 				pinchStartDistance = 0;
 				pointers.clear();
+				handlers.onActivity?.();
 				handlers.onPinchEnd?.();
 			}
 			return;
 		}
-		if (cancelled) return;
+		if (cancelled) {
+			handlers.onActivity?.();
+			return;
+		}
 
 		const dx = tracked.last.x - tracked.start.x;
 		const dy = tracked.last.y - tracked.start.y;
@@ -312,7 +320,10 @@ export function attachGestures(
 			if (direction) handlers.onTurn?.(direction);
 			return;
 		}
-		if (elapsed > TAP_TIME) return;
+		if (elapsed > TAP_TIME) {
+			handlers.onActivity?.();
+			return;
+		}
 
 		const point = tracked.last;
 		const zone = tapZone(point.x, node.clientWidth);
@@ -344,9 +355,9 @@ export function attachGestures(
 		// A tap in the middle waits, because it is the one that a double tap
 		// starts with — and it reports no activity of its own, so `onTap` is
 		// free to hide an already-visible chrome instead of finding it just
-		// shown and undoing itself.
+		// shown and undoing itself. The chrome stays held, from the
+		// `onHold` the press already fired, until `onTap` releases it.
 		clearPendingTap();
-		handlers.onTapPending?.();
 		pendingTap = setTimeout(() => {
 			pendingTap = null;
 			handlers.onTap?.();
