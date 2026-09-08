@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the OPDS feed are unaffected. Range requests, rendering and memory
   behaviour were checked against the previous major and are unchanged.
 
+### Fixed
+
+- A tap in the middle of the page no longer flashes the reader toolbar before
+  hiding it again: it now shows the toolbar when it is hidden and hides it
+  when it is shown, as a toggle should. An edge tap, a swipe, a pinch, a pan
+  while zoomed, a double tap and a moving mouse or pen still bring the toolbar
+  up as before.
+
 ## [0.2.0] - 2026-09-08
 
 The catalogue tells you what it is doing, and the parser reads two more numbering shapes.

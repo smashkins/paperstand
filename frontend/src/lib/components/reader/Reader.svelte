@@ -394,6 +394,13 @@
 		);
 	});
 
+	function onWindowPointerMove(event: PointerEvent) {
+		// A finger already reports its own activity through the gesture layer;
+		// treating its jitter as movement here is what made a tap flash the chrome.
+		if (event.pointerType === 'touch') return;
+		activity();
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.metaKey || event.ctrlKey || event.altKey) return;
 		// A key pressed on a focused control belongs to that control. Space
@@ -466,7 +473,7 @@
 	bind:innerWidth={windowWidth}
 	bind:innerHeight={windowHeight}
 	onkeydown={onKeydown}
-	onpointermove={activity}
+	onpointermove={onWindowPointerMove}
 	onfullscreenchange={() => (fullscreen = Boolean(document.fullscreenElement))}
 	onpagehide={() => flushProgress(true)}
 />

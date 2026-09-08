@@ -14,6 +14,11 @@
  * * a tap in the outer tenth of either edge to turn the page, and a tap in the
  *   middle to show or hide the chrome.
  *
+ * Every one of those reports activity to keep the chrome's auto-hide timer
+ * fresh, except the tap in the middle: it is held back to see whether a
+ * second tap turns it into a double tap, and reporting activity early would
+ * only show the chrome for `toggleChrome` to hide again a moment later.
+ *
  * The keyboard is the reader's own concern, but the two rules that decide
  * whether a key *reaches* it — is this target something that has its own idea
  * about the space bar — and the arithmetic a zoom does to the offset live here
@@ -161,7 +166,7 @@ export interface GestureHandlers {
 	onWheelZoom?(factor: number, point: Point): void;
 	/** A one-finger drag while zoomed in. */
 	onPan?(dx: number, dy: number): void;
-	/** Anything at all happened: the chrome's auto-hide timer restarts. */
+	/** Anything but a centre tap happened: the chrome's auto-hide timer restarts. */
 	onActivity?(): void;
 }
 
@@ -227,7 +232,6 @@ export function attachGestures(
 
 	function onPointerDown(event: PointerEvent) {
 		if (event.pointerType === 'mouse' && event.button !== 0) return;
-		handlers.onActivity?.();
 		const point = local(event);
 		pointers.set(event.pointerId, {
 			id: event.pointerId,
@@ -264,6 +268,7 @@ export function attachGestures(
 		}
 
 		if (pointers.size === 1 && tracked.moved && options.isZoomed?.()) {
+			handlers.onActivity?.();
 			handlers.onPan?.(point.x - previous.x, point.y - previous.y);
 		}
 	}
@@ -287,12 +292,12 @@ export function attachGestures(
 		}
 		if (cancelled) return;
 
-		handlers.onActivity?.();
 		const dx = tracked.last.x - tracked.start.x;
 		const dy = tracked.last.y - tracked.start.y;
 		const elapsed = event.timeStamp - tracked.startedAt;
 
 		if (tracked.moved) {
+			handlers.onActivity?.();
 			// A drag on a zoomed page has already panned; it never turns.
 			if (options.isZoomed?.()) return;
 			const direction = swipeDirection(dx, dy, elapsed);
@@ -310,6 +315,7 @@ export function attachGestures(
 			// once and then zoom.
 			clearPendingTap();
 			lastTapAt = 0;
+			handlers.onActivity?.();
 			handlers.onTurn?.(zone);
 			return;
 		}
@@ -322,12 +328,15 @@ export function attachGestures(
 		if (isDouble) {
 			clearPendingTap();
 			lastTapAt = 0;
+			handlers.onActivity?.();
 			handlers.onDoubleTap?.(point);
 			return;
 		}
 
 		// A tap in the middle waits, because it is the one that a double tap
-		// starts with.
+		// starts with — and it reports no activity of its own, so `onTap` is
+		// free to hide an already-visible chrome instead of finding it just
+		// shown and undoing itself.
 		clearPendingTap();
 		pendingTap = setTimeout(() => {
 			pendingTap = null;

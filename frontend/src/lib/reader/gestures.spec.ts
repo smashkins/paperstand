@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	attachGestures,
 	distance,
+	DOUBLE_TAP_TIME,
 	EDGE_FRACTION,
 	focalPan,
 	isInteractiveTarget,
@@ -175,6 +176,83 @@ function stage(width = 1000, height = 800) {
 }
 
 describe('attachGestures', () => {
+	// The deferred centre tap resolves on a real setTimeout; fake timers let the
+	// tests that wait for it advance the clock instead of the wall.
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('a centre tap toggles the chrome without reporting activity first', () => {
+		const onActivity = vi.fn();
+		const onTap = vi.fn();
+		const { node, tap } = stage();
+		const detach = attachGestures(node, { onActivity, onTap });
+
+		tap(500, 1000);
+		expect(onActivity).not.toHaveBeenCalled();
+		expect(onTap).not.toHaveBeenCalled();
+
+		vi.advanceTimersByTime(DOUBLE_TAP_TIME);
+
+		expect(onTap).toHaveBeenCalledTimes(1);
+		expect(onActivity).not.toHaveBeenCalled();
+		detach();
+	});
+
+	it('reports activity for an edge tap', () => {
+		const onActivity = vi.fn();
+		const { node, tap } = stage();
+		const detach = attachGestures(node, { onActivity, onTurn: vi.fn() });
+
+		tap(980, 1000);
+
+		expect(onActivity).toHaveBeenCalledTimes(1);
+		detach();
+	});
+
+	it('reports activity for a swipe', () => {
+		const onActivity = vi.fn();
+		const { node, send } = stage();
+		const detach = attachGestures(node, { onActivity, onTurn: vi.fn() });
+
+		send('pointerdown', { clientX: 800, clientY: 400, timeStamp: 0 });
+		send('pointermove', { clientX: 800 - SWIPE_DISTANCE, clientY: 400, timeStamp: 50 });
+		send('pointerup', { clientX: 800 - SWIPE_DISTANCE, clientY: 400, timeStamp: 60 });
+
+		expect(onActivity).toHaveBeenCalledTimes(1);
+		detach();
+	});
+
+	it('reports activity for a double tap', () => {
+		const onActivity = vi.fn();
+		const { node, tap } = stage();
+		const detach = attachGestures(node, { onActivity, onDoubleTap: vi.fn() });
+
+		tap(500, 1000);
+		tap(500, 1100);
+
+		expect(onActivity).toHaveBeenCalledTimes(1);
+		detach();
+	});
+
+	it('reports activity for a pan while zoomed', () => {
+		const onActivity = vi.fn();
+		const onPan = vi.fn();
+		const { node, send } = stage();
+		const detach = attachGestures(node, { onActivity, onPan }, { isZoomed: () => true });
+
+		send('pointerdown', { clientX: 500, clientY: 400, timeStamp: 0 });
+		send('pointermove', { clientX: 520, clientY: 410, timeStamp: 20 });
+
+		expect(onActivity).toHaveBeenCalledTimes(1);
+		expect(onPan).toHaveBeenCalledTimes(1);
+		detach();
+	});
+
 	it('turns the page twice for two quick taps at the same edge', () => {
 		const turns: Direction[] = [];
 		const onDoubleTap = vi.fn();
