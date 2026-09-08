@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --project backend --frozen
+
+      - name: Lint and type check
+        run: make lint-api
+
+      - name: Test
+        run: make test-api
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The OpenAPI document and the TypeScript client generated from it are
+      # committed. Regenerate both and fail if anything moved: a response model
+      # changed without `make gen-api` is caught here rather than in a screen.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Check the generated API client
+        working-directory: .
+        run: |
+          uv sync --project backend --frozen
+          make gen-api
+          git diff --exit-code -- frontend/src/lib/api/openapi.json frontend/src/lib/api/types.gen.ts
+
+      - name: Compile messages
+        run: npm run i18n
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run check
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Single platform, loaded into the local daemon so that the next step can
+      # actually run it.
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: paperstand:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The container acceptance criteria of M0, enforced: health, SPA, the
+      # privilege drop to PUID/PGID, and a writable /data.
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          library="$(mktemp -d)"
+          data="$(mktemp -d)"
+          # The entrypoint chowns /data itself; the runner only has to hand it a
+          # directory it is allowed to write to.
+          chmod 777 "$data"
+
+          docker run --rm -d --name paperstand-ci \
+            -e PUID=1234 -e PGID=1000 \
+            -p 18080:8080 \
+            --mount "type=bind,src=$library,dst=/library,ro" \
+            --mount "type=bind,src=$data,dst=/data" \
+            paperstand:ci
+
+          cleanup() {
+            docker logs paperstand-ci 2>&1 || true
+            docker stop paperstand-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          code=""
+          for _ in $(seq 30); do
+            code="$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/health || true)"
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "$code" = "200"
+          echo "health: $(curl -fsS http://127.0.0.1:18080/api/health)"
+
+          spa="$(curl -fsS -o index.html -w '%{http_code}' http://127.0.0.1:18080/)"
+          test "$spa" = "200"
+          grep -q '<html' index.html
+
+          # The image declares no USER, so `docker exec` lands as root: the
+          # server's own identity is read off PID 1, which is what the
+          # entrypoint dropped to.
+          test "$(docker exec paperstand-ci stat -c '%u' /proc/1)" = "1234"
+          test "$(docker exec paperstand-ci stat -c '%g' /proc/1)" = "1000"
+
+          # And /data has to be writable as that identity, not as root.
+          docker exec -u 1234:1000 paperstand-ci sh -c 'touch /data/.probe'
+          test -e "$data/.probe"

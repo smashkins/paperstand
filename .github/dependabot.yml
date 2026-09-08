@@ -1,0 +1,39 @@
+version: 2
+
+# Actions are referenced by major tag and base images by version tag, both for
+# readability; Dependabot is what keeps them current.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'Update'
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'Update'
+
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'Update'
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: 'Update'
+    # The Python and Node majors are deliberate choices (PyMuPDF wheels, Node LTS);
+    # only patch and minor bumps of the base images are wanted automatically.
+    ignore:
+      - dependency-name: python
+        update-types: ['version-update:semver-major']
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
