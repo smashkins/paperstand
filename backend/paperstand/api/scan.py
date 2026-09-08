@@ -8,13 +8,12 @@ id of the scan already in flight so that the caller can follow it instead.
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from paperstand.logging import get_logger
 from paperstand.scanner.scheduler import ScanInProgress, ScanScheduler
+from paperstand.schemas import ScanAccepted, ScanStatus
 
 log = get_logger(__name__)
 
@@ -25,9 +24,15 @@ def create_router(scheduler: ScanScheduler | None) -> APIRouter:
     """Build the scan router."""
     router = APIRouter(prefix="/api", tags=["scan"])
 
-    @router.post("/scan", status_code=202)
+    @router.post("/scan", status_code=202, response_model=ScanAccepted)
     def start_scan() -> JSONResponse:
-        """Start a scan, unless one is already running."""
+        """Start a scan, unless one is already running.
+
+        The 409 and 503 bodies are returned as plain ``JSONResponse``s, not
+        through ``response_model``, so that a conflict can carry the id of
+        the scan already running alongside its ``detail`` — a shape
+        ``HTTPException`` cannot produce.
+        """
         if scheduler is None:
             return JSONResponse({"detail": SCAN_UNAVAILABLE}, status_code=503)
         try:
@@ -40,10 +45,10 @@ def create_router(scheduler: ScanScheduler | None) -> APIRouter:
         return JSONResponse({"scan_id": scan_id}, status_code=202)
 
     @router.get("/scan/status")
-    def scan_status() -> dict[str, Any]:
+    def scan_status() -> ScanStatus:
         """Report whether a scan is running, and how the last one went."""
         if scheduler is None:
-            return {"running": False, "current": None, "last": None}
-        return scheduler.status()
+            return ScanStatus(running=False, current=None, last=None)
+        return ScanStatus(**scheduler.status())
 
     return router

@@ -63,6 +63,60 @@
 				"title": "HTTPValidationError",
 				"type": "object"
 			},
+			"HealthResponse": {
+				"description": "What ``GET /api/health`` answers with.",
+				"properties": {
+					"db_ok": {
+						"title": "Db Ok",
+						"type": "boolean"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"last_scan": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/ScanRecord"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"library_ok": {
+						"title": "Library Ok",
+						"type": "boolean"
+					},
+					"library_path": {
+						"title": "Library Path",
+						"type": "string"
+					},
+					"scanning": {
+						"title": "Scanning",
+						"type": "boolean"
+					},
+					"status": {
+						"title": "Status",
+						"type": "string"
+					},
+					"version": {
+						"title": "Version",
+						"type": "string"
+					}
+				},
+				"required": [
+					"status",
+					"version",
+					"library_path",
+					"library_ok",
+					"db_ok",
+					"scanning",
+					"issue_count"
+				],
+				"title": "HealthResponse",
+				"type": "object"
+			},
 			"Issue": {
 				"description": "One issue: a PDF in the library, as the catalogue understands it.",
 				"properties": {
@@ -569,6 +623,317 @@
 				"title": "ProgressUpdate",
 				"type": "object"
 			},
+			"ScanAccepted": {
+				"description": "What ``POST /api/scan`` answers with when it accepts.",
+				"properties": {
+					"scan_id": {
+						"title": "Scan Id",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"scan_id"
+				],
+				"title": "ScanAccepted",
+				"type": "object"
+			},
+			"ScanProgress": {
+				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward.",
+				"properties": {
+					"added": {
+						"title": "Added",
+						"type": "integer"
+					},
+					"covers_done": {
+						"title": "Covers Done",
+						"type": "integer"
+					},
+					"covers_total": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Covers Total"
+					},
+					"elapsed": {
+						"title": "Elapsed",
+						"type": "number"
+					},
+					"errors": {
+						"title": "Errors",
+						"type": "integer"
+					},
+					"files_seen": {
+						"title": "Files Seen",
+						"type": "integer"
+					},
+					"phase": {
+						"enum": [
+							"catalogue",
+							"covers"
+						],
+						"title": "Phase",
+						"type": "string"
+					},
+					"removed": {
+						"title": "Removed",
+						"type": "integer"
+					},
+					"scan_id": {
+						"title": "Scan Id",
+						"type": "integer"
+					},
+					"started_at": {
+						"title": "Started At",
+						"type": "string"
+					},
+					"updated": {
+						"title": "Updated",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"scan_id",
+					"phase",
+					"started_at",
+					"elapsed",
+					"files_seen",
+					"added",
+					"updated",
+					"removed",
+					"errors",
+					"covers_done"
+				],
+				"title": "ScanProgress",
+				"type": "object"
+			},
+			"ScanRecord": {
+				"description": "One row of the ``scans`` table, the only place the timestamps live.",
+				"properties": {
+					"added": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Added"
+					},
+					"covers_done": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Covers Done"
+					},
+					"errors": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Errors"
+					},
+					"files_seen": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Files Seen"
+					},
+					"finished_at": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Finished At"
+					},
+					"id": {
+						"title": "Id",
+						"type": "integer"
+					},
+					"message": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Message"
+					},
+					"removed": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Removed"
+					},
+					"started_at": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Started At"
+					},
+					"status": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Status"
+					},
+					"updated": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Updated"
+					}
+				},
+				"required": [
+					"id"
+				],
+				"title": "ScanRecord",
+				"type": "object"
+			},
+			"ScanStatus": {
+				"description": "What ``GET /api/scan/status`` answers with.\n\n``current`` is ``null`` when the scheduler is idle. Between a scan being\naccepted and its first snapshot it is a ``catalogue`` snapshot with every\ncounter at zero, never ``null`` while ``running`` is ``true``.",
+				"properties": {
+					"current": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/ScanProgress"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"last": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/ScanSummary"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"running": {
+						"title": "Running",
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"running"
+				],
+				"title": "ScanStatus",
+				"type": "object"
+			},
+			"ScanSummary": {
+				"description": "A finished scan, as the scheduler remembers it in memory.",
+				"properties": {
+					"added": {
+						"title": "Added",
+						"type": "integer"
+					},
+					"covers_done": {
+						"title": "Covers Done",
+						"type": "integer"
+					},
+					"duration": {
+						"title": "Duration",
+						"type": "number"
+					},
+					"errors": {
+						"title": "Errors",
+						"type": "integer"
+					},
+					"files_seen": {
+						"title": "Files Seen",
+						"type": "integer"
+					},
+					"message": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Message"
+					},
+					"removed": {
+						"title": "Removed",
+						"type": "integer"
+					},
+					"scan_id": {
+						"title": "Scan Id",
+						"type": "integer"
+					},
+					"status": {
+						"title": "Status",
+						"type": "string"
+					},
+					"updated": {
+						"title": "Updated",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"scan_id",
+					"status",
+					"files_seen",
+					"added",
+					"updated",
+					"removed",
+					"covers_done",
+					"errors",
+					"duration"
+				],
+				"title": "ScanSummary",
+				"type": "object"
+			},
 			"Stats": {
 				"description": "What the catalogue holds and what it costs on disk.",
 				"properties": {
@@ -971,9 +1336,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"additionalProperties": true,
-									"title": "Response Health Api Health Get",
-									"type": "object"
+									"$ref": "#/components/schemas/HealthResponse"
 								}
 							}
 						},
@@ -1939,13 +2302,15 @@
 		},
 		"/api/scan": {
 			"post": {
-				"description": "Start a scan, unless one is already running.",
+				"description": "Start a scan, unless one is already running.\n\nThe 409 and 503 bodies are returned as plain ``JSONResponse``s, not\nthrough ``response_model``, so that a conflict can carry the id of\nthe scan already running alongside its ``detail`` — a shape\n``HTTPException`` cannot produce.",
 				"operationId": "start_scan_api_scan_post",
 				"responses": {
 					"202": {
 						"content": {
 							"application/json": {
-								"schema": {}
+								"schema": {
+									"$ref": "#/components/schemas/ScanAccepted"
+								}
 							}
 						},
 						"description": "Successful Response"
@@ -1966,9 +2331,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"additionalProperties": true,
-									"title": "Response Scan Status Api Scan Status Get",
-									"type": "object"
+									"$ref": "#/components/schemas/ScanStatus"
 								}
 							}
 						},

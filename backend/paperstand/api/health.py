@@ -9,7 +9,6 @@ what it finds and never fails.
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
 
 from fastapi import APIRouter
 
@@ -18,6 +17,7 @@ from paperstand.config import Settings
 from paperstand.db import Database
 from paperstand.logging import get_logger
 from paperstand.scanner.scheduler import ScanScheduler
+from paperstand.schemas import HealthResponse, ScanRecord
 
 log = get_logger(__name__)
 
@@ -36,7 +36,7 @@ SCAN_FIELDS = (
 )
 
 
-def last_scan(database: Database | None) -> dict[str, Any] | None:
+def last_scan(database: Database | None) -> ScanRecord | None:
     """The last scan that finished, as stored in the database."""
     if database is None:
         return None
@@ -49,7 +49,7 @@ def last_scan(database: Database | None) -> dict[str, Any] | None:
         return None
     if row is None:
         return None
-    return {field: row[field] for field in SCAN_FIELDS}
+    return ScanRecord(**{field: row[field] for field in SCAN_FIELDS})
 
 
 def issue_count(database: Database | None) -> int | None:
@@ -73,18 +73,18 @@ def create_router(
     router = APIRouter(prefix="/api", tags=["system"])
 
     @router.get("/health")
-    def health() -> dict[str, Any]:
+    def health() -> HealthResponse:
         """Report the service, the library, the database and the last scan."""
         total = issue_count(database)
-        return {
-            "status": "ok",
-            "version": __version__,
-            "library_path": str(settings.library),
-            "library_ok": settings.library.is_dir(),
-            "db_ok": total is not None,
-            "last_scan": last_scan(database),
-            "scanning": scheduler is not None and scheduler.running,
-            "issue_count": total or 0,
-        }
+        return HealthResponse(
+            status="ok",
+            version=__version__,
+            library_path=str(settings.library),
+            library_ok=settings.library.is_dir(),
+            db_ok=total is not None,
+            last_scan=last_scan(database),
+            scanning=scheduler is not None and scheduler.running,
+            issue_count=total or 0,
+        )
 
     return router

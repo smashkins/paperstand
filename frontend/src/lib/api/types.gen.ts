@@ -240,6 +240,11 @@ export interface paths {
 		/**
 		 * Start Scan
 		 * @description Start a scan, unless one is already running.
+		 *
+		 *     The 409 and 503 bodies are returned as plain ``JSONResponse``s, not
+		 *     through ``response_model``, so that a conflict can carry the id of
+		 *     the scan already running alongside its ``detail`` — a shape
+		 *     ``HTTPException`` cannot produce.
 		 */
 		post: operations['start_scan_api_scan_post'];
 		delete?: never;
@@ -404,6 +409,27 @@ export interface components {
 		HTTPValidationError: {
 			/** Detail */
 			detail?: components['schemas']['ValidationError'][];
+		};
+		/**
+		 * HealthResponse
+		 * @description What ``GET /api/health`` answers with.
+		 */
+		HealthResponse: {
+			/** Db Ok */
+			db_ok: boolean;
+			/** Issue Count */
+			issue_count: number;
+			last_scan?: components['schemas']['ScanRecord'] | null;
+			/** Library Ok */
+			library_ok: boolean;
+			/** Library Path */
+			library_path: string;
+			/** Scanning */
+			scanning: boolean;
+			/** Status */
+			status: string;
+			/** Version */
+			version: string;
 		};
 		/**
 		 * Issue
@@ -596,6 +622,117 @@ export interface components {
 			page: number;
 		};
 		/**
+		 * ScanAccepted
+		 * @description What ``POST /api/scan`` answers with when it accepts.
+		 */
+		ScanAccepted: {
+			/** Scan Id */
+			scan_id: number;
+		};
+		/**
+		 * ScanProgress
+		 * @description A scan already in progress, as ``GET /api/scan/status`` reports it.
+		 *
+		 *     ``covers_total`` is ``null`` during the ``catalogue`` phase — the fast
+		 *     phase never counts the files it will find before it has walked them —
+		 *     and known from the first ``covers`` snapshot onward.
+		 */
+		ScanProgress: {
+			/** Added */
+			added: number;
+			/** Covers Done */
+			covers_done: number;
+			/** Covers Total */
+			covers_total?: number | null;
+			/** Elapsed */
+			elapsed: number;
+			/** Errors */
+			errors: number;
+			/** Files Seen */
+			files_seen: number;
+			/**
+			 * Phase
+			 * @enum {string}
+			 */
+			phase: 'catalogue' | 'covers';
+			/** Removed */
+			removed: number;
+			/** Scan Id */
+			scan_id: number;
+			/** Started At */
+			started_at: string;
+			/** Updated */
+			updated: number;
+		};
+		/**
+		 * ScanRecord
+		 * @description One row of the ``scans`` table, the only place the timestamps live.
+		 */
+		ScanRecord: {
+			/** Added */
+			added?: number | null;
+			/** Covers Done */
+			covers_done?: number | null;
+			/** Errors */
+			errors?: number | null;
+			/** Files Seen */
+			files_seen?: number | null;
+			/** Finished At */
+			finished_at?: string | null;
+			/** Id */
+			id: number;
+			/** Message */
+			message?: string | null;
+			/** Removed */
+			removed?: number | null;
+			/** Started At */
+			started_at?: string | null;
+			/** Status */
+			status?: string | null;
+			/** Updated */
+			updated?: number | null;
+		};
+		/**
+		 * ScanStatus
+		 * @description What ``GET /api/scan/status`` answers with.
+		 *
+		 *     ``current`` is ``null`` when the scheduler is idle. Between a scan being
+		 *     accepted and its first snapshot it is a ``catalogue`` snapshot with every
+		 *     counter at zero, never ``null`` while ``running`` is ``true``.
+		 */
+		ScanStatus: {
+			current?: components['schemas']['ScanProgress'] | null;
+			last?: components['schemas']['ScanSummary'] | null;
+			/** Running */
+			running: boolean;
+		};
+		/**
+		 * ScanSummary
+		 * @description A finished scan, as the scheduler remembers it in memory.
+		 */
+		ScanSummary: {
+			/** Added */
+			added: number;
+			/** Covers Done */
+			covers_done: number;
+			/** Duration */
+			duration: number;
+			/** Errors */
+			errors: number;
+			/** Files Seen */
+			files_seen: number;
+			/** Message */
+			message?: string | null;
+			/** Removed */
+			removed: number;
+			/** Scan Id */
+			scan_id: number;
+			/** Status */
+			status: string;
+			/** Updated */
+			updated: number;
+		};
+		/**
 		 * Stats
 		 * @description What the catalogue holds and what it costs on disk.
 		 */
@@ -750,9 +887,7 @@ export interface operations {
 					[name: string]: unknown;
 				};
 				content: {
-					'application/json': {
-						[key: string]: unknown;
-					};
+					'application/json': components['schemas']['HealthResponse'];
 				};
 			};
 		};
@@ -1363,7 +1498,7 @@ export interface operations {
 					[name: string]: unknown;
 				};
 				content: {
-					'application/json': unknown;
+					'application/json': components['schemas']['ScanAccepted'];
 				};
 			};
 		};
@@ -1383,9 +1518,7 @@ export interface operations {
 					[name: string]: unknown;
 				};
 				content: {
-					'application/json': {
-						[key: string]: unknown;
-					};
+					'application/json': components['schemas']['ScanStatus'];
 				};
 			};
 		};

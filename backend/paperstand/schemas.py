@@ -28,6 +28,7 @@ DateSource = Literal["filename", "mixed", "folder", "mtime", "none"]
 TitleSource = Literal["config", "folder", "filename", "pattern", "unsorted"]
 IssueSort = Literal["date_desc", "date_asc", "added_desc"]
 TitleSort = Literal["name", "latest"]
+ScanPhase = Literal["catalogue", "covers"]
 
 
 class Aspect(BaseModel):
@@ -179,3 +180,87 @@ class Today(BaseModel):
     magazines: list[Issue]
     continue_reading: list[Issue]
     recently_added: list[Issue]
+
+
+class ScanAccepted(BaseModel):
+    """What ``POST /api/scan`` answers with when it accepts."""
+
+    scan_id: int
+
+
+class ScanProgress(BaseModel):
+    """A scan already in progress, as ``GET /api/scan/status`` reports it.
+
+    ``covers_total`` is ``null`` during the ``catalogue`` phase — the fast
+    phase never counts the files it will find before it has walked them —
+    and known from the first ``covers`` snapshot onward.
+    """
+
+    scan_id: int
+    phase: ScanPhase
+    started_at: str
+    elapsed: float
+    files_seen: int
+    added: int
+    updated: int
+    removed: int
+    errors: int
+    covers_done: int
+    covers_total: int | None = None
+
+
+class ScanSummary(BaseModel):
+    """A finished scan, as the scheduler remembers it in memory."""
+
+    scan_id: int
+    status: str
+    files_seen: int
+    added: int
+    updated: int
+    removed: int
+    covers_done: int
+    errors: int
+    message: str | None = None
+    duration: float
+
+
+class ScanStatus(BaseModel):
+    """What ``GET /api/scan/status`` answers with.
+
+    ``current`` is ``null`` when the scheduler is idle. Between a scan being
+    accepted and its first snapshot it is a ``catalogue`` snapshot with every
+    counter at zero, never ``null`` while ``running`` is ``true``.
+    """
+
+    running: bool
+    current: ScanProgress | None = None
+    last: ScanSummary | None = None
+
+
+class ScanRecord(BaseModel):
+    """One row of the ``scans`` table, the only place the timestamps live."""
+
+    id: int
+    started_at: str | None = None
+    finished_at: str | None = None
+    status: str | None = None
+    files_seen: int | None = None
+    added: int | None = None
+    updated: int | None = None
+    removed: int | None = None
+    covers_done: int | None = None
+    errors: int | None = None
+    message: str | None = None
+
+
+class HealthResponse(BaseModel):
+    """What ``GET /api/health`` answers with."""
+
+    status: str
+    version: str
+    library_path: str
+    library_ok: bool
+    db_ok: bool
+    last_scan: ScanRecord | None = None
+    scanning: bool
+    issue_count: int
