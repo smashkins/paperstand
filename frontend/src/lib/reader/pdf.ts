@@ -23,13 +23,21 @@ import {
 	type PDFDocumentProxy,
 	type PDFPageProxy,
 	type RenderTask
-} from 'pdfjs-dist';
+} from 'pdfjs-dist/legacy/build/pdf.mjs';
 
+// The `legacy` build, not the default one. pdf.js states a minimum browser
+// for this build only; the default build leans on whatever the newest engines
+// ship — `Uint8Array.prototype.toHex` to fingerprint every document,
+// `Math.sumPrecise` to rebuild a font — and is meant for the latest browser
+// versions alone. A reader opened from a tablet a few updates behind is
+// exactly what the legacy build is for, and it costs about a hundred
+// kilobytes over the whole bundle.
+//
 // The worker is a real asset of this bundle, resolved and fingerprinted by
 // Vite, so it is served from our own origin like everything else: Paperstand
 // never reaches out to a CDN.
 GlobalWorkerOptions.workerSrc = new URL(
-	'pdfjs-dist/build/pdf.worker.min.mjs',
+	'pdfjs-dist/legacy/build/pdf.worker.min.mjs',
 	import.meta.url
 ).href;
 

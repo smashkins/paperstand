@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The reader renders with pdf.js 6, shipped as its `legacy` build — the one
+  pdf.js states a minimum browser for. The in-browser reader now needs Chrome
+  125, Safari 18 or a browser of the same generation or newer; the storefront
+  and the OPDS feed are unaffected. Range requests, rendering and memory
+  behaviour were checked against the previous major and are unchanged.
 
 ## [0.2.0] - 2026-09-08
 

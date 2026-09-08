@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // The module sets `GlobalWorkerOptions.workerSrc` when it loads, and pulling
 // three megabytes of pdf.js into a unit test to watch it do that is not worth
 // it; nothing below touches the real library.
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
 	GlobalWorkerOptions: { workerSrc: '' },
 	getDocument: vi.fn()
 }));

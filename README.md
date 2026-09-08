@@ -55,7 +55,8 @@ declarative profiles you can extend.
   magazine, "continue reading" for what you left half-finished.
 - **Reads in the browser.** pdf.js over HTTP range requests, one page or two, swipe, pinch,
   double-tap, keyboard shortcuts, a thumbnail strip, and your position remembered per issue.
-  A 65 MB broadsheet opens having fetched about a tenth of the file.
+  A 65 MB broadsheet opens having fetched about a tenth of the file. Needs Chrome 125,
+  Safari 18 or a browser of the same generation or newer.
 - **Serves OPDS 1.2.** The same catalogue in the reading app on your phone or e-reader.
 - **Speaks English and Italian**, light and dark, on a phone, a tablet and a desktop.
 - **Small.** One image, under 400 MB, `linux/amd64` and `linux/arm64`, runs as your own uid.
