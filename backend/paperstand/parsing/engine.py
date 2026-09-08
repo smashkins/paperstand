@@ -370,7 +370,15 @@ class Parser:
         trace: Trace | None,
     ) -> tuple[int | None, str | None, tuple[int, int] | None]:
         if pattern is not None and pattern.groups.get("number"):
-            return int(pattern.groups["number"]), None, pattern.spans.get("number")
+            span = pattern.spans.get("number")
+            if not self.profile.number:
+                # `number: false` suppresses a pattern's own `number` group too:
+                # the span stays excluded from the title work below, but the
+                # value itself is not read as an issue number.
+                if trace is not None:
+                    trace.append(("number", "captured by the pattern, but disabled by the profile"))
+                return None, None, span
+            return int(pattern.groups["number"]), None, span
         if not self.profile.number:
             if trace is not None:
                 trace.append(("number", "disabled by the profile"))

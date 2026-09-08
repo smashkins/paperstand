@@ -147,7 +147,8 @@ four digit *folder* outside the range does not open a date folder either.
 | `N2` | a standalone 1–5 digit integer that is not a year and not part of the matched title. Standalone means what it says: `Formula1` is a title, not issue 1 of `Formula` |
 
 `N2` is switched off on its own for libraries of `kind: newspaper`. `number: false`
-switches both off.
+switches off N1 and N2 both, and a pattern's own `number` group as well — a date the same
+pattern captured still stands, only the value is not read as an issue number.
 
 ### The generic title rules
 

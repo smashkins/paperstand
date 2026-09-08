@@ -312,6 +312,18 @@ def test_a_pattern_capturing_a_number_does_not_leak_it_into_the_date() -> None:
     assert issue.matched_rule == "pattern[0] D6 title:pattern"
 
 
+def test_number_false_suppresses_a_pattern_captured_number_too() -> None:
+    """`number: false` is not just for the generic N1/N2 rules: a number the
+    pattern captured on its own is dropped as well, but the date completion
+    from the same pattern's spans is unaffected."""
+    config = config_with({"extends": "default", "number": False})
+    issue = parse_with(config, "M/Bright_Meadows_v2024_c02_Febbraio_2024.pdf")
+    assert issue.issue_number is None
+    assert issue.issue_date is not None
+    assert issue.issue_date.isoformat() == "2024-02-01"
+    assert issue.date_precision == "month"
+
+
 def test_a_year_outside_the_range_is_not_a_year() -> None:
     config = config_with({"extends": "default", "year_range": [1700, 1799]})
     issue = parse_with(config, "M/Title_17_March_1750.pdf")
