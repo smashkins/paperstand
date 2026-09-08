@@ -358,6 +358,12 @@ class Scanner:
                 self._drop_empty_libraries(connection, config)
                 set_meta(connection, "config_hash", config.config_hash)
             self._mark_duplicates(connection)
+            # Folded in before the final snapshot, not after, so that snapshot
+            # and the ScanResult below report the same total: an unreadable
+            # path is an error the scan found, even though no single file
+            # upsert ever raised for it.
+            if not walk.complete:
+                errors += max(1, len(walk.unreadable))
             snapshot(removed=removed)
 
         message = self._incomplete(scan_id, walk, kept)
@@ -368,7 +374,7 @@ class Scanner:
             added=added,
             updated=updated,
             removed=removed,
-            errors=errors + (0 if walk.complete else max(1, len(walk.unreadable))),
+            errors=errors,
             message=message,
         )
 

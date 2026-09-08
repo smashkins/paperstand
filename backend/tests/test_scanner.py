@@ -759,3 +759,31 @@ def test_started_at_is_read_from_the_scans_row_not_regenerated(
 
     assert snapshots
     assert all(snap.started_at == expected for snap in snapshots)
+
+
+def test_the_final_catalogue_snapshot_counts_the_unreadable_path_error(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """An incomplete walk's synthetic error reaches the last snapshot too.
+
+    Nothing changed on disk, so the second scan's slow phase has no cover
+    left to render and publishes nothing — the last snapshot the scan
+    publishes at all is the fast phase's own, and it must already carry the
+    error the walk could not avoid.
+    """
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)  # first pass: catalogue and render every cover
+
+    locked = sample_library.path("Magazines/Orizzonte")
+    locked.chmod(0o000)
+    try:
+        result, snapshots = run_with_progress(settings)
+    finally:
+        locked.chmod(0o755)
+
+    assert result.status == "ok"
+    assert result.errors >= 1
+    assert not any(snap.phase == "covers" for snap in snapshots)
+    last = snapshots[-1]
+    assert last.phase == "catalogue"
+    assert last.errors == result.errors
