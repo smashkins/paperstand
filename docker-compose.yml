@@ -1,0 +1,59 @@
+# Paperstand. Copy `.env.example` to `.env`, set LIBRARY_PATH and DATA_PATH,
+# then `docker compose up -d`.
+services:
+  paperstand:
+    image: ghcr.io/smashkins/paperstand:latest
+    # Uncomment to build the image from this checkout instead of pulling it.
+    # build: .
+    container_name: paperstand
+    ports:
+      - '${PORT:-8080}:8080'
+    volumes:
+      # Your PDFs. Mounted read-only: Paperstand never writes inside it, and the
+      # `:ro` is there so that a bug cannot change that.
+      - ${LIBRARY_PATH:-./library}:/library:ro
+      # The database, the covers and the page cache. Everything Paperstand
+      # writes lives here, and deleting it is a complete reset.
+      - ${DATA_PATH:-./data}:/data
+    environment:
+      # The container starts as root only to drop to this user and group, so
+      # that files written under DATA_PATH belong to you.
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      # Decides what "today" means. Get this right or the front page is a day out.
+      TZ: ${TZ:-Etc/UTC}
+      # Seconds between automatic scans. 0 switches the schedule off.
+      PAPERSTAND_SCAN_INTERVAL: ${PAPERSTAND_SCAN_INTERVAL:-900}
+      # Clients whose X-Forwarded-* headers are believed: your reverse proxy's
+      # address, or `*` when the proxy is the only thing that can reach the port.
+      PAPERSTAND_TRUSTED_PROXIES: ${PAPERSTAND_TRUSTED_PROXIES:-127.0.0.1}
+      # The address the outside world reaches Paperstand at. Only the OPDS feed
+      # needs it, and only when it cannot be worked out from the request — a
+      # sub-path, another port, a name that exists in your DNS and nowhere else.
+      PAPERSTAND_BASE_URL: ${PAPERSTAND_BASE_URL:-}
+    restart: unless-stopped
+    # The image carries its own HEALTHCHECK (GET /api/health every 30s), so
+    # `docker compose ps` reports healthy without anything declared here.
+# ---------------------------------------------------------------------------
+# On a Synology NAS
+# ---------------------------------------------------------------------------
+#
+# Paths look like this, and both must exist before the first start:
+#
+#   LIBRARY_PATH=/volume1/docker/paperstand/library
+#   DATA_PATH=/volume1/docker/paperstand/data
+#
+# PUID and PGID are the owner of the share. Find them over SSH with `id <user>`;
+# on DSM a normal user is typically uid 1026 upwards and group 100 (`users`):
+#
+#   PUID=1034
+#   PGID=100
+#
+# Keep DATA_PATH on a local volume. The database is SQLite in WAL mode, and
+# SQLite locking is not safe over SMB or NFS — a remote DATA_PATH will corrupt
+# it sooner or later. LIBRARY_PATH may be anywhere the NAS can read, remote
+# mounts included, because nothing ever writes to it.
+#
+# If the library lives on a different share, mount it as a second read-only
+# volume rather than symlinking into it: a symlink out of /library is not
+# followed.
