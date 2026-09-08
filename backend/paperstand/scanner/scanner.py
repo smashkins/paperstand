@@ -245,9 +245,7 @@ class Scanner:
             )
         )
 
-    def _fast_phase(
-        self, scan_id: int, config: PaperstandConfig, started_at: str
-    ) -> ScanResult:
+    def _fast_phase(self, scan_id: int, config: PaperstandConfig, started_at: str) -> ScanResult:
         """Walk, parse what changed, remove what is gone, resolve duplicates."""
         root = self.settings.library
         connection = self.database.connection
