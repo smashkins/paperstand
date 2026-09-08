@@ -642,12 +642,19 @@ export interface components {
 		 *     every snapshot carries it explicitly, ``null`` or not, so the generated
 		 *     client sees a field that is always there rather than one that might be
 		 *     missing.
+		 *
+		 *     ``covers_done`` counts successes only; a cover the pool could not render
+		 *     is ``covers_failed`` instead, so a bar or an "N of M" line wants
+		 *     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
+		 *     of that N were failures.
 		 */
 		ScanProgress: {
 			/** Added */
 			added: number;
 			/** Covers Done */
 			covers_done: number;
+			/** Covers Failed */
+			covers_failed: number;
 			/** Covers Total */
 			covers_total: number | null;
 			/** Elapsed */

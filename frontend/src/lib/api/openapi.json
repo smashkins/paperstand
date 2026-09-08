@@ -639,7 +639,7 @@
 				"type": "object"
 			},
 			"ScanProgress": {
-				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward. It has no default:\nevery snapshot carries it explicitly, ``null`` or not, so the generated\nclient sees a field that is always there rather than one that might be\nmissing.",
+				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward. It has no default:\nevery snapshot carries it explicitly, ``null`` or not, so the generated\nclient sees a field that is always there rather than one that might be\nmissing.\n\n``covers_done`` counts successes only; a cover the pool could not render\nis ``covers_failed`` instead, so a bar or an \"N of M\" line wants\n``covers_done + covers_failed`` to reach ``covers_total`` even when some\nof that N were failures.",
 				"properties": {
 					"added": {
 						"title": "Added",
@@ -647,6 +647,10 @@
 					},
 					"covers_done": {
 						"title": "Covers Done",
+						"type": "integer"
+					},
+					"covers_failed": {
+						"title": "Covers Failed",
 						"type": "integer"
 					},
 					"covers_total": {
@@ -708,6 +712,7 @@
 					"removed",
 					"errors",
 					"covers_done",
+					"covers_failed",
 					"covers_total"
 				],
 				"title": "ScanProgress",

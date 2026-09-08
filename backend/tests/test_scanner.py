@@ -709,3 +709,26 @@ def test_the_last_snapshot_agrees_with_the_scan_result(
     assert last.removed == result.removed
     assert last.errors == result.errors
     assert last.covers_done == result.covers_done
+
+
+def test_a_failed_cover_still_lets_the_bar_reach_the_total(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """``covers_done`` alone stalls short of the total; add ``covers_failed``."""
+    broken = sample_library.path("Zines/Broken_Mag_March_2026.pdf")
+    broken.write_bytes(b"not a PDF, not even close\n" * 40)
+
+    result, snapshots = run_with_progress(prepare(sample_library.root, data_dir))
+
+    assert result.errors == 1
+    covers = [snap for snap in snapshots if snap.phase == "covers"]
+    assert covers
+    total = covers[0].covers_total
+    assert total is not None
+    last = covers[-1]
+    assert last.covers_failed == 1
+    # covers_done counts successes only, so it still equals the finished
+    # scan's own covers_done — the bar and the "N of M" count next to it are
+    # what add covers_failed back in.
+    assert last.covers_done == result.covers_done
+    assert last.covers_done + last.covers_failed == total

@@ -106,11 +106,13 @@
 
 	// `null` reads as an indeterminate sweep: the catalogue phase's total is
 	// never known until the walk is done, and `covers_total` is `null` until
-	// the first `covers` snapshot.
+	// the first `covers` snapshot. The numerator is done *and* failed covers:
+	// a broken PDF still counts against the total, or the bar — and the "N of
+	// M" beside it — would never reach it.
 	const coversPercent = $derived.by(() => {
 		const current = scan?.current;
 		if (!current || current.phase !== 'covers' || !current.covers_total) return null;
-		return (current.covers_done / current.covers_total) * 100;
+		return ((current.covers_done + current.covers_failed) / current.covers_total) * 100;
 	});
 </script>
 
@@ -204,7 +206,7 @@
 						{#if current.phase === 'covers' && current.covers_total !== null}
 							<span class="tabular text-xs whitespace-nowrap text-muted">
 								{m.scan_covers_progress({
-									done: formatNumber(current.covers_done, locale.intl),
+									done: formatNumber(current.covers_done + current.covers_failed, locale.intl),
 									total: formatNumber(current.covers_total, locale.intl)
 								})}
 							</span>

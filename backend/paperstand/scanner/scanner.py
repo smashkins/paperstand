@@ -95,6 +95,11 @@ class ScanProgress:
     than an elapsed duration, because a duration frozen at publish time would
     be stale by the time a poller reads it two seconds later; the caller
     computes ``elapsed`` from ``started_at`` when it is read.
+
+    ``covers_done`` counts successes only, so it still equals the finished
+    scan's own ``covers_done`` — a cover the pool could not render is
+    ``covers_failed``, and a caller drawing "N of M" wants both: a broken PDF
+    must still let the bar, and the count beside it, reach ``covers_total``.
     """
 
     scan_id: int
@@ -106,6 +111,7 @@ class ScanProgress:
     removed: int = 0
     errors: int = 0
     covers_done: int = 0
+    covers_failed: int = 0
     covers_total: int | None = None
 
 
@@ -225,6 +231,7 @@ class Scanner:
         removed: int = 0,
         errors: int = 0,
         covers_done: int = 0,
+        covers_failed: int = 0,
         covers_total: int | None = None,
     ) -> None:
         """Hand a snapshot to ``on_progress``, when there is one to hand it to."""
@@ -241,6 +248,7 @@ class Scanner:
                 removed=removed,
                 errors=errors,
                 covers_done=covers_done,
+                covers_failed=covers_failed,
                 covers_total=covers_total,
             )
         )
@@ -392,6 +400,7 @@ class Scanner:
                 removed=result.removed,
                 errors=result.errors + failed,
                 covers_done=done,
+                covers_failed=failed,
                 covers_total=total,
             )
 
