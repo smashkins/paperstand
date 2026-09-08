@@ -50,6 +50,6 @@
 		}
 	},
 	"dependencies": {
-		"pdfjs-dist": "^5.7.284"
+		"pdfjs-dist": "^6.3.289"
 	}
 }
