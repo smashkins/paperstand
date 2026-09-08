@@ -1,0 +1,172 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] - 2026-09-09
+
+The first release. Paperstand reads a read-only folder of PDF periodicals and turns it into
+a newsstand: a catalogue by title and issue date, a cover-first web interface in English and
+Italian, an in-browser reader, and an OPDS 1.2 feed for mobile reading apps.
+
+### Added
+
+- Repository scaffold: license, contribution guide, editor and ignore rules, `Makefile`.
+- Backend skeleton: FastAPI application factory, `GET /api/health`, SPA static mount,
+  settings from `PAPERSTAND_*` environment variables, `paperstand serve` entry point.
+- Frontend skeleton: SvelteKit 2 / Svelte 5 SPA with Tailwind v4, self-hosted fonts,
+  English and Italian messages, theme toggle and language switch on a placeholder page.
+- Sample library generator producing a deterministic set of fake PDF periodicals across
+  the supported folder layouts.
+- Container image (multi-stage build, `PUID`/`PGID` support) and `docker-compose.yml`.
+- `PAPERSTAND_TRUSTED_PROXIES`: the clients whose `X-Forwarded-*` headers are believed.
+  Loopback only by default; set it to the reverse proxy's address, or to `*` when the
+  proxy is the only thing that can reach the port.
+- Parsing core: a generic engine executing declarative YAML **parser profiles**, with a
+  bundled `default` profile covering common real-world naming — date folders, numeric and
+  handle-like prefixes, duplicate suffixes, Italian and English month names, issue numbers,
+  configured titles with aliases and per-title patterns, and an *Unsorted* bucket for the
+  files that match none of them.
+- `paperstand.yml`: libraries, titles, parser profiles and an ignore list, with
+  auto-discovery of one library per top-level folder when the file is absent.
+- `paperstand parse-report <dir>` and `paperstand parse-explain <file>`: see what the
+  parser makes of a collection, and why, without a database.
+- Catalogue database: SQLite in `/data`, WAL, versioned schema. Reading progress is kept
+  apart from the issues, so it survives a file disappearing and coming back.
+- Background scanner in two phases: a fast walk that only reads names, sizes and
+  modification times and catalogues what changed, then a small worker pool that opens the
+  new PDFs for their page count, page size, first page text, a 900 px cover and a 300 px
+  thumbnail. A PDF that cannot be read costs its own row an error, never the scan.
+- Duplicate resolution: same title, same date and same issue number are folded together,
+  the copy without a duplicate suffix winning, the largest file breaking a tie.
+- A scan that could not read the whole library — an absent mount, a folder that refuses to
+  be listed — removes nothing and says so, instead of reading silence as deletion.
+- Two libraries whose names reduce to the same identifier are refused when the configuration
+  is loaded, naming both, rather than one quietly swallowing the other's files.
+- Scan scheduling: one scan on start-up and one every `PAPERSTAND_SCAN_INTERVAL` seconds,
+  never two at a time.
+- `POST /api/scan` (202, or 409 while a scan runs) and `GET /api/scan/status`.
+- `GET /api/health` now reports the database, the last scan and the number of issues, and
+  keeps answering during a scan, with an empty library and with no library at all.
+- `paperstand scan`: one scan in the foreground, printing its counters.
+- Files whose name starts with `@` are catalogued instead of skipped: on a file that is a
+  handle prefix the parser strips, while `@`, `.` and `#` still hide a whole folder.
+- REST API over the catalogue: `GET /api/libraries`, `/api/stats`, `/api/titles`
+  (with `kind`, `library`, `sort` and an `Unsorted` bucket that stays out of the way),
+  `/api/titles/{id}` and its per-year counts, `/api/titles/{id}/calendar`,
+  `/api/issues` with filters, sorting and pagination, and `/api/issues/{id}` with the
+  issues either side of it.
+- `GET /api/today`: the day's newspapers — one per title, falling back to the most recent
+  day that has any and saying which — the latest issue of every magazine, what is part-read
+  and what arrived last. The `Unsorted` bucket stays off the shelves; it is where a file
+  goes when the parser cannot place it, and it is browsed deliberately or not at all.
+- Reading progress: `GET /api/progress` and `GET|PUT|DELETE /api/issues/{id}/progress`,
+  with the page clamped to the document.
+- `GET|HEAD /api/issues/{id}/file`: the PDF, with byte ranges, `Accept-Ranges`, a strong
+  `ETag`, `If-Range`, `304` and `416` — everything an in-browser reader needs to open a
+  large document without downloading it. Never compressed, and never served from outside
+  the library root.
+- Covers and thumbnails on demand at `/api/issues/{id}/cover.jpg` and `thumb.jpg`, so a
+  wiped cache costs a render rather than a blank shelf.
+- Server-side page rendering at `/api/issues/{id}/pages/{n}.webp?w=&v=`, at a fixed ladder
+  of widths, cached on disk and swept back under `PAPERSTAND_PAGE_CACHE_MAX_MB` least
+  recently used first, after every scan and every so many renders. Images are only
+  promised to a browser for a year when their `v` still matches the file they came from,
+  so a PDF replaced where an old one was cannot leave a stale page on screen. A sweep
+  never takes a page that is on its way to a response.
+- A reading position moves with its issue: a file read and then found to be a duplicate of
+  a better copy hands its bookmark to the copy that stayed, and duplicates never appear
+  twice in "continue reading" or in `/api/progress`.
+- **OPDS 1.2 catalogue at `/opds`**, so that the collection can be read from a phone or an
+  e-reader: Today, Newspapers, Magazines, Recently added and — only when it has something
+  in it — Unsorted; one feed per title, fifty issues to a page with `first`, `previous`,
+  `next` and `last`; a cover, a thumbnail and one acquisition link to the PDF on every
+  entry. Navigation and acquisition feeds carry the content type OPDS says they should, and
+  the rules the web interface follows apply here too: duplicates never appear, and *Today*
+  falls back to the most recent day that has newspapers.
+- OPDS search at `/opds/search?q=`, over the title's name, the file name and the derived
+  title, with the OpenSearch description at `/opds/opensearch.xml` that a client builds its
+  own search box from.
+- In the feed, a file the parser could not place is named after itself — what the parser
+  derived from the file name, or the file name — rather than after the *Unsorted* bucket it
+  is filed in, which would have made every entry on that shelf read the same.
+- Absolute URLs in the feed, from `PAPERSTAND_BASE_URL` when it is set and otherwise from
+  the request — including the `X-Forwarded-Proto` and `X-Forwarded-Host` of a reverse proxy
+  listed in `PAPERSTAND_TRUSTED_PROXIES`. The forwarded headers are now read by the
+  application itself rather than by the server in front of it, so a proxy that rewrites the
+  host is honoured, and every deployment gets the URLs the tests describe.
+- `docs/opds.md`: the feed tree, how to add the catalogue in Panels, Chunky, Moon+ Reader,
+  KOReader and Librera, and how to put the whole application behind basic authentication
+  with Caddy or with nginx — Paperstand has no authentication of its own in 0.1.0.
+- A committed OpenAPI document and the TypeScript client generated from it
+  (`make gen-api`); CI regenerates both and fails if either has moved. The OPDS routes stay
+  out of it deliberately: their contract is the OPDS specification, not Paperstand's.
+- The storefront: a cover-first web interface over the catalogue. `/` opens on the day's
+  newspapers at full size under a large localised date, with "continue reading", the latest
+  magazines and what arrived last below it; `/newspapers` and `/magazines` are walls of
+  latest covers; `/title/{id}` gives a daily a month calendar of mini front pages and a
+  magazine a section per year; `/settings` shows the libraries, the scanner with a live
+  "Rescan now", and what the caches cost on disk.
+- Covers are drawn at the real page ratio the scanner measured, so a shelf reserves the
+  right space before an image exists and nothing on the page moves when it arrives; a
+  part-read issue carries a 3 px progress stripe.
+- Every string in the interface is in English and Italian, and every date, number and file
+  size goes through `Intl` with the active language. `npm run i18n:check` fails the build on
+  a catalogue that has drifted or on text hardcoded in a component.
+- Reader preferences — spread and where page images come from — are chosen in Settings and
+  kept per browser, ready for the reader itself.
+- A year of a magazine is walked a page at a time, so an archive with more issues in one
+  year than a single request will carry is still reachable in full; a year that fails to
+  load stops and offers a retry rather than asking again forever.
+- A date is never shown at a finer precision than the file actually carried: a title whose
+  latest issue only said "March 2026" says "March 2026", not the first of the month.
+- The in-browser reader at `/read/{id}`: pdf.js over the range endpoint, so a 56 MB
+  broadsheet shows its front page having fetched about 7% of the file and never a whole
+  copy of it. One page or two, the cover always alone; swipe, pinch, double tap, ctrl or
+  ⌘ with the wheel, a tenth of each edge to turn the page and the middle to hide the
+  chrome, which hides itself anyway after two and a half seconds. Arrow keys, space,
+  PageUp/PageDown, Home/End, `+`/`−`/`0`, `f`, `t` and `Esc`, all listed in the toolbar's
+  `?` panel.
+- A thumbnail strip of the whole issue, lazily fetched from the server's 200 px page
+  images, with the current page highlighted and scrolled into view.
+- Reading position is restored when an issue is reopened and written back a second after
+  the page changes, when the tab is hidden and when the reader is closed — never for a
+  cover nobody read past.
+- "Rendered by the server" in Settings now does something: the reader draws the backend's
+  WebP pages instead of parsing the PDF, for a tablet that cannot afford a worker.
+- Leaving the reader destroys the document and its worker: ten issues opened and closed in
+  a row leave the heap where they found it. Pages warmed for a spread the reader has already
+  left are cancelled rather than left to finish, so a run of thumbnail jumps does not queue
+  up work behind the page somebody is actually looking at.
+- The reader's last position survives the tab closing: the flush on the way out is a
+  keepalive request, and it happens on `pagehide` as well as on a tab being hidden.
+- Covers, thumbnails and rendered pages answer `HEAD` as well as `GET`, so a reading app
+  can probe a stored catalogue without downloading it. The PDF endpoint and every OPDS feed
+  already did.
+- An application icon and a web manifest, so "Add to Home Screen" gives Paperstand its own
+  icon and name on iOS and Android, and the browser's chrome follows the theme.
+- The theme is applied before the first paint: a dark-mode reader no longer gets a flash of
+  paper white on every cold load.
+- An error page in both languages for an address that is not a route, or a page that would
+  not load, with the way back to Today.
+- `docs/configuration.md`: every environment variable and the whole `paperstand.yml` schema.
+  `docs/sample-library.md` describes the fictional publications the examples use.
+- CI on push and pull request, and a release workflow publishing multi-architecture images
+  to `ghcr.io/smashkins/paperstand` with OCI metadata labels.
+
+### Known limitations
+
+- No authentication. Put Paperstand behind a reverse proxy, or on a network you trust;
+  [`docs/opds.md`](docs/opds.md) has a basic-auth example that a reading app can still use.
+- Search is in the OPDS feed only; the web interface has the box disabled.
+- Serving Paperstand under a sub-path is not supported.
+
+
+[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/smashkins/paperstand/releases/tag/v0.1.0
