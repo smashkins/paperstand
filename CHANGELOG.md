@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-09-08
+
+The catalogue tells you what it is doing, and the parser reads two more numbering shapes.
+
 ### Added
 
 - Live scan progress: `GET /api/scan/status` reports the running scan's phase,
@@ -185,5 +191,6 @@ Italian, an in-browser reader, and an OPDS 1.2 feed for mobile reading apps.
 - Serving Paperstand under a sub-path is not supported.
 
 
-[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/smashkins/paperstand/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/smashkins/paperstand/releases/tag/v0.1.0

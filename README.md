@@ -170,7 +170,7 @@ covers do not appear (almost always a base-URL problem).
 
 ## Reverse proxy and authentication
 
-**Paperstand has no authentication of its own in 0.1.0.** Anyone who can reach the port can
+**Paperstand has no authentication of its own.** Anyone who can reach the port can
 read the catalogue. Run it on a network you trust, or put a reverse proxy in front of it and
 let the proxy ask for a password — HTTP basic auth works with every OPDS client listed
 above, which is why it is the recommended shape. There is a worked example, with the
@@ -210,7 +210,7 @@ That is your business. Paperstand reads a folder and has no opinion about how it
 
 ## Roadmap
 
-Not in 0.1.0, in rough order of interest:
+Not there yet, in rough order of interest:
 
 - **OPDS-PSE page streaming**, so a reading app can fetch one rendered page at a time
   instead of downloading the whole PDF. The endpoint it needs already exists.

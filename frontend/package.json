@@ -1,7 +1,7 @@
 {
 	"name": "paperstand-frontend",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"type": "module",
 	"scripts": {
 		"i18n": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy custom-localStorage preferredLanguage baseLocale --emit-ts-declarations",

@@ -64,11 +64,11 @@ Each issue entry carries its cover, its thumbnail and one acquisition link to th
 
 Reading in the app therefore means downloading the PDF. Page streaming — the OPDS-PSE
 extension, which would let a client fetch one rendered page at a time from Paperstand — is
-not part of 0.1.0, although the endpoint behind it already exists.
+not there yet, although the endpoint behind it already exists.
 
 ## Adding the catalogue in a client
 
-There is **no authentication in 0.1.0**; see [Putting it behind a
+There is **no authentication**; see [Putting it behind a
 password](#putting-it-behind-a-password). Leave the user name and password fields empty
 everywhere, unless a reverse proxy in front of Paperstand is asking for them.
 
