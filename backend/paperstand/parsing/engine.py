@@ -172,18 +172,31 @@ class Parser:
         pattern, date_hit, date_spans = self._match_patterns(spaced, trace)
         pattern_rule = pattern.rule if pattern is not None else None
         date_rule: str | None = None
+        # Every span the pattern captured — not just its date groups — is masked
+        # before the generic date rules run, so a captured `number` or
+        # `subtitle` cannot be misread as a day or a month. Masking group spans,
+        # rather than the whole match, leaves alone whatever a pattern that only
+        # matches a prefix never captured in the first place.
+        pattern_spans = list(pattern.spans.values()) if pattern is not None else []
         if date_hit is None:
+            generic_source = mask(spaced, pattern_spans)
+            if trace is not None and pattern_spans:
+                trace.append(("masked", repr(generic_source)))
             date_hit = find_date(
-                spaced, self._date_rules, self.months, self.profile.year_range, trace
+                generic_source, self._date_rules, self.months, self.profile.year_range, trace
             )
             if date_hit is not None:
                 date_rule = date_hit.rule
                 date_spans = [date_hit.span]
         elif not _is_complete(date_hit):
             # A pattern may capture only part of a date. What it did not capture
-            # falls through to the generic rules, on what is left of the name.
+            # falls through to the generic rules, on what the pattern's own
+            # spans leave behind.
+            generic_source = mask(spaced, pattern_spans)
+            if trace is not None:
+                trace.append(("masked", repr(generic_source)))
             generic = find_date(
-                mask(spaced, date_spans),
+                generic_source,
                 self._date_rules,
                 self.months,
                 self.profile.year_range,
@@ -195,6 +208,10 @@ class Parser:
                 date_rule = generic.rule
                 date_spans = [*date_spans, generic.span]
 
+        # The number and title work below still masks the date groups alone: a
+        # captured `number` is already read straight off the pattern in
+        # `_resolve_number`, and widening this mask too would blank out title
+        # text the title rules still need.
         masked = mask(spaced, date_spans)
         squashed = squash(masked)
         config_match = (

@@ -291,6 +291,29 @@ def test_a_pattern_that_captures_only_a_year_is_completed_by_the_generic_rules()
     assert issue.matched_rule == "pattern[0] D3 title:pattern"
 
 
+def test_a_pattern_capturing_a_number_does_not_leak_it_into_the_date() -> None:
+    """A volume-and-issue pattern of the user's own, not the bundled `default`
+    patterns for the same shape: the engine fix stands on its own. Without it,
+    the `02` of `c02` is masked only as a date group — it is not one here, the
+    pattern captures it as `number` — so D3 reads it as a day, `2 February`
+    rather than `February`."""
+    config = config_with(
+        {
+            "extends": "default",
+            "patterns": [
+                r"^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)"
+            ],
+        }
+    )
+    issue = parse_with(config, "M/Bright_Meadows_v2024_c02_Febbraio_2024.pdf")
+    assert issue.issue_date is not None
+    assert issue.issue_date.isoformat() == "2024-02-01"
+    assert issue.date_precision == "month"
+    assert issue.date_source == "filename"
+    assert issue.issue_number == 2
+    assert issue.matched_rule == "pattern[0] D6 title:pattern"
+
+
 def test_a_year_outside_the_range_is_not_a_year() -> None:
     config = config_with({"extends": "default", "year_range": [1700, 1799]})
     issue = parse_with(config, "M/Title_17_March_1750.pdf")
