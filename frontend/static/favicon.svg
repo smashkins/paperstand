@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Paperstand">
+	<title>Paperstand</title>
+	<rect width="32" height="32" rx="7" fill="#c8102e" />
+	<rect x="7" y="6" width="18" height="20" rx="1.5" fill="#f8f5ef" />
+	<rect x="10" y="9" width="12" height="3.5" fill="#c8102e" />
+	<rect x="10" y="15.5" width="12" height="2" fill="#c8102e" opacity=".45" />
+	<rect x="10" y="19.5" width="8" height="2" fill="#c8102e" opacity=".45" />
+</svg>

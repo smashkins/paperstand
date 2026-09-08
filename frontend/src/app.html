@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="description" content="Self-hosted reader for collections of PDF periodicals." />
+
+		<link rel="icon" href="%sveltekit.assets%/favicon.svg" type="image/svg+xml" />
+		<link rel="alternate icon" href="%sveltekit.assets%/favicon.ico" sizes="32x32" />
+		<link rel="apple-touch-icon" href="%sveltekit.assets%/apple-touch-icon.png" />
+		<link rel="manifest" href="%sveltekit.assets%/manifest.webmanifest" />
+		<meta name="apple-mobile-web-app-title" content="Paperstand" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="theme-color" content="#f5f1ea" />
+
+		<!--
+			The theme, before the first paint. `ssr = false` means the document
+			arrives empty and the theme store only runs after hydration, so
+			without this a dark-mode reader gets a full screen of paper white on
+			every cold load. Deliberately tiny and failure-tolerant: a browser
+			that refuses storage, or a stored value that is not one of the three,
+			falls through to the system preference — which is what the store
+			would have decided anyway.
+		-->
+		<script>
+			(function () {
+				var stored = null;
+				try {
+					stored = localStorage.getItem('paperstand:theme');
+				} catch (error) {
+					/* private mode, or site data switched off */
+				}
+				var dark =
+					stored === 'dark' ||
+					(stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+				if (dark) document.documentElement.classList.add('dark');
+				var meta = document.querySelector('meta[name="theme-color"]');
+				if (meta) meta.setAttribute('content', dark ? '#121212' : '#f5f1ea');
+			})();
+		</script>
+
+		%sveltekit.head%
+	</head>
+
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>
