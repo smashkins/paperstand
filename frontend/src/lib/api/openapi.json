@@ -64,7 +64,7 @@
 				"type": "object"
 			},
 			"HealthResponse": {
-				"description": "What ``GET /api/health`` answers with.",
+				"description": "What ``GET /api/health`` answers with.\n\n``last_scan`` has no default: the endpoint always passes it explicitly,\n``null`` or a record, so the client sees a field that is always present.",
 				"properties": {
 					"db_ok": {
 						"title": "Db Ok",
@@ -111,6 +111,7 @@
 					"library_path",
 					"library_ok",
 					"db_ok",
+					"last_scan",
 					"scanning",
 					"issue_count"
 				],
@@ -638,7 +639,7 @@
 				"type": "object"
 			},
 			"ScanProgress": {
-				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward.",
+				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward. It has no default:\nevery snapshot carries it explicitly, ``null`` or not, so the generated\nclient sees a field that is always there rather than one that might be\nmissing.",
 				"properties": {
 					"added": {
 						"title": "Added",
@@ -706,7 +707,8 @@
 					"updated",
 					"removed",
 					"errors",
-					"covers_done"
+					"covers_done",
+					"covers_total"
 				],
 				"title": "ScanProgress",
 				"type": "object"
@@ -836,7 +838,7 @@
 				"type": "object"
 			},
 			"ScanStatus": {
-				"description": "What ``GET /api/scan/status`` answers with.\n\n``current`` is ``null`` when the scheduler is idle. Between a scan being\naccepted and its first snapshot it is a ``catalogue`` snapshot with every\ncounter at zero, never ``null`` while ``running`` is ``true``.",
+				"description": "What ``GET /api/scan/status`` answers with.\n\n``current`` is ``null`` when the scheduler is idle. Between a scan being\naccepted and its first snapshot it is a ``catalogue`` snapshot with every\ncounter at zero, never ``null`` while ``running`` is ``true``. Neither\nfield carries a default — every caller passes both explicitly — so the\nclient sees them as always-present-but-nullable, not possibly missing.",
 				"properties": {
 					"current": {
 						"anyOf": [
@@ -864,7 +866,9 @@
 					}
 				},
 				"required": [
-					"running"
+					"running",
+					"current",
+					"last"
 				],
 				"title": "ScanStatus",
 				"type": "object"
@@ -929,6 +933,7 @@
 					"removed",
 					"covers_done",
 					"errors",
+					"message",
 					"duration"
 				],
 				"title": "ScanSummary",

@@ -24,6 +24,12 @@ export type Today = components['schemas']['Today'];
 export type Progress = components['schemas']['Progress'];
 export type ProgressRecord = components['schemas']['ProgressRecord'];
 export type YearCount = components['schemas']['YearCount'];
+export type ScanAccepted = components['schemas']['ScanAccepted'];
+export type ScanProgress = components['schemas']['ScanProgress'];
+export type ScanSummary = components['schemas']['ScanSummary'];
+export type ScanStatus = components['schemas']['ScanStatus'];
+export type ScanRecord = components['schemas']['ScanRecord'];
+export type Health = components['schemas']['HealthResponse'];
 export type Kind = Issue['kind'];
 export type DatePrecision = Issue['date_precision'];
 export type DateSource = Issue['date_source'];
@@ -152,67 +158,6 @@ async function request<T>(path: string, options: CallOptions = {}, init: Request
 	} catch {
 		throw new ApiError(response.status, path, 'the response was not JSON');
 	}
-}
-
-/**
- * What `GET /api/scan/status` answers with.
- *
- * The scan endpoints answer with plain dictionaries rather than models, so
- * these three shapes are written by hand — the one place in the client where a
- * type is not generated. `current` is the id of the scan in flight, not an
- * object, and the summary carries no timestamps: those live on the row that
- * `/api/health` reports.
- */
-export interface ScanStatus {
-	running: boolean;
-	current: number | null;
-	last: ScanSummary | null;
-}
-
-/** A finished scan, as the scheduler remembers it in memory. */
-export interface ScanSummary {
-	scan_id: number;
-	status: string;
-	files_seen: number;
-	added: number;
-	updated: number;
-	removed: number;
-	covers_done: number;
-	errors: number;
-	message: string | null;
-	duration: number;
-}
-
-/** One row of the `scans` table, which is the only thing that has the times. */
-export interface ScanRecord {
-	id: number;
-	started_at: string | null;
-	finished_at: string | null;
-	status: string | null;
-	files_seen: number | null;
-	added: number | null;
-	updated: number | null;
-	removed: number | null;
-	covers_done: number | null;
-	errors: number | null;
-	message: string | null;
-}
-
-/** What `GET /api/health` answers with. */
-export interface Health {
-	status: string;
-	version: string;
-	library_path: string;
-	library_ok: boolean;
-	db_ok: boolean;
-	last_scan: ScanRecord | null;
-	scanning: boolean;
-	issue_count: number;
-}
-
-/** What `POST /api/scan` answers with when it accepts. */
-export interface ScanAccepted {
-	scan_id: number;
 }
 
 export interface TitleParams {

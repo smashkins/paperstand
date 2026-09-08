@@ -413,13 +413,16 @@ export interface components {
 		/**
 		 * HealthResponse
 		 * @description What ``GET /api/health`` answers with.
+		 *
+		 *     ``last_scan`` has no default: the endpoint always passes it explicitly,
+		 *     ``null`` or a record, so the client sees a field that is always present.
 		 */
 		HealthResponse: {
 			/** Db Ok */
 			db_ok: boolean;
 			/** Issue Count */
 			issue_count: number;
-			last_scan?: components['schemas']['ScanRecord'] | null;
+			last_scan: components['schemas']['ScanRecord'] | null;
 			/** Library Ok */
 			library_ok: boolean;
 			/** Library Path */
@@ -635,7 +638,10 @@ export interface components {
 		 *
 		 *     ``covers_total`` is ``null`` during the ``catalogue`` phase — the fast
 		 *     phase never counts the files it will find before it has walked them —
-		 *     and known from the first ``covers`` snapshot onward.
+		 *     and known from the first ``covers`` snapshot onward. It has no default:
+		 *     every snapshot carries it explicitly, ``null`` or not, so the generated
+		 *     client sees a field that is always there rather than one that might be
+		 *     missing.
 		 */
 		ScanProgress: {
 			/** Added */
@@ -643,7 +649,7 @@ export interface components {
 			/** Covers Done */
 			covers_done: number;
 			/** Covers Total */
-			covers_total?: number | null;
+			covers_total: number | null;
 			/** Elapsed */
 			elapsed: number;
 			/** Errors */
@@ -698,11 +704,13 @@ export interface components {
 		 *
 		 *     ``current`` is ``null`` when the scheduler is idle. Between a scan being
 		 *     accepted and its first snapshot it is a ``catalogue`` snapshot with every
-		 *     counter at zero, never ``null`` while ``running`` is ``true``.
+		 *     counter at zero, never ``null`` while ``running`` is ``true``. Neither
+		 *     field carries a default — every caller passes both explicitly — so the
+		 *     client sees them as always-present-but-nullable, not possibly missing.
 		 */
 		ScanStatus: {
-			current?: components['schemas']['ScanProgress'] | null;
-			last?: components['schemas']['ScanSummary'] | null;
+			current: components['schemas']['ScanProgress'] | null;
+			last: components['schemas']['ScanSummary'] | null;
 			/** Running */
 			running: boolean;
 		};
@@ -722,7 +730,7 @@ export interface components {
 			/** Files Seen */
 			files_seen: number;
 			/** Message */
-			message?: string | null;
+			message: string | null;
 			/** Removed */
 			removed: number;
 			/** Scan Id */

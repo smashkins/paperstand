@@ -193,7 +193,10 @@ class ScanProgress(BaseModel):
 
     ``covers_total`` is ``null`` during the ``catalogue`` phase — the fast
     phase never counts the files it will find before it has walked them —
-    and known from the first ``covers`` snapshot onward.
+    and known from the first ``covers`` snapshot onward. It has no default:
+    every snapshot carries it explicitly, ``null`` or not, so the generated
+    client sees a field that is always there rather than one that might be
+    missing.
     """
 
     scan_id: int
@@ -206,7 +209,7 @@ class ScanProgress(BaseModel):
     removed: int
     errors: int
     covers_done: int
-    covers_total: int | None = None
+    covers_total: int | None
 
 
 class ScanSummary(BaseModel):
@@ -220,7 +223,7 @@ class ScanSummary(BaseModel):
     removed: int
     covers_done: int
     errors: int
-    message: str | None = None
+    message: str | None
     duration: float
 
 
@@ -229,12 +232,14 @@ class ScanStatus(BaseModel):
 
     ``current`` is ``null`` when the scheduler is idle. Between a scan being
     accepted and its first snapshot it is a ``catalogue`` snapshot with every
-    counter at zero, never ``null`` while ``running`` is ``true``.
+    counter at zero, never ``null`` while ``running`` is ``true``. Neither
+    field carries a default — every caller passes both explicitly — so the
+    client sees them as always-present-but-nullable, not possibly missing.
     """
 
     running: bool
-    current: ScanProgress | None = None
-    last: ScanSummary | None = None
+    current: ScanProgress | None
+    last: ScanSummary | None
 
 
 class ScanRecord(BaseModel):
@@ -254,13 +259,17 @@ class ScanRecord(BaseModel):
 
 
 class HealthResponse(BaseModel):
-    """What ``GET /api/health`` answers with."""
+    """What ``GET /api/health`` answers with.
+
+    ``last_scan`` has no default: the endpoint always passes it explicitly,
+    ``null`` or a record, so the client sees a field that is always present.
+    """
 
     status: str
     version: str
     library_path: str
     library_ok: bool
     db_ok: bool
-    last_scan: ScanRecord | None = None
+    last_scan: ScanRecord | None
     scanning: bool
     issue_count: int
