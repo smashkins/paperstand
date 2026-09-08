@@ -27,7 +27,7 @@ RUN npm run i18n && npm run build
 # is glibc based; it is the same base as the runtime so that the venv it builds
 # is valid there, at the same path.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS deps
+FROM python:3.14-slim-bookworm AS deps
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.26 /uv /usr/local/bin/uv
 
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------------------------------------------------------------------------
 # Stage 3 — runtime.
 # ---------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS runtime
+FROM python:3.14-slim-bookworm AS runtime
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
