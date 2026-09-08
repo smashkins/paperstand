@@ -732,3 +732,30 @@ def test_a_failed_cover_still_lets_the_bar_reach_the_total(
     # what add covers_failed back in.
     assert last.covers_done == result.covers_done
     assert last.covers_done + last.covers_failed == total
+
+
+def test_started_at_is_read_from_the_scans_row_not_regenerated(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """``run`` reads the timestamp ``begin`` wrote rather than taking a new one.
+
+    Deterministic, unlike a timing-based test: ``started_at`` is truncated to
+    the second, so two independent ``utc_now()`` calls a few milliseconds
+    apart would agree unless they happened to straddle a second boundary —
+    reading the same row instead makes agreement certain rather than likely.
+    """
+    settings = prepare(sample_library.root, data_dir)
+    database = open_database(settings.db_path)
+    try:
+        scanner = Scanner(settings, database)
+        scan_id = scanner.begin()
+        expected = scanner.started_at(scan_id)
+
+        snapshots: list[ScanProgress] = []
+        scanner.on_progress = snapshots.append
+        scanner.run(scan_id)
+    finally:
+        database.close()
+
+    assert snapshots
+    assert all(snap.started_at == expected for snap in snapshots)

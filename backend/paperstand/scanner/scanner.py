@@ -180,6 +180,21 @@ class Scanner:
             )
         return int(cursor.lastrowid or 0)
 
+    def started_at(self, scan_id: int) -> str:
+        """The instant ``begin`` opened ``scan_id`` — read back, not regenerated.
+
+        ``run`` and the scheduler's seed snapshot both need this timestamp,
+        and two independent ``utc_now()`` calls a few milliseconds apart would
+        let the elapsed timer jump when the first real snapshot replaces the
+        seed. The ``scans`` row is the one place it is stored, so both read it
+        back from there rather than each keeping — and risking losing sync
+        with — a copy of their own.
+        """
+        row = self.database.connection.execute(
+            "SELECT started_at FROM scans WHERE id = ?", (scan_id,)
+        ).fetchone()
+        return str(row["started_at"]) if row is not None else utc_now()
+
     def scan(self) -> ScanResult:
         """Run a complete scan, from the ``scans`` row to the last cover."""
         return self.run(self.begin())
@@ -187,7 +202,7 @@ class Scanner:
     def run(self, scan_id: int) -> ScanResult:
         """Run both phases of scan ``scan_id`` and close its row."""
         started = time.perf_counter()
-        started_at = utc_now()
+        started_at = self.started_at(scan_id)
         try:
             result = self._run(scan_id, started, started_at)
         except Exception as error:  # a failed scan is reported, never raised

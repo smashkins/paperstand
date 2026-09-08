@@ -109,6 +109,40 @@ def test_status_reports_the_running_scan_s_progress(
     assert settled["last"]["scan_id"] == scan_id
 
 
+def test_started_at_is_stable_across_the_whole_scan(
+    sample_client: TestClient, gate: threading.Event
+) -> None:
+    """The seed and every snapshot published after it agree on when it began.
+
+    ``started_at`` used to be regenerated independently by the scheduler's
+    seed and by ``Scanner.run`` — two clocks a few milliseconds apart that
+    could disagree and make the elapsed timer jump. Both now read the same
+    ``scans`` row, so every snapshot from the seed to the last one carries
+    the same value.
+    """
+    accepted = sample_client.post("/api/scan")
+    scan_id = accepted.json()["scan_id"]
+
+    seeded = sample_client.get("/api/scan/status").json()["current"]["started_at"]
+    assert seeded
+
+    gate.set()
+    seen: list[str] = []
+    deadline = time.monotonic() + WAIT
+    while time.monotonic() < deadline:
+        current = sample_client.get("/api/scan/status").json()["current"]
+        if current is None:
+            break
+        seen.append(current["started_at"])
+        time.sleep(0.01)
+
+    assert seen, "the scan must publish at least one more snapshot after the gate opens"
+    assert all(value == seeded for value in seen)
+    assert wait_until(lambda: sample_client.get("/api/scan/status").json()["last"] is not None)
+    last = sample_client.get("/api/scan/status").json()["last"]
+    assert last["scan_id"] == scan_id
+
+
 def test_health_answers_while_a_scan_is_running(
     sample_client: TestClient, gate: threading.Event
 ) -> None:

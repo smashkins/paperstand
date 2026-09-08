@@ -17,7 +17,7 @@ import threading
 from typing import Any
 
 from paperstand.config import Settings
-from paperstand.db import Database, utc_now
+from paperstand.db import Database
 from paperstand.logging import get_logger
 from paperstand.render.pages import evict as evict_pages
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult
@@ -143,9 +143,14 @@ class ScanScheduler:
 
         Without this, a poller landing between ``request_scan`` returning and
         the scan thread's first callback would see ``running: true`` with
-        ``current: null`` — a shape the design rules out.
+        ``current: null`` — a shape the design rules out. ``started_at`` comes
+        from the ``scans`` row itself, the same place ``run`` reads it from,
+        so the seed and every snapshot that replaces it agree on the instant
+        the elapsed timer counts from.
         """
-        return ScanProgress(scan_id=scan_id, phase="catalogue", started_at=utc_now())
+        return ScanProgress(
+            scan_id=scan_id, phase="catalogue", started_at=self.scanner.started_at(scan_id)
+        )
 
     def _on_progress(self, progress: ScanProgress) -> None:
         """The callback handed to the scanner: keep the latest snapshot."""
