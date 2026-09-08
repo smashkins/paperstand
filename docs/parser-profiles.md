@@ -107,6 +107,12 @@ case-insensitively, so `(?P<month>[a-z]+)` matches `Marzo`.
 > real day of that month, or that falls before the start, means the pattern has not
 > recognised the name at all: the next pattern, and then the generic rules, get their turn.
 
+Every group a pattern captures — `number` and `subtitle` included, not only the date groups
+— is invisible to the generic date rules that follow: the text is masked out before D1–D7
+run over what the pattern left behind. A pattern that reads a volume year and an issue
+number out of `Title v2024 c02 Febbraio 2024` still leaves `02` out of D3's reach, so it
+stays the issue number rather than becoming the 2nd day of a February date.
+
 ### The generic date rules
 
 | Rule | Shape | Precision |
@@ -198,8 +204,12 @@ lowercase_words: [
   'to', 'at', 'by', 'from', 'an',
 ]
 
-# No pattern of its own: the default profile relies on the generic rules.
-patterns: []
+# Volume-and-issue numbering: a year-stamped volume and a running issue
+# number, in either order. Neither is anchored at the end, so a trailing
+# "<Month> YYYY" still reaches the generic date rules below.
+patterns:
+  - '^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)'
+  - '^(?P<title>.+?)\s+c(?P<number>\d{1,5})(?!\d)\s*-\s*v(?P<year>\d{4})(?!\d)'
 
 date_rules: [D1, D2, D3, D4, D5, D6, D7]
 date_fallback: [folder, mtime]
@@ -300,6 +310,45 @@ Both files come out as `Alpha Daily` and `Zeta Times`, dated 2026-03-17, with
 `matched_rule: pattern[0] title:config`: the pattern supplies the date and the code, and
 the aliases turn the code into the real title.
 
+### 4. Volume-and-issue numbering
+
+```
+Zines/Bright_Meadows_v2024_c02_Febbraio_2024.pdf
+Zines/Bright_Meadows_c15_-_v2023.pdf
+```
+
+No configuration at all: `default` carries both shapes. `parse-explain` on the first shows
+what the masking pays for — the `02` of `c02` stays out of D3's reach because the pattern
+captured it, not because it happens to be a date group:
+
+```
+steps:
+  replace '[_]+' -> ' '  'Bright_Meadows_v2024_c02_Febbraio_2024' -> 'Bright Meadows v2024 c02 Febbraio 2024'
+  spaced                 'Bright Meadows v2024 c02 Febbraio 2024'
+  squashed               'brightmeadowsv2024c02febbraio2024'
+  folders                []
+  pattern[0]             matched, groups {'title': 'Bright Meadows', 'year': '2024', 'number': '02'}
+  masked                 '               v     c   Febbraio 2024'
+  date D1                no match
+  date D2                no match
+  date D3                no match
+  date D4                no match
+  date D5                no match
+  date D6                matched 'Febbraio 2024' at (25, 38)
+
+result:
+  issue_date     2024-02-01
+  date_precision month
+  issue_number   2
+  matched_rule   pattern[0] D6 title:pattern
+```
+
+The `masked` step is the pattern's own spans blanked out of `spaced`: `Bright Meadows`,
+`2024` and `02` are gone, but the `v` and `c` that are not part of any group survive, and so
+does `Febbraio 2024`, which D6 then reads at month precision. The second file has no
+trailing month, so `c15 - v2023` gives issue number 15 and the year 2023 alone, at year
+precision, `matched_rule: pattern[1] title:pattern`.
+
 ### A pattern for one title only
 
 When a single title needs a shape of its own, it does not need a profile:
@@ -354,6 +403,8 @@ steps:
   spaced                 'Corriere del Ponte 17 Marzo'
   squashed               'corrieredelponte17marzo'
   folders                ['2026', '03', '17']
+  pattern[0]             no match
+  pattern[1]             no match
   date D1                no match
   date D2                no match
   date D3                matched '17 Marzo' at (19, 27)

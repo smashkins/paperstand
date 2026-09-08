@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- The `default` profile reads two more real-world shapes: a year-stamped volume and a
+  running issue number, `Title vYYYY cNNN` and `Title cNNN - vYYYY`, in either order.
+
+### Fixed
+
+- A pattern that captures an issue number, or any other named group, no longer has it read
+  as a day by the generic date rules: every span the pattern captured is masked before they
+  run, not only its date groups.
 
 ## [0.1.0] - 2026-09-09
 
