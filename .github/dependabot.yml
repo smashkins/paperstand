@@ -33,7 +33,8 @@ updates:
     # The Python and Node majors are deliberate choices (PyMuPDF wheels, Node LTS);
     # only patch and minor bumps of the base images are wanted automatically.
     ignore:
+      # Docker tags such as 3.12 -> 3.14 count as minor bumps: pin both majors and minors.
       - dependency-name: python
-        update-types: ['version-update:semver-major']
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
       - dependency-name: node
-        update-types: ['version-update:semver-major']
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
