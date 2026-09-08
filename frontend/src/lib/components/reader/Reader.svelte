@@ -408,12 +408,12 @@
 	});
 
 	function onWindowPointerMove(event: PointerEvent) {
-		// A pointer with a button down — mouse, pen or finger — belongs to the
-		// gesture layer, which reports activity itself; only hovering is worth this,
-		// and a press that has not resolved yet holds the chrome even after the
-		// button lifts, until `onTap` or `onActivity` says what it was.
+		// A pointer with a button down on the stage belongs to the gesture layer,
+		// which reports activity itself; a press anywhere else — the toolbar above
+		// all — is activity as it always was, and so is hovering. A press that has
+		// not resolved yet holds the chrome even after the button lifts.
 		if (held) return;
-		if (event.buttons !== 0) return;
+		if (event.buttons !== 0 && stage?.contains(event.target as Node)) return;
 		activity();
 	}
 
