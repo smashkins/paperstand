@@ -203,6 +203,22 @@ describe('attachGestures', () => {
 		detach();
 	});
 
+	it('a pending centre tap asks the chrome to hold still', () => {
+		const onTapPending = vi.fn();
+		const onTap = vi.fn();
+		const { node, tap } = stage();
+		const detach = attachGestures(node, { onTapPending, onTap });
+
+		tap(500, 1000);
+		expect(onTapPending).toHaveBeenCalledTimes(1);
+		expect(onTap).not.toHaveBeenCalled();
+
+		vi.advanceTimersByTime(DOUBLE_TAP_TIME);
+
+		expect(onTap).toHaveBeenCalledTimes(1);
+		detach();
+	});
+
 	it('reports activity for an edge tap', () => {
 		const onActivity = vi.fn();
 		const { node, tap } = stage();

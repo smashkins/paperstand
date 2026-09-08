@@ -17,7 +17,10 @@
  * Every one of those reports activity to keep the chrome's auto-hide timer
  * fresh, except the tap in the middle: it is held back to see whether a
  * second tap turns it into a double tap, and reporting activity early would
- * only show the chrome for `toggleChrome` to hide again a moment later.
+ * only show the chrome for `toggleChrome` to hide again a moment later. While
+ * it waits, it asks the chrome to hold still instead — neither shown nor
+ * hidden by anything else — so the toggle answers the state the reader
+ * actually saw, not one the auto-hide timer changed underneath the tap.
  *
  * The keyboard is the reader's own concern, but the two rules that decide
  * whether a key *reaches* it — is this target something that has its own idea
@@ -156,6 +159,11 @@ export interface GestureHandlers {
 	onTurn?(direction: Direction): void;
 	/** A tap in the middle: show or hide the chrome. */
 	onTap?(): void;
+	/**
+	 * A centre tap landed and is waiting out the double-tap window: hold the
+	 * chrome exactly where it is until `onTap` decides.
+	 */
+	onTapPending?(): void;
 	/** Two taps in the same place: toggle the zoom around that point. */
 	onDoubleTap?(point: Point): void;
 	/** A pinch in progress. `scale` is relative to where the pinch started. */
@@ -338,6 +346,7 @@ export function attachGestures(
 		// free to hide an already-visible chrome instead of finding it just
 		// shown and undoing itself.
 		clearPendingTap();
+		handlers.onTapPending?.();
 		pendingTap = setTimeout(() => {
 			pendingTap = null;
 			handlers.onTap?.();

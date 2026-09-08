@@ -264,6 +264,14 @@
 		}, CHROME_TIMEOUT);
 	}
 
+	function holdChrome() {
+		// A centre tap is waiting to see whether it becomes a double tap; the
+		// auto-hide timer must not change the chrome underneath it, or
+		// `toggleChrome` would answer a state the reader never saw.
+		if (hideTimer !== null) clearTimeout(hideTimer);
+		hideTimer = null;
+	}
+
 	function toggleChrome() {
 		if (chrome) {
 			if (hideTimer !== null) clearTimeout(hideTimer);
@@ -375,6 +383,7 @@
 			{
 				onTurn: turn,
 				onTap: toggleChrome,
+				onTapPending: holdChrome,
 				onDoubleTap: (at) => zoomAround(zoom > MIN_ZOOM ? MIN_ZOOM : 2, at),
 				onPinch: (scale, centre) => {
 					// The midpoint travels with the fingers; the settle needs the
