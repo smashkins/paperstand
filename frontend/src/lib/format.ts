@@ -254,6 +254,21 @@ export function formatWhen(
 	).format(date);
 }
 
+/**
+ * Elapsed time as `m:ss`, e.g. `1:23`, `12:04`.
+ *
+ * Minutes are not padded and never roll over into hours — a scan running
+ * that long is already the exceptional case the progress block exists for —
+ * and a negative or non-finite input reads as `0:00` rather than crashing
+ * the block that shows it.
+ */
+export function formatElapsed(seconds: number): string {
+	const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+	const minutes = Math.floor(total / 60);
+	const secs = total % 60;
+	return `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
 /** Capitalise the first letter, which Italian month and weekday names need. */
 export function capitalise(value: string): string {
 	if (!value) return value;

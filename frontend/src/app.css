@@ -146,6 +146,21 @@ body {
 	animation: paperstand-shimmer 1.4s linear infinite;
 }
 
+/* The scan progress bar's indeterminate sweep, for the catalogue phase, whose
+   total is never known until the walk is done. */
+@keyframes paperstand-progress-sweep {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(300%);
+	}
+}
+
+.progress-sweep {
+	animation: paperstand-progress-sweep 1.2s ease-in-out infinite;
+}
+
 /* Route changes fade and rise. The wrapper is keyed by the route id, so the
    animation replays on every navigation. */
 @keyframes paperstand-enter {

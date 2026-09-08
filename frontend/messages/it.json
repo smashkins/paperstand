@@ -91,6 +91,10 @@
 	"scan_last": "Ultima scansione {when}",
 	"scan_summary": "{files} file letti · {added} aggiunti · {updated} aggiornati · {removed} rimossi",
 	"scan_errors": "{count} errori",
+	"scan_phase_catalogue": "Catalogazione dei file",
+	"scan_phase_covers": "Generazione delle copertine",
+	"scan_elapsed": "In corso da {time}",
+	"scan_covers_progress": "{done} di {total} copertine",
 
 	"stat_titles": "Testate",
 	"stat_issues": "Uscite",

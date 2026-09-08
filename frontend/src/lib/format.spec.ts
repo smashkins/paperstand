@@ -5,6 +5,7 @@ import {
 	DEFAULT_ASPECT,
 	formatDateAtPrecision,
 	formatDateTime,
+	formatElapsed,
 	formatWhen,
 	formatIssueDate,
 	formatIssueLabel,
@@ -264,5 +265,30 @@ describe('formatNumber and capitalise', () => {
 	it('capitalises only the first letter', () => {
 		expect(capitalise('martedì 8 settembre')).toBe('Martedì 8 settembre');
 		expect(capitalise('')).toBe('');
+	});
+});
+
+describe('formatElapsed', () => {
+	it('renders seconds under a minute as 0:ss', () => {
+		expect(formatElapsed(0)).toBe('0:00');
+		expect(formatElapsed(9)).toBe('0:09');
+	});
+
+	it('pads seconds but not minutes', () => {
+		expect(formatElapsed(61)).toBe('1:01');
+		expect(formatElapsed(605)).toBe('10:05');
+	});
+
+	it('truncates rather than rounds', () => {
+		expect(formatElapsed(59.9)).toBe('0:59');
+	});
+
+	it('never rolls minutes over into hours', () => {
+		expect(formatElapsed(3661)).toBe('61:01');
+	});
+
+	it('treats negative or non-finite input as zero', () => {
+		expect(formatElapsed(-5)).toBe('0:00');
+		expect(formatElapsed(Number.NaN)).toBe('0:00');
 	});
 });

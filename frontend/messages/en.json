@@ -91,6 +91,10 @@
 	"scan_last": "Last scan {when}",
 	"scan_summary": "{files} files seen · {added} added · {updated} updated · {removed} removed",
 	"scan_errors": "{count} errors",
+	"scan_phase_catalogue": "Cataloguing files",
+	"scan_phase_covers": "Rendering covers",
+	"scan_elapsed": "Running for {time}",
+	"scan_covers_progress": "{done} of {total} covers",
 
 	"stat_titles": "Titles",
 	"stat_issues": "Issues",

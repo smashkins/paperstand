@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { ApiError, api, type ScanRecord, type ScanStatus } from '$lib/api/client';
-	import { formatDateTime, formatNumber, formatSize } from '$lib/format';
+	import { formatDateTime, formatElapsed, formatNumber, formatSize } from '$lib/format';
 	import { m } from '$lib/paraglide/messages.js';
 	import { locales, type Locale } from '$lib/paraglide/runtime';
 	import { locale } from '$lib/stores/locale.svelte';
@@ -15,6 +15,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorState from '$lib/components/ui/ErrorState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
 	import type { PageProps } from './$types';
 
@@ -102,6 +103,15 @@
 		'px-3 py-1.5 text-[13px] font-medium transition-colors border-r border-hairline last:border-r-0';
 
 	const summary = $derived(scan?.last ?? null);
+
+	// `null` reads as an indeterminate sweep: the catalogue phase's total is
+	// never known until the walk is done, and `covers_total` is `null` until
+	// the first `covers` snapshot.
+	const coversPercent = $derived.by(() => {
+		const current = scan?.current;
+		if (!current || current.phase !== 'covers' || !current.covers_total) return null;
+		return (current.covers_done / current.covers_total) * 100;
+	});
 </script>
 
 <svelte:head><title>{m.settings_title()} · {m.app_name()}</title></svelte:head>
@@ -167,37 +177,65 @@
 			</Button>
 
 			<div class="grid gap-1 text-[13px]">
-				<span class="flex items-center gap-2 font-medium">
-					{#if scan?.running}
+				{#if scan?.running && scan.current}
+					{@const current = scan.current}
+					<span class="flex items-center gap-2 font-medium">
 						<span class="inline-block h-2 w-2 rounded-full bg-accent" aria-hidden="true"></span>
-						{m.scan_running()}
-					{:else}
-						{m.scan_idle()}
-					{/if}
-				</span>
-				{#if lastRun}
-					<span class="tabular text-muted">
-						{m.scan_last({
-							when: formatDateTime(lastRun.finished_at ?? lastRun.started_at, locale.intl)
-						})}
+						{current.phase === 'covers' ? m.scan_phase_covers() : m.scan_phase_catalogue()}
 					</span>
-				{/if}
-				{#if summary}
 					<span class="tabular text-muted">
 						{m.scan_summary({
-							files: formatNumber(summary.files_seen, locale.intl),
-							added: formatNumber(summary.added, locale.intl),
-							updated: formatNumber(summary.updated, locale.intl),
-							removed: formatNumber(summary.removed, locale.intl)
+							files: formatNumber(current.files_seen, locale.intl),
+							added: formatNumber(current.added, locale.intl),
+							updated: formatNumber(current.updated, locale.intl),
+							removed: formatNumber(current.removed, locale.intl)
 						})}
 					</span>
-					{#if summary.errors}
+					{#if current.errors}
 						<span class="tabular text-accent-text">
-							{m.scan_errors({ count: formatNumber(summary.errors, locale.intl) })}
+							{m.scan_errors({ count: formatNumber(current.errors, locale.intl) })}
 						</span>
 					{/if}
-				{:else if !lastRun}
-					<span class="text-muted">{m.scan_never()}</span>
+					<span class="tabular text-muted">
+						{m.scan_elapsed({ time: formatElapsed(current.elapsed) })}
+					</span>
+					<div class="mt-1 flex items-center gap-2">
+						<ProgressBar percent={coversPercent} aria-label={m.scan_running()} class="max-w-56" />
+						{#if current.phase === 'covers' && current.covers_total !== null}
+							<span class="tabular text-xs whitespace-nowrap text-muted">
+								{m.scan_covers_progress({
+									done: formatNumber(current.covers_done, locale.intl),
+									total: formatNumber(current.covers_total, locale.intl)
+								})}
+							</span>
+						{/if}
+					</div>
+				{:else}
+					<span class="flex items-center gap-2 font-medium">{m.scan_idle()}</span>
+					{#if lastRun}
+						<span class="tabular text-muted">
+							{m.scan_last({
+								when: formatDateTime(lastRun.finished_at ?? lastRun.started_at, locale.intl)
+							})}
+						</span>
+					{/if}
+					{#if summary}
+						<span class="tabular text-muted">
+							{m.scan_summary({
+								files: formatNumber(summary.files_seen, locale.intl),
+								added: formatNumber(summary.added, locale.intl),
+								updated: formatNumber(summary.updated, locale.intl),
+								removed: formatNumber(summary.removed, locale.intl)
+							})}
+						</span>
+						{#if summary.errors}
+							<span class="tabular text-accent-text">
+								{m.scan_errors({ count: formatNumber(summary.errors, locale.intl) })}
+							</span>
+						{/if}
+					{:else if !lastRun}
+						<span class="text-muted">{m.scan_never()}</span>
+					{/if}
 				{/if}
 			</div>
 
