@@ -153,6 +153,9 @@ See [`docs/folder-layout.md`](docs/folder-layout.md) for the layouts and
 [`docs/parser-profiles.md`](docs/parser-profiles.md) for how to teach the parser a shape it
 does not know.
 
+`organize-plan` previews a canonical, one-name-per-issue layout for the same files, read-only
+and dry-run only for now: see [`docs/organizer.md`](docs/organizer.md).
+
 ## OPDS
 
 The catalogue is also an [OPDS 1.2](https://specs.opds.io/opds-1.2) feed, so the reading app

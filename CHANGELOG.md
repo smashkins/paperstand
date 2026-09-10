@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A dry-run `organize-plan` command that prints where each file would live
+  under a canonical `<Title>/<YYYY>/<Title> - <ISO date>[ - n<number>].pdf`
+  layout; nothing it does reaches the running server yet.
+
 ## [0.2.1] - 2026-09-08
 
 The reader moves to pdf.js 6, and a tap in the middle of a page does what a tap should.
