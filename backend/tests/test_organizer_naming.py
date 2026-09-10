@@ -158,6 +158,28 @@ def test_a_missing_date_wins_over_an_mtime_date() -> None:
     assert plan == Unsorted(reason="no date in the name or the folder")
 
 
+def test_unsorted_a_title_with_a_path_separator() -> None:
+    """A configured title is a free string: `/` would smuggle in an extra folder."""
+    plan = plan_issue(issue(title="Ponte / Lago", derived="Ponte / Lago"))
+    assert plan == Unsorted(reason='title "Ponte / Lago" is not a valid folder name')
+
+
+def test_unsorted_an_empty_title() -> None:
+    plan = plan_issue(issue(title="", derived=""))
+    assert plan == Unsorted(reason='title "" is not a valid folder name')
+
+
+def test_unsorted_a_title_that_is_dot_dot() -> None:
+    plan = plan_issue(issue(title="..", derived=".."))
+    assert plan == Unsorted(reason='title ".." is not a valid folder name')
+
+
+def test_an_mtime_date_wins_over_a_bad_title() -> None:
+    """`date_source` is checked before the title's shape: the mtime reason stands."""
+    plan = plan_issue(issue(title="Ponte / Lago", derived="Ponte / Lago", source="mtime"))
+    assert plan == Unsorted(reason="date would come from the file's modification time")
+
+
 # --------------------------------------------------------------- the fixture table
 
 

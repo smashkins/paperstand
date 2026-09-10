@@ -38,7 +38,10 @@ rather than guessed at:
 - no configured title matches the name;
 - there is no date anywhere in the name or the folders;
 - the only date found would come from the file's modification time — a guess the organizer
-  must never bake into a permanent name.
+  must never bake into a permanent name;
+- the title itself is not usable as a single folder and file name — empty or blank, `.` or
+  `..`, or containing a path separator. A configured title is a free string, so this is
+  checked rather than assumed.
 
 ## Reading the output
 

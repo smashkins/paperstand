@@ -83,6 +83,19 @@ def canonical_filename(title: str, date: str, issue_number: int | None) -> str:
     return f"{name}.pdf"
 
 
+def _is_safe_component(name: str) -> bool:
+    """Whether ``name`` is usable, on its own, as one folder or file name.
+
+    Rejects an empty or whitespace-only string, a name carrying a path
+    separator (which would smuggle in extra folders, or escape the library
+    root), and the two special components `.` and `..`. A *configured* title
+    is a free string (see ``TitleConfig.name``), so this cannot be assumed —
+    a title derived from a file name is not checked, since it can never
+    contain a separator in the first place.
+    """
+    return bool(name.strip()) and "/" not in name and name not in (".", "..")
+
+
 def plan_issue(issue: ParsedIssue) -> OrganizePlan:
     """Where ``issue`` would live under the canonical layout, or why it would not.
 
@@ -91,7 +104,9 @@ def plan_issue(issue: ParsedIssue) -> OrganizePlan:
     1. no configured title matched the name at all;
     2. the parser found no date anywhere in the name or the folder;
     3. the only date found came from the file's modification time, a guess the
-       canonical name must never bake in as if it were read off the file.
+       canonical name must never bake in as if it were read off the file;
+    4. the title itself is not a single, safe folder and file name component —
+       empty or blank, `.` or `..`, or containing a path separator.
     """
     if issue.title_source == "unsorted":
         return Unsorted(reason=f'no configured title matches "{issue.derived_title}"')
@@ -99,6 +114,8 @@ def plan_issue(issue: ParsedIssue) -> OrganizePlan:
         return Unsorted(reason="no date in the name or the folder")
     if issue.date_source == "mtime":
         return Unsorted(reason="date would come from the file's modification time")
+    if not _is_safe_component(issue.title_name):
+        return Unsorted(reason=f'title "{issue.title_name}" is not a valid folder name')
     date = iso_date(issue.issue_date, issue.date_precision)
     folder = canonical_folder(issue.title_name, issue.issue_date.year)
     filename = canonical_filename(issue.title_name, date, issue.issue_number)
