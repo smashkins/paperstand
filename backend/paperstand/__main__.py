@@ -33,6 +33,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="paperstand.yml to use (default: the configured one, else auto-discovery)",
     )
 
+    organize = subparsers.add_parser(
+        "organize-plan",
+        help="show where every PDF under a directory would live in the canonical layout",
+    )
+    organize.add_argument("directory", type=Path, help="library root to walk")
+    organize.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="paperstand.yml to use (default: the configured one, else auto-discovery)",
+    )
+
     explain = subparsers.add_parser(
         "parse-explain",
         help="show every step the parser takes on a single file",
@@ -130,6 +142,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from paperstand.cli.parse import parse_report
 
         return parse_report(args.directory, args.config)
+    if args.command == "organize-plan":
+        from paperstand.cli.organize import organize_plan
+
+        return organize_plan(args.directory, args.config)
     if args.command == "parse-explain":
         from paperstand.cli.parse import parse_explain
 
