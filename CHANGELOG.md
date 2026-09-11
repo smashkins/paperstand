@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [`configuration.md`](docs/configuration.md#publicationyml).
 - The canonical grammar now reads a volume and a variant off a name —
   `<Title> - <ISO date>[ - [v<volume> ]n<number>][ - <variant>]` — exposed as
-  `volume` and `variant` on an issue, both through the API and through OPDS.
+  `volume` and `variant` on an issue through the API; the variant is also part
+  of the issue label, which OPDS entries show.
 - `Title` gains `slug`, `frequency`, `language`, `issue_key`, `parent_slug`
   and `supplements`; `Issue` gains `variant` and `volume`; all nullable, and
   set only for a declared publication.

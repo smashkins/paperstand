@@ -435,9 +435,12 @@ class Scanner:
 
         A custom profile that replaces ``patterns:`` without a leading ``"+"``
         loses the two bundled volume patterns *and* the declared-publication
-        one along with them — silently, unless a library actually holds a
-        publication folder, in which case every file under it would fall back
-        to being parsed as if undeclared.
+        one along with them. The declaration itself still applies — every file
+        beneath the folder is filed under the declared title — but the volume
+        and the variant are no longer read off a canonical name, so a
+        supplement sharing its date with the plain issue is marked its
+        duplicate. Silent, unless a library actually holds a publication
+        folder; hence the warning.
         """
         warned: set[str] = set()
         for folder in publications:
@@ -448,8 +451,9 @@ class Scanner:
                 warned.add(library.name)
                 log.warning(
                     "scan %d: library %r uses parser %r, which does not include the "
-                    "canonical declared-publication pattern; its publication.yml "
-                    "folders will not be read as declarations",
+                    "canonical declared-publication pattern; files under its "
+                    "publication.yml folders keep the declared title but lose the "
+                    'volume and the variant (add "+" to the profile\'s patterns)',
                     scan_id,
                     library.name,
                     library.parser,
