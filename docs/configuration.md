@@ -48,11 +48,12 @@ fractions of a second. The slow one rasterises the covers of everything new, and
 one worth giving more workers on a machine that has cores to spare.
 
 An issue's id is the hash of its content, not its path (see [Identity](folder-layout.md#identity)).
-The first scan after upgrading to a build with content-hash identity reads every file once to
-learn the hash a row written by an older version never had, and reports how many with
-`hashed` in `GET /api/scan/status` — the only feedback while that one-time pass works through
-a whole library. A second scan hashes nothing: only a file that is new, moved, touched or
-genuinely changed costs the fast phase anything.
+Computing a hash means reading the whole file, and `hashed` in `GET /api/scan/status` counts
+every file a scan reads for one — new, touched or genuinely changed, and a legacy row backfilled
+once — before the catalogue is written. The first scan after upgrading to a build with
+content-hash identity reads nearly every file in the library this way, and `hashed` is the only
+feedback while that one-time backfill works through it. A second scan hashes only what actually
+changed: an untouched file costs the fast phase nothing.
 
 ### Rendering and the page cache
 

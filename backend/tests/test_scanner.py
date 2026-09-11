@@ -32,6 +32,7 @@ from paperstand.scanner.covers import (
     page_cache_dir,
     render_cover,
 )
+from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
 from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
 
@@ -118,6 +119,8 @@ def test_the_first_scan_catalogues_every_file(
     assert result.files_seen == library.catalogued_files
     assert result.added == library.catalogued_files
     assert (result.updated, result.removed) == (0, 0)
+    # Every file is new, so the hashing pre-pass reads every one of them.
+    assert result.hashed == library.catalogued_files
     assert len(rel_paths(settings)) == library.catalogued_files
 
 
@@ -641,6 +644,43 @@ def test_a_legacy_catalogue_is_backfilled_once_and_stays_quick_after(
 
     assert (again.added, again.updated, again.removed, again.hashed) == (0, 0, 0, 0)
     assert elapsed < 0.5
+
+
+def test_hashing_a_legacy_backfill_never_holds_the_write_lock(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every hash the fast phase needs is computed before its transaction
+    opens, so a whole library's worth of legacy rows can be read without ever
+    holding SQLite's writer lock — a concurrent write, `PUT
+    /api/issues/{id}/progress` among them, must never wait behind it."""
+    scan_once(scan_settings)
+    _make_legacy(scan_settings)
+
+    calls = 0
+    locked: list[str] = []
+
+    def checked(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        probe = sqlite3.connect(scan_settings.db_path)
+        try:
+            probe.execute("PRAGMA busy_timeout = 200")
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.execute("ROLLBACK")
+            except sqlite3.OperationalError as error:
+                locked.append(str(error))
+        finally:
+            probe.close()
+        return content_hash(path)
+
+    monkeypatch.setattr("paperstand.scanner.scanner.content_hash", checked)
+    result = scan_once(scan_settings)
+
+    assert calls == sample_library.catalogued_files
+    assert not locked, f"the write lock was held during {len(locked)} of {calls} hash(es)"
+    assert result.status == "ok"
+    assert result.hashed == sample_library.catalogued_files
 
 
 # ------------------------------------------------------------ two-level duplicates

@@ -214,9 +214,12 @@ class ScanProgress(BaseModel):
     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
     of that N were failures.
 
-    ``hashed`` counts the legacy rows the fast phase has read a file for, to
-    learn the content hash they never had — the only feedback while the
-    one-time backfill after an upgrade works through a whole library.
+    ``hashed`` counts every file this scan has read in full to compute a
+    content hash — a brand new file, a legacy row backfilled once, a touch
+    and a replacement alike. Right after an upgrade this is nearly every
+    file in the library, which is the only feedback while that one-time
+    backfill works through it; a later scan hashes only what actually
+    changed.
     """
 
     scan_id: int

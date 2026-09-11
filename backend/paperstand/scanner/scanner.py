@@ -116,6 +116,13 @@ class ScanProgress:
     scan's own ``covers_done`` — a cover the pool could not render is
     ``covers_failed``, and a caller drawing "N of M" wants both: a broken PDF
     must still let the bar, and the count beside it, reach ``covers_total``.
+
+    ``hashed`` counts every file this scan read in full to compute a content
+    hash — a brand new file, a legacy row backfilled once, a touch and a
+    replacement alike, not only the one-time legacy backfill. It climbs
+    during the hashing pre-pass, before the catalogue transaction opens, so a
+    caller watching it sees a large backfill's own progress rather than a
+    stall before the fast phase's other counters start moving.
     """
 
     scan_id: int
@@ -329,9 +336,9 @@ class Scanner:
         unchanged: list[str] = []
         # Files whose path matched no row in pass one, carried into pass two
         # once `gone` is known: only then can a rename or a move be told apart
-        # from an unrelated arrival. A replacement already has its hash by the
-        # time it is queued, so pass two never reads that file a second time.
-        queue: list[tuple[LibraryFile, LibraryConfig, DeclaredPublication | None, str | None]] = []
+        # from an unrelated arrival. Every queued file already has its digest
+        # from the hashing pre-pass below, so pass two never reads a file.
+        queue: list[tuple[LibraryFile, LibraryConfig, DeclaredPublication | None, str]] = []
 
         def snapshot() -> None:
             self._publish(
@@ -368,6 +375,37 @@ class Scanner:
             log.info("scan %d: the configuration changed; every row is re-parsed", scan_id)
         self._warn_missing_canonical_pattern(scan_id, config, walk.publications)
 
+        # Every hash this scan needs, computed before the transaction below
+        # opens. A whole PDF has to be read to hash it — minutes, on a large
+        # backfill over slow storage — and doing that while holding SQLite's
+        # writer lock would make every other write wait out the busy timeout
+        # behind it, `PUT /api/issues/{id}/progress` included. Pass one and
+        # pass two take their digest from here and never call `content_hash`
+        # themselves.
+        digests: dict[str, str] = {}
+        for found in buffered:
+            library = config.library_for(found.rel_path)
+            if library is None:
+                continue
+            stored = existing.get(found.rel_path)
+            needs_hash = (
+                stored is None
+                or stored.content_hash is None
+                or stored.size != found.size
+                or stored.mtime_ns != found.mtime_ns
+            )
+            if not needs_hash:
+                continue
+            try:
+                digests[found.rel_path] = content_hash(root / found.rel_path)
+            except OSError as error:
+                errors += 1
+                log.warning("scan %d: cannot hash %s: %s", scan_id, found.rel_path, error)
+                snapshot()
+                continue
+            hashed += 1
+            snapshot()
+
         with self.database.transaction():
             # Pass one: every file whose path is already catalogued.
             for found in buffered:
@@ -378,7 +416,13 @@ class Scanner:
                 stored = existing.pop(found.rel_path, None)
                 publication = index.resolve(found.publication_dir, library, config)
                 if stored is None:
-                    queue.append((found, library, publication, None))
+                    found_hash = digests.get(found.rel_path)
+                    if found_hash is None:
+                        # Unreadable when the pre-pass hashed it, already
+                        # counted as an error there: nothing to catalogue.
+                        snapshot()
+                        continue
+                    queue.append((found, library, publication, found_hash))
                     snapshot()
                     continue
 
@@ -387,8 +431,11 @@ class Scanner:
                         # A legacy row: there was never a hash to compare
                         # against, so whatever this path holds now becomes its
                         # content identity, once.
+                        found_hash = digests.get(found.rel_path)
+                        if found_hash is None:
+                            snapshot()
+                            continue
                         stale = stored.size != found.size or stored.mtime_ns != found.mtime_ns
-                        found_hash = content_hash(root / found.rel_path)
                         stored = self._rewrite_id(connection, stored, found_hash, taken)
                         self._upsert(
                             connection,
@@ -407,7 +454,6 @@ class Scanner:
                             # there is no telling whether the bytes did too:
                             # nothing rendered from them can be trusted.
                             self._reset_derivatives(connection, stored.id)
-                        hashed += 1
                         updated += 1
                     elif stored.size == found.size and stored.mtime_ns == found.mtime_ns:
                         if not reparse_all:
@@ -428,7 +474,10 @@ class Scanner:
                         )
                         updated += 1
                     else:
-                        found_hash = content_hash(root / found.rel_path)
+                        found_hash = digests.get(found.rel_path)
+                        if found_hash is None:
+                            snapshot()
+                            continue
                         if found_hash == stored.content_hash:
                             # A touch: the bytes are exactly what they were.
                             self._upsert(
@@ -478,13 +527,8 @@ class Scanner:
             for paths in by_hash.values():
                 paths.sort()
 
-            for found, library, publication, precomputed in queue:
+            for found, library, publication, found_hash in queue:
                 try:
-                    found_hash = (
-                        precomputed
-                        if precomputed is not None
-                        else content_hash(root / found.rel_path)
-                    )
                     matches = by_hash.get(found_hash)
                     if matches:
                         old_rel_path = matches.pop(0)

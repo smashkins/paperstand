@@ -30,8 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after the folder's own basename, and prints `-> in place` for a file
   already shaped that way; the summary gains that count.
 - `Issue` gains `content_hash`, the file's full SHA-256; `ScanProgress` gains
-  `hashed`, how many legacy rows the running scan has read a file for to
-  learn the content hash they never had.
+  `hashed`, how many files the running scan has read in full to compute a
+  content hash — new, touched or genuinely changed, and a legacy row
+  backfilled once.
 
 ### Changed
 
