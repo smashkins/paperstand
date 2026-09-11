@@ -75,11 +75,27 @@ def canonical_folder(title: str, year: int) -> str:
     return f"{title}/{year:04d}"
 
 
-def canonical_filename(title: str, date: str, issue_number: int | None) -> str:
-    """The `<Title> - <ISO date>[ - n<number>].pdf` file name of an issue."""
+def canonical_filename(
+    title: str,
+    date: str,
+    issue_number: int | None,
+    volume: int | None = None,
+    variant: str | None = None,
+) -> str:
+    """The `<Title> - <ISO date>[ - [v<volume> ]n<number>][ - <variant>].pdf` file name.
+
+    ``volume`` is written only alongside a number — a volume with no issue to
+    go with it is not something the canonical grammar can read back, so it is
+    silently dropped rather than written where it could not be parsed again.
+    """
     name = f"{title} - {date}"
     if issue_number is not None:
-        name += f" - n{issue_number}"
+        if volume is not None:
+            name += f" - v{volume} n{issue_number}"
+        else:
+            name += f" - n{issue_number}"
+    if variant:
+        name += f" - {variant}"
     return f"{name}.pdf"
 
 
@@ -106,7 +122,10 @@ def plan_issue(issue: ParsedIssue) -> OrganizePlan:
     3. the only date found came from the file's modification time, a guess the
        canonical name must never bake in as if it were read off the file;
     4. the title itself is not a single, safe folder and file name component —
-       empty or blank, `.` or `..`, or containing a path separator.
+       empty or blank, `.` or `..`, or containing a path separator;
+    5. the variant itself contains ` - `, which the canonical grammar reads as
+       a field separator: writing it verbatim would produce a name the parser
+       could never read back to the same variant.
     """
     if issue.title_source == "unsorted":
         return Unsorted(reason=f'no configured title matches "{issue.derived_title}"')
@@ -116,7 +135,14 @@ def plan_issue(issue: ParsedIssue) -> OrganizePlan:
         return Unsorted(reason="date would come from the file's modification time")
     if not _is_safe_component(issue.title_name):
         return Unsorted(reason=f'title "{issue.title_name}" is not a valid folder name')
+    if issue.variant is not None and " - " in issue.variant:
+        return Unsorted(
+            reason=f'variant "{issue.variant}" contains " - ", which a canonical name '
+            "could not read back"
+        )
     date = iso_date(issue.issue_date, issue.date_precision)
     folder = canonical_folder(issue.title_name, issue.issue_date.year)
-    filename = canonical_filename(issue.title_name, date, issue.issue_number)
+    filename = canonical_filename(
+        issue.title_name, date, issue.issue_number, issue.volume, issue.variant
+    )
     return CanonicalPath(folder=folder, filename=filename)

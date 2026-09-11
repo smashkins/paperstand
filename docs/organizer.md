@@ -22,7 +22,7 @@ it, the libraries are auto-discovered from the top-level folders.
 ## The canonical layout it targets
 
 ```
-<Title>/<YYYY>/<Title> - <ISO date>[ - n<number>].pdf
+<Title>/<YYYY>/<Title> - <ISO date>[ - [v<volume> ]n<number>][ - <variant>].pdf
 ```
 
 - `Title` — the configured title, used verbatim as both the folder name and the start of the
@@ -31,6 +31,10 @@ it, the libraries are auto-discovered from the top-level folders.
   or `2026`. A precision the name and the folders do not support is never guessed at.
 - `n<number>` — the issue number, with no zero padding (`n8`, `n1655`), present only when the
   parser resolved one.
+- `v<volume>` — a volume, written only alongside a number: a volume with no issue number to
+  go with it would produce a name the parser could not read back, so it is dropped instead.
+- `<variant>` — a supplement or an edition, appended verbatim after the number when the name
+  carries one, declared in a `publication.yml` or not.
 
 A file the parser cannot place with confidence is reported **unsorted**, with a reason,
 rather than guessed at:
@@ -41,7 +45,9 @@ rather than guessed at:
   must never bake into a permanent name;
 - the title itself is not usable as a single folder and file name — empty or blank, `.` or
   `..`, or containing a path separator. A configured title is a free string, so this is
-  checked rather than assumed.
+  checked rather than assumed;
+- the variant itself contains ` - `, which the canonical grammar reads as a field separator:
+  writing it verbatim would produce a name the parser could not read back to the same variant.
 
 ## Reading the output
 
@@ -71,5 +77,6 @@ COLLISION Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
 
 This is a preview, nothing else. `organize-plan` never creates, moves, renames or deletes a
 file, and what it prints does not reach the running server, the database or the page cache
-in any way. A supplement or a variant, an edition folder, and any actual move of a file are
-not part of this command; they belong to later work on the canonical library layout.
+in any way. Resolving a name against an existing `publication.yml` folder, and any actual
+move of a file, are not part of this command yet; they belong to later work on the canonical
+library layout.

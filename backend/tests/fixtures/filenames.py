@@ -473,6 +473,20 @@ CONFIGURED: tuple[Expected, ...] = (
         derived="Confini",
         rule="pattern[0] title:config",
     ),
+    # A variant with no `publication.yml` to declare it against: undeclared,
+    # not rejected — an undeclared supplement is still catalogued (P1.2 design
+    # decision 2), only its rule tail says so.
+    Expected(
+        rel_path="Magazines/Confini/Confini - 2026 - n8 - Speciale.pdf",
+        title="Confini",
+        date="2026-01-01",
+        precision="year",
+        source="filename",
+        number=8,
+        derived="Confini",
+        rule="pattern[0] title:config variant:undeclared",
+        variant="Speciale",
+    ),
 )
 
 #: Files parsed with no configuration at all: auto-discovery does the work.
@@ -607,6 +621,20 @@ DISCOVERED: tuple[Expected, ...] = (
         derived="Random Mag",
         rule="pattern[0] title:pattern",
         title_source="pattern",
+    ),
+    # The canonical grammar's own volume: unlike the old `v<year> c<number>`
+    # shape, `ParsedIssue.volume` is actually populated here.
+    Expected(
+        rel_path="Zines/Bright Meadows - 2024-03 - v2024 n03.pdf",
+        title="Bright Meadows",
+        date="2024-03-01",
+        precision="month",
+        source="filename",
+        number=3,
+        derived="Bright Meadows",
+        rule="pattern[0] title:pattern",
+        title_source="pattern",
+        volume=2024,
     ),
 )
 
