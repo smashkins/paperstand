@@ -342,7 +342,7 @@ class Scanner:
                     unchanged.append(stored.id)
                     snapshot()
                     continue
-                publication = index.get(found.publication_dir) if found.publication_dir else None
+                publication = index.resolve(found.publication_dir, library, config)
                 try:
                     self._upsert(
                         connection,

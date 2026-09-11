@@ -95,7 +95,11 @@ def report_rows(root: Path, config: PaperstandConfig) -> list[tuple[str, ...]]:
     index.load_all(walk.publications)
     rows: list[tuple[str, ...]] = []
     for found in buffered:
-        publication = index.get(found.publication_dir) if found.publication_dir else None
+        library = config.library_for(found.rel_path)
+        if library is None:
+            # Belongs to no configured library: no profile runs on it at all.
+            continue
+        publication = index.resolve(found.publication_dir, library, config)
         issue = parse_file(found.rel_path, root, config, publication)
         if issue is None:
             continue

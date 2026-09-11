@@ -21,6 +21,7 @@ from paperstand.cli.parse import (
     missing_explicit_config,
     parse_file,
 )
+from paperstand.config import PaperstandConfig
 from paperstand.logging import get_logger
 from paperstand.organizer import Unsorted, plan_issue
 from paperstand.publication import PublicationIndex
@@ -31,29 +32,40 @@ log = get_logger(__name__)
 __all__ = ["organize_plan"]
 
 
-def _declared_title_folders(index: PublicationIndex, folders: dict[str, str]) -> dict[str, str]:
-    """Every declared title's own folder, keyed by the title it declares.
+def _declared_title_folders(
+    index: PublicationIndex, folders: dict[str, str], config: PaperstandConfig
+) -> dict[tuple[str, str], str]:
+    """Every declared title's own folder, keyed by (library name, title).
 
     Lets a file that is *not itself* inside a declared folder — a date-folder
     file whose configured title a `publication.yml` elsewhere also declares —
     plan into that folder too, the same way the scanner joins it to the same
-    title row. Two folders declaring the same title is a mistake worth a
-    warning, not a silent pick: the first one found while walking is kept.
+    title row. Keyed by the declaring library as well as the title, so two
+    libraries that happen to declare the same title never plan across a
+    library boundary; a folder belonging to no configured library declares
+    nothing here. Two folders in the *same* library declaring the same title
+    is a mistake worth a warning, not a silent pick: the first one found
+    while walking is kept.
     """
-    mapping: dict[str, str] = {}
+    mapping: dict[tuple[str, str], str] = {}
     for folder in folders:
         declared = index.get(folder)
         if declared is None:
             continue
-        existing = mapping.get(declared.title)
+        library = config.library_for(folder)
+        if library is None:
+            continue
+        key = (library.name, declared.title)
+        existing = mapping.get(key)
         if existing is None:
-            mapping[declared.title] = declared.folder
+            mapping[key] = declared.folder
         elif existing != declared.folder:
             log.warning(
-                "%r is declared by both %s and %s; %s wins",
+                "%r is declared by both %s and %s in library %r; %s wins",
                 declared.title,
                 existing,
                 declared.folder,
+                library.name,
                 existing,
             )
     return mapping
@@ -83,7 +95,7 @@ def organize_plan(
     buffered = list(walk)
     index = PublicationIndex(root)
     index.load_all(walk.publications)
-    title_folders = _declared_title_folders(index, walk.publications)
+    title_folders = _declared_title_folders(index, walk.publications, config)
 
     # Source paths grouped by the canonical path they resolve to, so that two
     # (or more) files landing on the same name can be reported together instead
@@ -94,13 +106,18 @@ def organize_plan(
     unsorted = 0
     for found in buffered:
         rel_path = found.rel_path
-        publication = index.get(found.publication_dir) if found.publication_dir else None
-        issue = parse_file(rel_path, root, config, publication)
-        if issue is None:
+        library = config.library_for(rel_path)
+        if library is None:
             # Belongs to no configured library: parse-report skips it the same
             # way, since no profile ran on it at all.
             continue
-        plan = plan_issue(issue, publication_folder=title_folders.get(issue.title_name))
+        publication = index.resolve(found.publication_dir, library, config)
+        issue = parse_file(rel_path, root, config, publication)
+        if issue is None:
+            continue
+        plan = plan_issue(
+            issue, publication_folder=title_folders.get((library.name, issue.title_name))
+        )
         if isinstance(plan, Unsorted):
             unsorted += 1
             print(f"{rel_path} -> unsorted: {plan.reason}", file=stream)

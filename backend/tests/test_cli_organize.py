@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from paperstand.__main__ import main
 from paperstand.cli.organize import organize_plan
@@ -212,6 +213,56 @@ def test_two_folders_declaring_the_same_title_warn_and_the_first_wins(
         and "Newspapers/Il Mattutino" in message
         for message in warnings
     )
+
+
+def test_two_libraries_declaring_the_same_title_plan_into_their_own_folders(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Two separate, configured libraries each declaring "Corriere del
+    Ponte" must never plan across the boundary between them: each library's
+    own file stays in its own declared folder, and neither is warned about
+    the other — unlike two folders colliding *inside* one library."""
+    root = tmp_path / "library"
+    for rel_path, content in (
+        ("Newspapers/Corriere del Ponte/publication.yml", "id: corriere-del-ponte\n"),
+        ("Extra/Corriere del Ponte/publication.yml", "id: corriere-del-ponte-extra\n"),
+    ):
+        target = root / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    newspapers_file = (
+        root / "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf"
+    )
+    extra_file = root / "Extra/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-18.pdf"
+    for path in (newspapers_file, extra_file):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.7\n")
+
+    config_path = tmp_path / "paperstand.yml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "libraries": [
+                    {"name": "Newspapers", "path": "Newspapers", "kind": "newspaper"},
+                    {"name": "Extra", "path": "Extra", "kind": "newspaper"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        out = io.StringIO()
+        assert organize_plan(root, config_path, out) == 0
+    text = out.getvalue()
+
+    assert (
+        "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf -> in place"
+    ) in text
+    assert ("Extra/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-18.pdf -> in place") in text
+    assert ", 2 in place," in text
+    warnings = [record.message for record in caplog.records if record.levelno >= logging.WARNING]
+    assert not any("Corriere del Ponte" in message for message in warnings)
 
 
 def test_it_never_writes_anything(sample_library: SampleLibrary) -> None:

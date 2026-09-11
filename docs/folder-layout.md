@@ -31,8 +31,9 @@ change it, is [`parser-profiles.md`](parser-profiles.md).
 A fifth arrangement, additive to the four above and to whatever else the library already
 holds: a folder anywhere under a library that contains a `publication.yml` is a **declared
 publication**, and every PDF beneath it, at any depth, belongs to the title it declares —
-never to Unsorted, whatever its own name looks like. Nested declarations: the nearest
-ancestor wins.
+never to Unsorted, whatever its own name looks like. Nested declarations: the nearest *valid*
+ancestor wins — a nested folder whose own `publication.yml` is malformed does not lose the
+declaration above it, it falls back to it.
 
 ```
 Newspapers/Corriere del Ponte/publication.yml
@@ -68,6 +69,11 @@ A few things worth knowing:
   all — nothing beneath it is skipped, it is simply parsed by the usual rules.
 - **A yml at the library root is ignored**, with a warning: a whole library cannot itself be
   "a publication".
+- **A declaration only applies inside the library it belongs to.** With an explicitly
+  configured nested library — `Collection/Magazines` inside `Collection` — a `publication.yml`
+  sitting in `Collection` is never inherited by files under `Collection/Magazines`: the two
+  are different libraries, and a declaration never crosses that boundary, however the folders
+  happen to nest on disk.
 
 ## Libraries
 

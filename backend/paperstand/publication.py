@@ -27,7 +27,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from paperstand.config import validation_message
+from paperstand.config import LibraryConfig, PaperstandConfig, validation_message
 from paperstand.logging import get_logger
 from paperstand.parsing.normalize import slugify
 
@@ -188,6 +188,45 @@ class PublicationIndex:
         result = self._load(folder)
         self._cache[folder] = result
         return result
+
+    def resolve(
+        self,
+        publication_dir: str | None,
+        library: LibraryConfig,
+        config: PaperstandConfig,
+    ) -> DeclaredPublication | None:
+        """The declaration that applies to a file under ``publication_dir``.
+
+        ``publication_dir`` is the nearest ancestor the walk noticed a
+        ``publication.yml`` in — whether or not that one turned out to be
+        valid, since the walker only records that a file is *there*, never
+        opens it. From there, ancestors are walked upward through :meth:`get`
+        (cached; it stats the folder) until one loads, so a folder whose own
+        yml is malformed still inherits a valid declaration from further up
+        instead of losing it outright.
+
+        A declaration found this way only applies inside the library it was
+        declared in: when the folder that actually holds it belongs to no
+        configured library, or to a library other than ``library``, it
+        contributes nothing here — an explicitly configured nested library
+        (``Collection/Magazines`` inside ``Collection``) never inherits a
+        declaration that belongs to the library above it.
+        """
+        if not publication_dir:
+            return None
+        parts = PurePosixPath(publication_dir).parts
+        declared: DeclaredPublication | None = None
+        for depth in range(len(parts), 0, -1):
+            found = self.get("/".join(parts[:depth]))
+            if found is not None:
+                declared = found
+                break
+        if declared is None:
+            return None
+        owner = config.library_for(declared.folder)
+        if owner is None or owner.name != library.name:
+            return None
+        return declared
 
     def nearest(self, rel_path: str) -> DeclaredPublication | None:
         """The nearest declaring ancestor of a file, probing the folders on disk.

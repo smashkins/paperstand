@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from paperstand.config import PaperstandConfig
 from paperstand.publication import (
     PUBLICATION_FILE,
     DeclaredPublication,
@@ -261,6 +262,75 @@ def test_nearest_wins_the_closest_declaration(tmp_path: Path) -> None:
     found = index.nearest("Newspapers/Corriere del Ponte/Corriere del Ponte - 2026-09-06.pdf")
     assert found is not None
     assert found.slug == "corriere-del-ponte"
+
+
+# --------------------------------------------------------------------- resolve
+
+
+def _config(*libraries: dict[str, object]) -> PaperstandConfig:
+    return PaperstandConfig.model_validate({"libraries": list(libraries)})
+
+
+def test_resolve_returns_none_with_no_publication_dir(tmp_path: Path) -> None:
+    config = _config({"name": "Newspapers", "path": "Newspapers"})
+    library = config.library_for("Newspapers/x.pdf")
+    assert library is not None
+    index = PublicationIndex(tmp_path)
+    assert index.resolve(None, library, config) is None
+
+
+def test_resolve_returns_its_own_folders_declaration(tmp_path: Path) -> None:
+    write(tmp_path, "Newspapers/Corriere del Ponte", "id: corriere-del-ponte\n")
+    config = _config({"name": "Newspapers", "path": "Newspapers"})
+    library = config.library_for("Newspapers/x.pdf")
+    assert library is not None
+    index = PublicationIndex(tmp_path)
+    declared = index.resolve("Newspapers/Corriere del Ponte", library, config)
+    assert declared is not None
+    assert declared.slug == "corriere-del-ponte"
+
+
+def test_resolve_falls_back_to_a_valid_ancestor_when_the_nearest_yml_is_malformed(
+    tmp_path: Path,
+) -> None:
+    """The walker only ever records the nearest folder holding a file, not
+    the nearest one that validates: `resolve` is what climbs past a broken
+    yml to the valid declaration above it."""
+    write(tmp_path, "A", "id: a\n")
+    write(tmp_path, "A/B", "frequenzy: monthly\n")
+    config = _config({"name": "A", "path": "A"})
+    library = config.library_for("A/B/x.pdf")
+    assert library is not None
+    index = PublicationIndex(tmp_path)
+
+    declared = index.resolve("A/B", library, config)
+
+    assert declared is not None
+    assert declared.folder == "A"
+    assert declared.slug == "a"
+
+
+def test_resolve_never_crosses_into_a_different_library(tmp_path: Path) -> None:
+    """An explicitly configured nested library does not inherit a
+    declaration that belongs to the library enclosing it."""
+    write(tmp_path, "Collection", "id: whole-collection\n")
+    config = _config(
+        {"name": "Collection", "path": "Collection"},
+        {"name": "Collection Magazines", "path": "Collection/Magazines"},
+    )
+    index = PublicationIndex(tmp_path)
+
+    nested = config.library_for("Collection/Magazines/x.pdf")
+    assert nested is not None
+    assert nested.name == "Collection Magazines"
+    assert index.resolve("Collection", nested, config) is None
+
+    outer = config.library_for("Collection/x.pdf")
+    assert outer is not None
+    assert outer.name == "Collection"
+    declared = index.resolve("Collection", outer, config)
+    assert declared is not None
+    assert declared.slug == "whole-collection"
 
 
 # --------------------------------------------------------------------- the digest

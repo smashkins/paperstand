@@ -960,6 +960,96 @@ def test_removing_a_publication_yml_reverts_to_the_configured_title(
     assert "title:config" in str(after[0]["matched_rule"])
 
 
+def test_a_declaration_does_not_cross_into_an_explicitly_configured_nested_library(
+    tmp_path: Path,
+) -> None:
+    """`Collection/publication.yml` belongs to the `Collection` library. A
+    PDF under the explicitly configured nested library `Collection/Magazines`
+    is inside the folder the walker still notices the yml in — nested
+    folders inherit a declaration by construction — but `library_for`'s
+    longest-prefix semantics put the file in the *other* library, and the
+    declaration must not cross that boundary."""
+    root = tmp_path / "library"
+    (root / "Collection").mkdir(parents=True)
+    (root / "Collection" / "publication.yml").write_text("id: whole-collection\n", encoding="utf-8")
+    folder = root / "Collection" / "Magazines" / "Confini" / "2026"
+    folder.mkdir(parents=True)
+    document = pymupdf.open()
+    document.new_page()
+    document.save(folder / "Confini - 2026-03.pdf")
+    document.close()
+
+    data = tmp_path / "data"
+    settings = quiet_settings(root, data)
+    settings.config_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.config_path.write_text(
+        yaml.safe_dump(
+            {
+                "libraries": [
+                    {"name": "Collection", "path": "Collection", "kind": "newspaper"},
+                    {
+                        "name": "Collection Magazines",
+                        "path": "Collection/Magazines",
+                        "kind": "magazine",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    row = query(
+        settings,
+        "SELECT t.name AS title, i.matched_rule FROM issues i "
+        "JOIN titles t ON t.id = i.title_id WHERE i.library_id = 'collection-magazines'",
+    )[0]
+    assert row["title"] == "Confini"
+    assert "title:publication" not in str(row["matched_rule"])
+
+
+def test_a_malformed_nested_yml_falls_back_to_the_valid_declaration_above_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`A/publication.yml` is valid, `A/B/publication.yml` is malformed: the
+    walker only ever notices the nearer file, so `A/B/x.pdf` must not simply
+    lose its declaration — it is filed under `A`'s, with one warning naming
+    `A/B`."""
+    root = tmp_path / "library"
+    folder_a = root / "Zines" / "A"
+    folder_b = folder_a / "B"
+    folder_b.mkdir(parents=True)
+    (folder_a / "publication.yml").write_text("id: a\n", encoding="utf-8")
+    (folder_b / "publication.yml").write_text("frequenzy: monthly\n", encoding="utf-8")
+    document = pymupdf.open()
+    document.new_page()
+    document.save(folder_b / "x.pdf")
+    document.close()
+
+    settings = quiet_settings(root, tmp_path / "data")
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert result.errors == 0
+    row = query(
+        settings,
+        "SELECT t.name AS title, t.slug AS slug, i.matched_rule FROM issues i "
+        "JOIN titles t ON t.id = i.title_id WHERE i.rel_path = 'Zines/A/B/x.pdf'",
+    )[0]
+    assert row["slug"] == "a"
+    assert "title:publication" in str(row["matched_rule"])
+    warnings = [
+        record.message
+        for record in caplog.records
+        if record.levelno >= logging.WARNING and "Zines/A/B" in record.message
+    ]
+    assert len(warnings) == 1
+    assert "frequenzy" in warnings[0]
+
+
 def test_issue_key_number_groups_same_numbered_issues_and_never_numberless_ones(
     tmp_path: Path,
 ) -> None:
