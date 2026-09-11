@@ -57,6 +57,7 @@ ISSUE_COLUMNS = """
     i.rel_path AS rel_path,
     i.filename AS filename,
     i.size AS size,
+    i.content_hash AS content_hash,
     i.mtime_ns AS mtime_ns,
     i.issue_date AS issue_date,
     i.date_precision AS date_precision,
@@ -123,10 +124,11 @@ def file_url(identifier: str) -> str:
 def pages_url_template(identifier: str, mtime_ns: int) -> str:
     """The template a reader fills in with a page number and a width.
 
-    Versioned like the covers are. The issue id is the hash of a *path*, so a
-    PDF replaced where an old one was keeps it, and without ``v`` a browser that
-    cached a page for a year would go on showing the old document's pages long
-    after the scan had thrown the server's copies away.
+    Versioned like the covers are. An id names one set of bytes for good — a
+    PDF replaced with different content is a new issue with a new id, never
+    this one — but the modification time still moves on a touch, so without
+    ``v`` a browser that cached a page for a year would go on trusting an
+    address the scan may since have thrown its server-side copy away from.
     """
     return f"/api/issues/{quote(identifier)}/pages/{{n}}.webp?w={{w}}&v={mtime_ns}"
 
@@ -166,6 +168,7 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         filename=str(row["filename"]),
         rel_path=str(row["rel_path"]),
         size=int(row["size"]),
+        content_hash=row["content_hash"],
         page_count=int(row["page_count"]) if row["page_count"] is not None else None,
         aspect=aspect,
         cover_url=cover_url(identifier, mtime_ns),

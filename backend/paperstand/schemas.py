@@ -86,6 +86,7 @@ class Issue(BaseModel):
     filename: str
     rel_path: str
     size: int
+    content_hash: str | None = None
     page_count: int | None = None
     aspect: Aspect | None = None
     cover_url: str
@@ -212,6 +213,13 @@ class ScanProgress(BaseModel):
     is ``covers_failed`` instead, so a bar or an "N of M" line wants
     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
     of that N were failures.
+
+    ``hashed`` counts every file this scan has read in full to compute a
+    content hash — a brand new file, a legacy row backfilled once, a touch
+    and a replacement alike. Right after an upgrade this is nearly every
+    file in the library, which is the only feedback while that one-time
+    backfill works through it; a later scan hashes only what actually
+    changed.
     """
 
     scan_id: int
@@ -223,6 +231,7 @@ class ScanProgress(BaseModel):
     updated: int
     removed: int
     errors: int
+    hashed: int
     covers_done: int
     covers_failed: int
     covers_total: int | None

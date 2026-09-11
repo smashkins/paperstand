@@ -96,6 +96,7 @@ def test_status_reports_the_running_scan_s_progress(
     assert current["phase"] == "catalogue"
     assert current["files_seen"] == 0
     assert current["added"] == 0
+    assert current["hashed"] == 0
     assert current["covers_done"] == 0
     assert current["covers_failed"] == 0
     assert current["covers_total"] is None

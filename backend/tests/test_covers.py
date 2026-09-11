@@ -16,6 +16,7 @@ from paperstand.scanner.covers import (
     clear_cache,
     cover_paths,
     has_cover,
+    move_cache,
     page_cache_dir,
     render_cover,
 )
@@ -89,3 +90,83 @@ def test_clearing_the_cache_removes_the_images_and_the_pages(
 
 def test_the_quality_is_the_documented_one() -> None:
     assert JPEG_QUALITY == 85
+
+
+# ------------------------------------------------------------------ move_cache
+
+
+def test_move_cache_moves_the_images_and_the_pages(
+    sample_library: SampleLibrary, tmp_path: Path
+) -> None:
+    cache = tmp_path / "cache"
+    render_cover(sample_library.path(A_NEWSPAPER), "1111111111111111", cache)
+    pages = page_cache_dir(cache, "1111111111111111")
+    pages.mkdir(parents=True)
+    (pages / "1-900.webp").write_bytes(b"page one")
+    cover, thumbnail = cover_paths(cache, "1111111111111111")
+    cover_bytes = cover.read_bytes()
+    thumbnail_bytes = thumbnail.read_bytes()
+
+    move_cache(cache, "1111111111111111", "2222222222222222")
+
+    assert not has_cover(cache, "1111111111111111")
+    assert not pages.exists()
+    assert has_cover(cache, "2222222222222222")
+    new_cover, new_thumbnail = cover_paths(cache, "2222222222222222")
+    assert new_cover.read_bytes() == cover_bytes
+    assert new_thumbnail.read_bytes() == thumbnail_bytes
+    new_pages = page_cache_dir(cache, "2222222222222222")
+    assert (new_pages / "1-900.webp").read_bytes() == b"page one"
+
+
+def test_move_cache_tolerates_a_missing_source(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    # Nothing was ever rendered for this id: moving it is not an error.
+    move_cache(cache, "0000000000000000", "1111111111111111")
+
+    assert not has_cover(cache, "0000000000000000")
+    assert not has_cover(cache, "1111111111111111")
+
+
+def test_move_cache_never_touches_another_ids_files(
+    sample_library: SampleLibrary, tmp_path: Path
+) -> None:
+    cache = tmp_path / "cache"
+    render_cover(sample_library.path(A_NEWSPAPER), "aaaaaaaaaaaaaaaa", cache)
+    render_cover(sample_library.path(A_NEWSPAPER), "bbbbbbbbbbbbbbbb", cache)
+    untouched_cover, untouched_thumb = cover_paths(cache, "bbbbbbbbbbbbbbbb")
+    untouched_cover_bytes = untouched_cover.read_bytes()
+    untouched_thumb_bytes = untouched_thumb.read_bytes()
+
+    move_cache(cache, "aaaaaaaaaaaaaaaa", "cccccccccccccccc")
+
+    assert has_cover(cache, "cccccccccccccccc")
+    assert has_cover(cache, "bbbbbbbbbbbbbbbb")
+    assert untouched_cover.read_bytes() == untouched_cover_bytes
+    assert untouched_thumb.read_bytes() == untouched_thumb_bytes
+
+
+def test_move_cache_lets_an_existing_target_win(
+    sample_library: SampleLibrary, tmp_path: Path
+) -> None:
+    """A target already rendered fresh under the new id is never clobbered."""
+    cache = tmp_path / "cache"
+    render_cover(sample_library.path(A_NEWSPAPER), "dddddddddddddddd", cache)
+    render_cover(sample_library.path(A_NEWSPAPER), "eeeeeeeeeeeeeeee", cache)
+    target_cover, target_thumb = cover_paths(cache, "eeeeeeeeeeeeeeee")
+    target_cover_bytes = target_cover.read_bytes()
+    target_thumb_bytes = target_thumb.read_bytes()
+    source_pages = page_cache_dir(cache, "dddddddddddddddd")
+    source_pages.mkdir(parents=True)
+    (source_pages / "1-900.webp").write_bytes(b"from the source")
+    target_pages = page_cache_dir(cache, "eeeeeeeeeeeeeeee")
+    target_pages.mkdir(parents=True)
+    (target_pages / "1-900.webp").write_bytes(b"already there")
+
+    move_cache(cache, "dddddddddddddddd", "eeeeeeeeeeeeeeee")
+
+    assert not has_cover(cache, "dddddddddddddddd")
+    assert not source_pages.exists()
+    assert target_cover.read_bytes() == target_cover_bytes
+    assert target_thumb.read_bytes() == target_thumb_bytes
+    assert (target_pages / "1-900.webp").read_bytes() == b"already there"

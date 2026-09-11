@@ -23,10 +23,18 @@ import yaml
 from PIL import Image
 
 from paperstand.config import Settings
-from paperstand.db import issue_id, open_database
-from paperstand.scanner.covers import CoverError, CoverResult, cover_paths, has_cover, render_cover
+from paperstand.db import open_database
+from paperstand.scanner.covers import (
+    CoverError,
+    CoverResult,
+    cover_paths,
+    has_cover,
+    page_cache_dir,
+    render_cover,
+)
+from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
-from tests.conftest import SampleLibrary, quiet_settings, write_sample_config
+from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
@@ -111,6 +119,8 @@ def test_the_first_scan_catalogues_every_file(
     assert result.files_seen == library.catalogued_files
     assert result.added == library.catalogued_files
     assert (result.updated, result.removed) == (0, 0)
+    # Every file is new, so the hashing pre-pass reads every one of them.
+    assert result.hashed == library.catalogued_files
     assert len(rel_paths(settings)) == library.catalogued_files
 
 
@@ -288,7 +298,7 @@ def test_deleting_a_file_removes_its_row_and_its_cache(
     scan_settings: Settings, sample_library: SampleLibrary
 ) -> None:
     scan_once(scan_settings)
-    identifier = issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
     assert has_cover(scan_settings.cache_path, identifier)
     sample_library.path(A_NEWSPAPER).unlink()
 
@@ -299,13 +309,17 @@ def test_deleting_a_file_removes_its_row_and_its_cache(
     assert not has_cover(scan_settings.cache_path, identifier)
 
 
-def test_a_changed_file_is_reparsed_and_its_cover_regenerated(
+def test_a_changed_file_is_a_replacement_with_a_new_id_and_no_progress(
     scan_settings: Settings,
     sample_library: SampleLibrary,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Content identity, no exception: different bytes at the same path is a
+    new issue, not the old one re-rendered. The old id's cache and reading
+    position are gone with it; the new id starts with neither."""
     scan_once(scan_settings)
-    identifier = issue_id(A_NEWSPAPER)
+    old_identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    set_progress(scan_settings, old_identifier, 3)
     target = sample_library.path(A_NEWSPAPER)
     with target.open("ab") as handle:
         handle.write(b"\n% one more byte\n")
@@ -319,15 +333,24 @@ def test_a_changed_file_is_reparsed_and_its_cover_regenerated(
 
     monkeypatch.setattr("paperstand.scanner.scanner.render_cover", counting)
     result = scan_once(scan_settings)
+    new_identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
 
-    assert (result.added, result.updated, result.removed) == (0, 1, 0)
-    assert rendered == [identifier]
-    row = query(scan_settings, "SELECT size, cover_status FROM issues WHERE id = ?", (identifier,))[
-        0
-    ]
+    assert new_identifier != old_identifier
+    assert (result.added, result.updated, result.removed) == (1, 0, 1)
+    assert rendered == [new_identifier]
+    assert not query(scan_settings, "SELECT id FROM issues WHERE id = ?", (old_identifier,))
+    row = query(
+        scan_settings, "SELECT size, cover_status FROM issues WHERE id = ?", (new_identifier,)
+    )[0]
     assert row["size"] == info.st_size
     assert row["cover_status"] == "ok"
-    assert has_cover(scan_settings.cache_path, identifier)
+    assert has_cover(scan_settings.cache_path, new_identifier)
+    assert not has_cover(scan_settings.cache_path, old_identifier)
+    # The old position is orphaned, not deleted — where every orphaned
+    # position stays, in case those exact bytes ever come back — and the new
+    # issue starts with none of its own.
+    assert progress_of(scan_settings, old_identifier) == 3
+    assert progress_of(scan_settings, new_identifier) is None
 
 
 def test_changing_the_configuration_reassigns_titles_without_rendering(
@@ -379,6 +402,413 @@ def test_dropping_a_library_from_the_configuration_forgets_its_issues(
     assert issues_in(scan_settings, "zines") == 0
     assert title_names(scan_settings, "zines") == set()
     assert not query(scan_settings, "SELECT id FROM libraries WHERE id = 'zines'")
+
+
+# --------------------------------------------------------------- content identity
+
+
+def test_a_rename_within_the_folder_keeps_identity(
+    scan_settings: Settings, sample_library: SampleLibrary
+) -> None:
+    scan_once(scan_settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    set_progress(scan_settings, identifier, 3)
+    cover, _ = cover_paths(scan_settings.cache_path, identifier)
+    cover_bytes = cover.read_bytes()
+    pages = page_cache_dir(scan_settings.cache_path, identifier)
+    pages.mkdir(parents=True, exist_ok=True)
+    (pages / "1-900.webp").write_bytes(b"cached page")
+
+    original = sample_library.path(A_NEWSPAPER)
+    renamed = original.with_name("Corriere_del_Ponte_renamed.pdf")
+    original.rename(renamed)
+
+    result = scan_once(scan_settings)
+
+    assert (result.added, result.removed) == (0, 0)
+    new_rel_path = f"{A_NEWSPAPER.rsplit('/', 1)[0]}/{renamed.name}"
+    row = query(scan_settings, "SELECT id, rel_path FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["rel_path"] == new_rel_path
+    assert cover.read_bytes() == cover_bytes
+    assert (pages / "1-900.webp").is_file()
+    assert progress_of(scan_settings, identifier) == 3
+
+
+def test_a_move_to_another_folder_keeps_identity_and_reparses_the_title(
+    tmp_path: Path,
+) -> None:
+    """A move is the same issue wherever it lands: its title comes from
+    wherever it lands now, exactly as a fresh file's would."""
+    root = tmp_path / "library"
+    first_folder = root / "Zines" / "First Folder"
+    first_folder.mkdir(parents=True)
+    pdf_path = first_folder / "issue.pdf"
+    document = pymupdf.open()
+    document.new_page()
+    document.save(pdf_path)
+    document.close()
+
+    title_query = (
+        "SELECT i.id AS id, i.rel_path AS rel_path, t.name AS title_name "
+        "FROM issues i JOIN titles t ON t.id = i.title_id"
+    )
+    settings = quiet_settings(root, tmp_path / "data")
+    first_result = scan_once(settings)
+    assert first_result.added == 1
+    before = query(settings, title_query)[0]
+    identifier = str(before["id"])
+    assert before["title_name"] == "First Folder"
+    set_progress(settings, identifier, 2)
+    cover, _ = cover_paths(settings.cache_path, identifier)
+    cover_bytes = cover.read_bytes()
+
+    second_folder = root / "Zines" / "Second Folder"
+    second_folder.mkdir(parents=True)
+    new_path = second_folder / "issue.pdf"
+    pdf_path.rename(new_path)
+
+    result = scan_once(settings)
+
+    assert (result.added, result.removed) == (0, 0)
+    assert result.updated == 1
+    row = query(settings, f"{title_query} WHERE i.id = ?", (identifier,))[0]
+    assert row["rel_path"] == "Zines/Second Folder/issue.pdf"
+    assert row["title_name"] == "Second Folder"
+    assert cover.read_bytes() == cover_bytes
+    assert progress_of(settings, identifier) == 2
+
+
+def test_a_touch_reports_updated_and_renders_nothing(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_once(scan_settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    cover, _ = cover_paths(scan_settings.cache_path, identifier)
+    cover_mtime = cover.stat().st_mtime_ns
+
+    target = sample_library.path(A_NEWSPAPER)
+    payload = target.read_bytes()
+    future = target.stat().st_mtime + 120
+    os.utime(target, (future, future))
+    assert target.read_bytes() == payload  # only the stat moved
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a touch must never render a cover")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert (result.added, result.removed) == (0, 0)
+    assert result.updated == 1
+    assert cover.stat().st_mtime_ns == cover_mtime
+    row = query(scan_settings, "SELECT mtime_ns FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["mtime_ns"] == target.stat().st_mtime_ns
+
+
+def test_two_files_swapping_paths_keep_their_identities(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path swap (or a rotation) looks, to pass one, like two independent
+    replacements: each old row is deleted the moment its path is found to
+    hold different bytes. Pass two must still tell that apart from an actual
+    replacement — the bytes it lost are exactly the bytes another queued file
+    gained — and reunite each with its old id, cache and reading position
+    rather than adding two fresh rows and removing two old ones."""
+    scan_once(scan_settings)
+    rows = query(
+        scan_settings,
+        "SELECT i.id, i.rel_path FROM issues i JOIN titles t ON t.id = i.title_id "
+        "WHERE t.name = 'Corriere del Ponte' ORDER BY i.rel_path LIMIT 2",
+    )
+    assert len(rows) == 2
+    id_a, rel_a = str(rows[0]["id"]), str(rows[0]["rel_path"])
+    id_b, rel_b = str(rows[1]["id"]), str(rows[1]["rel_path"])
+    set_progress(scan_settings, id_a, 3)
+    set_progress(scan_settings, id_b, 7)
+    cover_a, _ = cover_paths(scan_settings.cache_path, id_a)
+    cover_b, _ = cover_paths(scan_settings.cache_path, id_b)
+    mtime_a = cover_a.stat().st_mtime_ns
+    mtime_b = cover_b.stat().st_mtime_ns
+
+    path_a = sample_library.path(rel_a)
+    path_b = sample_library.path(rel_b)
+    temp = path_a.with_name("swap-temp.pdf")
+    path_a.rename(temp)
+    path_b.rename(path_a)
+    temp.rename(path_b)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a path swap must never render a cover")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert (result.added, result.removed) == (0, 0)
+    now_at_a = query(scan_settings, "SELECT id FROM issues WHERE rel_path = ?", (rel_a,))[0]
+    now_at_b = query(scan_settings, "SELECT id FROM issues WHERE rel_path = ?", (rel_b,))[0]
+    assert now_at_a["id"] == id_b
+    assert now_at_b["id"] == id_a
+    assert progress_of(scan_settings, id_a) == 3
+    assert progress_of(scan_settings, id_b) == 7
+    assert cover_a.stat().st_mtime_ns == mtime_a
+    assert cover_b.stat().st_mtime_ns == mtime_b
+    assert has_cover(scan_settings.cache_path, id_a)
+    assert has_cover(scan_settings.cache_path, id_b)
+
+
+def _make_legacy(settings: Settings) -> dict[str, str]:
+    """Rewrite every catalogued issue's id to a ``legacy-<n>`` placeholder
+    with no content hash, renaming its cache files to match — a stand-in for
+    a database written before schema 3, without running a migration on it."""
+    connection = sqlite3.connect(settings.db_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute("SELECT id, rel_path FROM issues ORDER BY rel_path").fetchall()
+        mapping = {str(row["id"]): f"legacy-{index}" for index, row in enumerate(rows)}
+        with connection:
+            # Cleared before any id moves: SQLite refuses to change a primary
+            # key another row's `duplicate_of` still references.
+            connection.execute("UPDATE issues SET duplicate_of = NULL")
+            for old, new in mapping.items():
+                connection.execute(
+                    "UPDATE issues SET id = ?, content_hash = NULL WHERE id = ?", (new, old)
+                )
+    finally:
+        connection.close()
+
+    for old, new in mapping.items():
+        old_cover, old_thumb = cover_paths(settings.cache_path, old)
+        new_cover, new_thumb = cover_paths(settings.cache_path, new)
+        for source, target in ((old_cover, new_cover), (old_thumb, new_thumb)):
+            if source.is_file():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+        old_pages = page_cache_dir(settings.cache_path, old)
+        if old_pages.is_dir():
+            new_pages = page_cache_dir(settings.cache_path, new)
+            new_pages.parent.mkdir(parents=True, exist_ok=True)
+            old_pages.rename(new_pages)
+    return mapping
+
+
+def test_a_legacy_row_whose_file_changed_meanwhile_is_rendered_again(
+    scan_settings: Settings, sample_library: SampleLibrary
+) -> None:
+    """A legacy row has no hash to compare against, so a file whose stat moved
+    since the last pre-upgrade scan may well hold different bytes: its cover
+    is rendered again, while every other legacy row keeps the cover it had."""
+    scan_once(scan_settings)
+    _make_legacy(scan_settings)
+    target = sample_library.path(A_NEWSPAPER)
+    with target.open("ab") as handle:
+        handle.write(b"\n%% changed before the upgrade scan\n")
+
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    assert result.hashed == sample_library.catalogued_files
+    assert result.covers_done == 1
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    assert has_cover(scan_settings.cache_path, identifier)
+    row = query(scan_settings, "SELECT cover_status FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["cover_status"] == "ok"
+
+
+def test_a_legacy_catalogue_is_backfilled_once_and_stays_quick_after(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one-time migration: every legacy row gets the id its content always
+    implied, its cache is moved rather than re-rendered, a reading position
+    and an already-resolved duplicate pair both survive the rewrite, and a
+    second scan — with nothing left to hash — is as quick as any other
+    unchanged one."""
+    first = scan_once(scan_settings)
+    assert first.added == sample_library.catalogued_files
+    duplicate_pairs = {
+        str(row["rel_path"]): str(row["duplicate_of"])
+        for row in query(
+            scan_settings,
+            "SELECT rel_path, duplicate_of FROM issues WHERE duplicate_of IS NOT NULL",
+        )
+    }
+    assert duplicate_pairs, "the sample library always has at least one dedup-suffixed copy"
+    loser_rel, winner_id_before = next(iter(duplicate_pairs.items()))
+    winner_rel = str(
+        query(scan_settings, "SELECT rel_path FROM issues WHERE id = ?", (winner_id_before,))[0][
+            "rel_path"
+        ]
+    )
+
+    mapping = _make_legacy(scan_settings)
+    loser_legacy = mapping[sample_issue_id(sample_library.root, loser_rel)]
+    winner_legacy = mapping[sample_issue_id(sample_library.root, winner_rel)]
+    progress_legacy = mapping[sample_issue_id(sample_library.root, A_NEWSPAPER)]
+    set_progress(scan_settings, progress_legacy, 4)
+
+    # Re-established on the legacy ids: exactly what an upgraded catalogue
+    # would hold, and the one case `_rewrite_id` has to clear a `duplicate_of`
+    # for before it can rename the row it points at.
+    connection = sqlite3.connect(scan_settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET duplicate_of = ? WHERE id = ?", (winner_legacy, loser_legacy)
+            )
+    finally:
+        connection.close()
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a legacy row's bytes did not change; nothing should be rendered")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    assert result.added == 0
+    assert result.hashed == sample_library.catalogued_files
+    assert result.updated == sample_library.catalogued_files
+
+    for row in query(scan_settings, "SELECT id, rel_path, content_hash FROM issues"):
+        expected = sample_issue_id(sample_library.root, str(row["rel_path"]))
+        assert str(row["id"]) == expected
+        assert row["content_hash"] is not None and len(row["content_hash"]) == 64
+
+    new_progress_id = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    assert progress_of(scan_settings, new_progress_id) == 4
+    assert progress_of(scan_settings, progress_legacy) is None
+    assert has_cover(scan_settings.cache_path, new_progress_id)
+
+    new_winner_id = sample_issue_id(sample_library.root, winner_rel)
+    after = query(
+        scan_settings, "SELECT duplicate_of FROM issues WHERE rel_path = ?", (loser_rel,)
+    )[0]
+    assert after["duplicate_of"] == new_winner_id
+
+    started = time.perf_counter()
+
+    def unexpected(*args: object, **kwargs: object) -> str:
+        raise AssertionError("a fully hashed catalogue must never rehash a file")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.content_hash", unexpected)
+    again = scan_once(scan_settings)
+    elapsed = time.perf_counter() - started
+
+    assert (again.added, again.updated, again.removed, again.hashed) == (0, 0, 0, 0)
+    assert elapsed < 0.5
+
+
+def test_hashing_a_legacy_backfill_never_holds_the_write_lock(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every hash the fast phase needs is computed before its transaction
+    opens, so a whole library's worth of legacy rows can be read without ever
+    holding SQLite's writer lock — a concurrent write, `PUT
+    /api/issues/{id}/progress` among them, must never wait behind it."""
+    scan_once(scan_settings)
+    _make_legacy(scan_settings)
+
+    calls = 0
+    locked: list[str] = []
+
+    def checked(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        probe = sqlite3.connect(scan_settings.db_path)
+        try:
+            probe.execute("PRAGMA busy_timeout = 200")
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.execute("ROLLBACK")
+            except sqlite3.OperationalError as error:
+                locked.append(str(error))
+        finally:
+            probe.close()
+        return content_hash(path)
+
+    monkeypatch.setattr("paperstand.scanner.scanner.content_hash", checked)
+    result = scan_once(scan_settings)
+
+    assert calls == sample_library.catalogued_files
+    assert not locked, f"the write lock was held during {len(locked)} of {calls} hash(es)"
+    assert result.status == "ok"
+    assert result.hashed == sample_library.catalogued_files
+
+
+# ------------------------------------------------------------ two-level duplicates
+
+
+def test_a_byte_identical_copy_elsewhere_is_duplicate_of_the_original(
+    scan_settings: Settings, sample_library: SampleLibrary
+) -> None:
+    """Identity is content: a plain-named copy dropped in an unrelated
+    folder is still resolved as a duplicate of the original — and needed a
+    `_unique`-suffixed id of its own in the first place, since the bytes are
+    identical."""
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    original_id = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_row = query(
+        scan_settings, "SELECT id, duplicate_of FROM issues WHERE rel_path = ?", (copy_rel,)
+    )[0]
+    assert copy_row["id"] == f"{original_id}-2"
+    assert copy_row["duplicate_of"] == original_id
+    winner_row = query(
+        scan_settings, "SELECT duplicate_of FROM issues WHERE id = ?", (original_id,)
+    )[0]
+    assert winner_row["duplicate_of"] is None
+
+
+def test_a_chain_of_duplicates_is_flattened_and_progress_walks_it(tmp_path: Path) -> None:
+    """A row that wins the content level can still lose the title level: the
+    stored pointer always skips straight to the final winner, and a reading
+    position set on the deepest loser walks the whole chain within one scan."""
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Chain"
+    folder.mkdir(parents=True)
+    (folder / "publication.yml").write_text("issue_key: number\n", encoding="utf-8")
+    payload = b"%PDF-1.7\n" + b"x" * 300
+    (folder / "Chain - 2026-01-01 - n1.pdf").write_bytes(payload)
+    (folder / "Chain - 2026-01-03 - n1.pdf").write_bytes(payload + b"a bigger, different file")
+
+    settings = quiet_settings(root, tmp_path / "data")
+    first_scan = scan_once(settings)
+    assert first_scan.status == "ok"
+    rows = {
+        str(row["rel_path"]): dict(row)
+        for row in query(settings, "SELECT rel_path, id, duplicate_of FROM issues")
+    }
+    first_id = str(rows["Zines/Chain/Chain - 2026-01-01 - n1.pdf"]["id"])
+    bigger_id = str(rows["Zines/Chain/Chain - 2026-01-03 - n1.pdf"]["id"])
+    # The number alone decides the group: the bigger file already wins it.
+    assert rows["Zines/Chain/Chain - 2026-01-01 - n1.pdf"]["duplicate_of"] == bigger_id
+    assert rows["Zines/Chain/Chain - 2026-01-03 - n1.pdf"]["duplicate_of"] is None
+
+    # A byte-identical copy of the level-one loser, at a path sorting after
+    # it: `_unique` gives it the next free suffix on `first`'s own id.
+    second_id = f"{first_id}-2"
+    set_progress(settings, second_id, 2)
+    (folder / "Chain - 2026-01-02 - n1.pdf").write_bytes(payload)
+
+    second_scan = scan_once(settings)
+
+    assert second_scan.status == "ok"
+    row = query(
+        settings,
+        "SELECT id, duplicate_of FROM issues WHERE rel_path = ?",
+        ("Zines/Chain/Chain - 2026-01-02 - n1.pdf",),
+    )[0]
+    assert row["id"] == second_id
+    # Flattened: the copy points straight at the title-level winner, never at
+    # `first`, which only ever won the content level.
+    assert row["duplicate_of"] == bigger_id
+    assert progress_of(settings, bigger_id) == 2
+    assert progress_of(settings, first_id) is None
+    assert progress_of(settings, second_id) is None
 
 
 # ------------------------------------------------------------------- resilience
@@ -484,7 +914,10 @@ def test_an_unreadable_folder_keeps_the_rows_underneath_it(
     assert result.errors >= 1
     assert "could not be read" in (result.message or "")
     assert sorted(rel_paths(scan_settings)) == sorted(before)
-    assert all(has_cover(scan_settings.cache_path, issue_id(path)) for path in hidden)
+    assert all(
+        has_cover(scan_settings.cache_path, sample_issue_id(sample_library.root, path))
+        for path in hidden
+    )
 
 
 def test_colliding_library_names_fail_the_scan_instead_of_misfiling(
@@ -572,15 +1005,21 @@ def stage_a_copy(sample_library: SampleLibrary, data_dir: Path) -> tuple[Path, P
     The copy carries a duplicate suffix, so once the original is back the
     original wins and the copy becomes the duplicate — which is exactly the
     order of events a reader would hit: read a file, then have a better copy of
-    the same issue turn up.
+    the same issue turn up. A trailing comment keeps the copy's bytes — and so
+    its id — distinct from the original's: what makes the two duplicates is
+    the date and the title they share, not identical content.
     """
     original = sample_library.path(A_NEWSPAPER)
     copy = original.with_name(f"{original.stem} (1){original.suffix}")
     shutil.copyfile(original, copy)
+    with copy.open("ab") as handle:
+        handle.write(b"\n% a distinct copy\n")
+    copy_rel = f"{A_NEWSPAPER.rsplit('/', 1)[0]}/{copy.name}"
+    loser = sample_issue_id(sample_library.root, copy_rel)
+    winner = sample_issue_id(sample_library.root, A_NEWSPAPER)
     parked = data_dir / "parked.pdf"
     shutil.move(str(original), parked)
-    copy_rel = f"{A_NEWSPAPER.rsplit('/', 1)[0]}/{copy.name}"
-    return original, parked, issue_id(copy_rel), issue_id(A_NEWSPAPER)
+    return original, parked, loser, winner
 
 
 def test_a_reading_position_follows_a_copy_onto_the_issue_that_wins(
@@ -619,6 +1058,39 @@ def test_a_position_already_set_on_the_winner_is_never_overwritten(
 
     assert progress_of(settings, winner) == 3
     assert progress_of(settings, loser) == 5
+
+
+def test_deleting_the_winner_s_progress_is_not_resurrected_by_a_later_scan(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """A reader deletes the winner's own progress through the API. The
+    duplicate relationship itself does not change on the next scan, so that
+    scan must never mistake the loser's still-retained, stale position for
+    something newly worth migrating back onto the winner."""
+    settings = quiet_settings(sample_library.root, data_dir)
+    write_sample_config(settings.config_path)
+    original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
+
+    scan_once(settings)
+    set_progress(settings, loser, 5)
+    set_progress(settings, winner, 3)
+
+    shutil.move(str(parked), original)
+    scan_once(settings)
+    assert progress_of(settings, winner) == 3
+    assert progress_of(settings, loser) == 5
+
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute("DELETE FROM reading_progress WHERE issue_id = ?", (winner,))
+    finally:
+        connection.close()
+    assert progress_of(settings, winner) is None
+
+    scan_once(settings)
+
+    assert progress_of(settings, winner) is None
 
 
 # --------------------------------------------------------------------- progress

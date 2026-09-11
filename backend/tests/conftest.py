@@ -31,6 +31,7 @@ from fastapi.testclient import TestClient
 from paperstand.config import Settings
 from paperstand.db import issue_id
 from paperstand.main import create_app
+from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -182,9 +183,11 @@ def scanned_data(sample_source: SampleLibrary, tmp_path_factory: pytest.TempPath
     """A ``/data`` holding the sample library already catalogued.
 
     Scanning means opening a hundred PDFs, so it is done once for the whole
-    session and copied per test. The catalogue only ever refers to a file by its
-    path *relative* to the library root, so the copy is just as valid against
-    each test's private copy of the library as it was against the original.
+    session and copied per test. An issue's id is derived from its bytes, and
+    ``shutil.copytree`` preserves both the bytes and the modification time, so
+    every id — and every unchanged row — in this catalogue is exactly as valid
+    against each test's private copy of the library as it was against the
+    original.
     """
     data = tmp_path_factory.mktemp("scanned") / "data"
     data.mkdir(parents=True)
@@ -213,9 +216,15 @@ def catalogue_client(catalogue_settings: Settings) -> Iterator[TestClient]:
         yield test_client
 
 
-def sample_issue_id(rel_path: str) -> str:
-    """The id a scan gives the file at ``rel_path``."""
-    return issue_id(rel_path)
+def sample_issue_id(root: Path, rel_path: str) -> str:
+    """The id a scan gives the file at ``rel_path``, hashing it directly.
+
+    The scanner derives an issue's id from its content, not its path, so
+    computing the id a test expects means hashing the same bytes the scanner
+    would have hashed — from wherever this test's own copy of the library
+    put them.
+    """
+    return issue_id(content_hash(root / rel_path))
 
 
 @pytest.fixture

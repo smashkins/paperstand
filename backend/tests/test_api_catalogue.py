@@ -349,15 +349,17 @@ def test_the_limit_is_capped(catalogue_client: TestClient) -> None:
 
 
 def test_an_issue_carries_its_urls_its_rule_and_its_neighbours(
-    catalogue_client: TestClient,
+    catalogue_client: TestClient, catalogue_settings: Settings
 ) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
 
     issue = catalogue_client.get(f"/api/issues/{identifier}").json()
 
     assert issue["id"] == identifier
     assert issue["title_name"] == "Corriere del Ponte"
     assert issue["kind"] == "newspaper"
+    assert issue["content_hash"] is not None and len(issue["content_hash"]) == 64
+    assert issue["id"] == issue["content_hash"][:16]
     assert issue["issue_date"] == SAMPLE_TODAY.isoformat()
     assert issue["date_precision"] == "day"
     assert issue["rel_path"] == A_NEWSPAPER

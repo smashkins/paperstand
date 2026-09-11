@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `organize-plan` plans a declared title's files into its own folder, named
   after the folder's own basename, and prints `-> in place` for a file
   already shaped that way; the summary gains that count.
+- `Issue` gains `content_hash`, the file's full SHA-256; `ScanProgress` gains
+  `hashed`, how many files the running scan has read in full to compute a
+  content hash — new, touched or genuinely changed, and a legacy row
+  backfilled once.
 
 ### Changed
 
@@ -38,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the folder it sits in now has the name win: `Title - 2026-03.pdf` in a
   folder-titled layout used to take its title from the folder, and now takes
   it from the name, matching every other layout.
+- An issue's id now derives from its content, not its path — see
+  [`folder-layout.md`](docs/folder-layout.md#identity). The first scan after
+  upgrading rewrites every id once: a bookmarked reader URL and an OPDS
+  entry's `urn:paperstand:issue:` change once, but every cover is renamed
+  rather than re-rendered. After that, renaming or moving a file anywhere in
+  its own library keeps its id, its cover, its cached pages and its reading
+  position; a byte-identical copy is a duplicate of the original wherever it
+  sits in the library, whatever it is called; touching a file without
+  changing its bytes no longer re-renders anything; a file replaced with
+  different bytes is a new issue.
 
 ## [0.2.1] - 2026-09-08
 

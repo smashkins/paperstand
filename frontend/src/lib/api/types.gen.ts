@@ -442,6 +442,8 @@ export interface components {
 			/** Added At */
 			added_at: string;
 			aspect?: components['schemas']['Aspect'] | null;
+			/** Content Hash */
+			content_hash?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -501,6 +503,8 @@ export interface components {
 			/** Added At */
 			added_at: string;
 			aspect?: components['schemas']['Aspect'] | null;
+			/** Content Hash */
+			content_hash?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -655,6 +659,13 @@ export interface components {
 		 *     is ``covers_failed`` instead, so a bar or an "N of M" line wants
 		 *     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
 		 *     of that N were failures.
+		 *
+		 *     ``hashed`` counts every file this scan has read in full to compute a
+		 *     content hash — a brand new file, a legacy row backfilled once, a touch
+		 *     and a replacement alike. Right after an upgrade this is nearly every
+		 *     file in the library, which is the only feedback while that one-time
+		 *     backfill works through it; a later scan hashes only what actually
+		 *     changed.
 		 */
 		ScanProgress: {
 			/** Added */
@@ -671,6 +682,8 @@ export interface components {
 			errors: number;
 			/** Files Seen */
 			files_seen: number;
+			/** Hashed */
+			hashed: number;
 			/**
 			 * Phase
 			 * @enum {string}

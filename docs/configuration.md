@@ -47,6 +47,14 @@ catalogue — it is what makes a new issue appear, and on a few thousand files i
 fractions of a second. The slow one rasterises the covers of everything new, and it is the
 one worth giving more workers on a machine that has cores to spare.
 
+An issue's id is the hash of its content, not its path (see [Identity](folder-layout.md#identity)).
+Computing a hash means reading the whole file, and `hashed` in `GET /api/scan/status` counts
+every file a scan reads for one — new, touched or genuinely changed, and a legacy row backfilled
+once — before the catalogue is written. The first scan after upgrading to a build with
+content-hash identity reads nearly every file in the library this way, and `hashed` is the only
+feedback while that one-time backfill works through it. A second scan hashes only what actually
+changed: an untouched file costs the fast phase nothing.
+
 ### Rendering and the page cache
 
 | Variable | Default | What it does |

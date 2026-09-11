@@ -46,6 +46,10 @@ A few details worth knowing:
   [`publication.yml`](folder-layout.md#declared-publications) sets `language` carries it on
   its own entry and on every one of its issues; a title with no declared language, or no
   `publication.yml` at all, carries no `dc:language` element.
+- **The entry id follows the file's content**, not its path (see
+  [Identity](folder-layout.md#identity)). A file renamed or moved anywhere else in its
+  library keeps its `urn:paperstand:issue:` — a client never sees it as a new entry — while a
+  copy re-downloaded with different bytes is a new issue with a new one.
 
 Each issue entry carries its cover, its thumbnail and one acquisition link to the PDF:
 

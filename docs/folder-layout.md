@@ -166,6 +166,25 @@ parsing and recorded as `has_dedup_suffix`, so both copies parse to the same iss
 catalogue can tell which one is the extra. A trailing `-03` right after a year is treated
 as a month, not as a copy counter: `Circuito_2026-03.pdf` is a March issue.
 
+## Identity
+
+An issue is its bytes, not its path. The id is the first sixteen hexadecimal characters of
+the file's SHA-256, taken over the whole file — never its name, its folder or when it last
+changed. Renaming a file, or moving it anywhere else under its own library, keeps its id, its
+cover, its cached pages and its reading position; only the title it is filed under is
+re-derived from wherever it landed, the same as a freshly discovered file's would be. A
+byte-identical copy is a duplicate of the original wherever it turns up in the library,
+whatever it is called. A file replaced with different bytes at the same path is a new issue —
+it inherits nothing from what was there before, and the old reading position is left exactly
+where every orphaned position is left, in case those bytes ever come back. Touching a file —
+a new modification time, the same content — renders nothing again.
+
+The first scan after upgrading to this identity model hashes every file once, to learn the
+ids that used to come from a path alone; a second scan hashes nothing. A file moved *before*
+that first scan runs cannot be recognised as a move — the row it used to be has no hash yet
+to compare against — and is read as a deletion plus an arrival, the same as it always was:
+scan once before reorganising a library.
+
 ## What is skipped
 
 Everywhere in the library root, always:
