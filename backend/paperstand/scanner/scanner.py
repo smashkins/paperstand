@@ -1115,11 +1115,22 @@ class Scanner:
                 updates.append((duplicate_of, identifier))
         connection.executemany("UPDATE issues SET duplicate_of = ? WHERE id = ?", updates)
 
-        # Hash pairs first, then key pairs: a position moved onto a row that
-        # then turns out to be a duplicate itself is picked straight back up
-        # by the second call, walking the whole chain within one scan.
-        Scanner._migrate_progress(connection, hash_pairs)
-        Scanner._migrate_progress(connection, key_pairs)
+        # Only a row whose flattened `duplicate_of` just changed needs its
+        # progress looked at. A pointer that is stable from one scan to the
+        # next means either there is nothing left to migrate, or a reader has
+        # since cleared the winner's own position on purpose — and a scan must
+        # never silently resurrect a loser's stale one onto it. `updates`
+        # already carries the flattened (root) winner, so a row resolved at
+        # both levels in the same scan migrates straight to its final winner
+        # in one hop, never through an intermediate that may not itself have
+        # changed; hash-level changes move first, then key-level ones.
+        changed = [(winner, loser) for winner, loser in updates if winner is not None]
+        Scanner._migrate_progress(
+            connection, [(winner, loser) for winner, loser in changed if loser in losers]
+        )
+        Scanner._migrate_progress(
+            connection, [(winner, loser) for winner, loser in changed if loser not in losers]
+        )
 
     @staticmethod
     def _migrate_progress(connection: sqlite3.Connection, losers: list[tuple[str, str]]) -> None:

@@ -1060,6 +1060,39 @@ def test_a_position_already_set_on_the_winner_is_never_overwritten(
     assert progress_of(settings, loser) == 5
 
 
+def test_deleting_the_winner_s_progress_is_not_resurrected_by_a_later_scan(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """A reader deletes the winner's own progress through the API. The
+    duplicate relationship itself does not change on the next scan, so that
+    scan must never mistake the loser's still-retained, stale position for
+    something newly worth migrating back onto the winner."""
+    settings = quiet_settings(sample_library.root, data_dir)
+    write_sample_config(settings.config_path)
+    original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
+
+    scan_once(settings)
+    set_progress(settings, loser, 5)
+    set_progress(settings, winner, 3)
+
+    shutil.move(str(parked), original)
+    scan_once(settings)
+    assert progress_of(settings, winner) == 3
+    assert progress_of(settings, loser) == 5
+
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute("DELETE FROM reading_progress WHERE issue_id = ?", (winner,))
+    finally:
+        connection.close()
+    assert progress_of(settings, winner) is None
+
+    scan_once(settings)
+
+    assert progress_of(settings, winner) is None
+
+
 # --------------------------------------------------------------------- progress
 
 
