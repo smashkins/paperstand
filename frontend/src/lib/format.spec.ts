@@ -125,6 +125,36 @@ describe('formatIssueLabel', () => {
 	it('falls back to the file name when there is nothing else', () => {
 		expect(formatIssueLabel({ ...base, date_precision: 'none' }, 'en-GB')).toBe('something.pdf');
 	});
+
+	it('appends the variant after the number and the date', () => {
+		expect(
+			formatIssueLabel(
+				{
+					...base,
+					issue_number: '8',
+					issue_date: '2026-03-17',
+					date_precision: 'day',
+					variant: 'Weekend'
+				},
+				'en-GB'
+			)
+		).toBe('No. 8 · 17 Mar 2026 · Weekend');
+	});
+
+	it('carries the variant untranslated, on its own when nothing else is known', () => {
+		expect(formatIssueLabel({ ...base, date_precision: 'none', variant: 'Weekend' }, 'it-IT')).toBe(
+			'Weekend'
+		);
+	});
+
+	it('leaves the label alone when there is no variant', () => {
+		expect(
+			formatIssueLabel(
+				{ ...base, issue_date: '2026-03-17', date_precision: 'day', variant: null },
+				'en-GB'
+			)
+		).toBe('17 Mar 2026');
+	});
 });
 
 describe('formatTitleSpan', () => {
