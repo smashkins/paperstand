@@ -79,9 +79,9 @@ One line per file, in the walker's deterministic order, followed by any collisio
 summary:
 
 ```
-Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf -> Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
+Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf -> Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
 Newspapers/2026/03/17/La_Gazzetta_del_Lago_Sud_17_Marzo_2026.pdf -> unsorted: no configured title matches "La Gazzetta del Lago Sud"
-Magazines/Orizzonte/Orizzonte_1630_-_5_settembre_2026.pdf -> Orizzonte/2026/Orizzonte - 2026-09-05 - n1630.pdf
+Magazines/Orizzonte/Orizzonte_1630_-_5_settembre_2026.pdf -> Magazines/Orizzonte/2026/Orizzonte - 2026-09-05 - n1630.pdf
 Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-16.pdf -> in place
 
 2 planned, 1 in place, 1 unsorted, 0 collision(s)
@@ -93,7 +93,7 @@ conflate — they are printed together under a `COLLISION` marker instead of one
 winning:
 
 ```
-COLLISION Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
+COLLISION Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
   Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf
   Newspapers/2026/03/17/Corriere_del_Ponte_2026-03-17.pdf
 ```

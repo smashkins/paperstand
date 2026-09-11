@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from paperstand.config import (
     ConfigError,
     PaperstandConfig,
+    Settings,
     config_from_folders,
     discover_libraries,
     guess_kind,
@@ -213,3 +214,16 @@ def test_auto_discovery_skips_a_colliding_folder() -> None:
     libraries = discover_libraries(["Città", "Citta", "Zines"])
 
     assert [library.name for library in libraries] == ["Citta", "Zines"]
+
+
+# ------------------------------------------------------------------------- Settings
+
+
+def test_inbox_defaults_to_inbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PAPERSTAND_INBOX", raising=False)
+    assert Settings().inbox == Path("/inbox")
+
+
+def test_inbox_honours_its_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERSTAND_INBOX", "/mnt/inbox")
+    assert Settings().inbox == Path("/mnt/inbox")

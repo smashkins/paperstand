@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 
 import pytest
 
+from paperstand.config import Settings
 from paperstand.db import (
     SCHEMA_V1,
     SCHEMA_V2,
@@ -19,6 +21,7 @@ from paperstand.db import (
     library_id,
     migrate,
     open_database,
+    read_content_hashes,
     set_meta,
     title_id,
     user_version,
@@ -394,3 +397,43 @@ def test_closing_twice_is_harmless(tmp_path: Path) -> None:
     database.connection.execute("SELECT 1")
     database.close()
     database.close()
+
+
+# -------------------------------------------------------------- read_content_hashes
+
+
+def test_read_content_hashes_on_an_absent_file_warns_and_returns_empty(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        assert read_content_hashes(tmp_path / "absent.db") == {}
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_read_content_hashes_on_a_schema_2_database_warns_and_returns_empty(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_2(path)
+
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        assert read_content_hashes(path) == {}
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_read_content_hashes_on_a_populated_schema_3_database(
+    catalogue_settings: Settings,
+) -> None:
+    database = open_database(catalogue_settings.db_path)
+    expected = {
+        str(row["content_hash"]): str(row["rel_path"])
+        for row in database.connection.execute(
+            "SELECT content_hash, rel_path FROM issues WHERE content_hash IS NOT NULL"
+        )
+    }
+    database.close()
+    assert expected, "the scanned sample library produced no hashed row to check"
+
+    assert read_content_hashes(catalogue_settings.db_path) == expected

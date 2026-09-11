@@ -351,6 +351,52 @@ def get_meta(connection: sqlite3.Connection, key: str) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
+def read_content_hashes(path: Path) -> dict[str, str]:
+    """Every catalogued content hash, mapped to the relative path that carries it.
+
+    Opened read-only, through ``file:...?mode=ro`` so a catalogue that does not
+    exist raises rather than being created; the schema is checked with
+    ``PRAGMA user_version`` before the query ever touches ``content_hash`` — a
+    column a schema-2 catalogue does not have. An absent database, a catalogue
+    written by an older Paperstand, or any other :class:`sqlite3.Error` are all
+    the same case to a caller organizing an inbox: an empty mapping, one
+    ``log.warning``, and the run continues — a byte-identical file is then only
+    caught by the destination check at move time. The connection is closed
+    before this function returns, well before anything moves.
+
+    Two rows sharing a hash — a duplicate the scanner has not caught up with
+    yet — resolve to the row with the earliest ``rel_path``, so the mapping is
+    deterministic however the table's own row order happens to fall.
+    """
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return {}
+    try:
+        version = user_version(connection)
+        if version < 3:
+            log.warning(
+                "the catalogue at %s is schema %d, too old to carry content hashes",
+                path,
+                version,
+            )
+            return {}
+        rows = connection.execute(
+            "SELECT content_hash, rel_path FROM issues "
+            "WHERE content_hash IS NOT NULL ORDER BY rel_path"
+        ).fetchall()
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return {}
+    finally:
+        connection.close()
+    hashes: dict[str, str] = {}
+    for row_hash, rel_path in rows:
+        hashes.setdefault(str(row_hash), str(rel_path))
+    return hashes
+
+
 def set_meta(connection: sqlite3.Connection, key: str, value: str) -> None:
     """Write one ``meta`` value."""
     connection.execute(

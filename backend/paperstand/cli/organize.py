@@ -116,7 +116,9 @@ def organize_plan(
         if issue is None:
             continue
         plan = plan_issue(
-            issue, publication_folder=title_folders.get((library.name, issue.title_name))
+            issue,
+            publication_folder=title_folders.get((library.name, issue.title_name)),
+            library_path=library.path,
         )
         if isinstance(plan, Unsorted):
             unsorted += 1
