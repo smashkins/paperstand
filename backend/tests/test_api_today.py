@@ -100,9 +100,9 @@ def test_recently_added_is_capped_and_skips_duplicates(catalogue_client: TestCli
 
 
 def test_continue_reading_holds_what_was_started_and_not_finished(
-    catalogue_client: TestClient,
+    catalogue_client: TestClient, catalogue_settings: Settings
 ) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
     issue = catalogue_client.get(f"/api/issues/{identifier}").json()
     assert issue["page_count"] >= 3
 
@@ -160,8 +160,10 @@ def _zone(name: str) -> dt.tzinfo:
 # ----------------------------------------------------------------- progress
 
 
-def test_progress_is_written_read_listed_and_deleted(catalogue_client: TestClient) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+def test_progress_is_written_read_listed_and_deleted(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
     page_count = catalogue_client.get(f"/api/issues/{identifier}").json()["page_count"]
 
     assert catalogue_client.get(f"/api/issues/{identifier}/progress").status_code == 404
@@ -183,8 +185,10 @@ def test_progress_is_written_read_listed_and_deleted(catalogue_client: TestClien
     assert catalogue_client.get("/api/progress").json() == []
 
 
-def test_a_page_beyond_the_document_is_clamped(catalogue_client: TestClient) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+def test_a_page_beyond_the_document_is_clamped(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
     page_count = catalogue_client.get(f"/api/issues/{identifier}").json()["page_count"]
 
     stored = catalogue_client.put(f"/api/issues/{identifier}/progress", json={"page": 9999}).json()
@@ -192,8 +196,10 @@ def test_a_page_beyond_the_document_is_clamped(catalogue_client: TestClient) -> 
     assert stored["page"] == page_count
 
 
-def test_a_page_below_one_is_refused(catalogue_client: TestClient) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+def test_a_page_below_one_is_refused(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
 
     assert (
         catalogue_client.put(f"/api/issues/{identifier}/progress", json={"page": 0}).status_code
@@ -282,7 +288,7 @@ def test_a_fallback_day_of_only_unsorted_issues_keeps_looking_back(
 def test_a_duplicate_leaves_the_progress_lists(
     catalogue_client: TestClient, catalogue_settings: Settings
 ) -> None:
-    identifier = sample_issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
     catalogue_client.put(f"/api/issues/{identifier}/progress", json={"page": 2})
     assert [item["id"] for item in catalogue_client.get("/api/progress").json()] == [identifier]
     assert today(catalogue_client, date=SAMPLE_TODAY.isoformat())["continue_reading"]

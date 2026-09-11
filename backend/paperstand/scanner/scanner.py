@@ -52,6 +52,7 @@ from paperstand.scanner.covers import (
     has_cover,
     render_cover,
 )
+from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.walker import LibraryFile, Walk, top_level_folders
 
 log = get_logger(__name__)
@@ -77,6 +78,7 @@ ISSUE_COLUMNS = (
     "has_dedup_suffix",
     "variant",
     "volume",
+    "content_hash",
     "added_at",
     "updated_at",
     "last_seen_scan",
@@ -290,6 +292,10 @@ class Scanner:
             )
             for row in connection.execute("SELECT id, rel_path, size, mtime_ns FROM issues")
         }
+        # Every id already spoken for, kept apart from `existing` so that
+        # popping a matched path never shrinks it: an id stays taken for the
+        # whole scan, whether its row was just matched or not touched at all.
+        taken = {item.id for item in existing.values()}
 
         files_seen = added = updated = errors = 0
         unchanged: list[str] = []
@@ -354,6 +360,7 @@ class Scanner:
                         stored,
                         changed,
                         publication,
+                        taken,
                     )
                 except (sqlite3.Error, ValueError) as error:
                     errors += 1
@@ -589,6 +596,7 @@ class Scanner:
         stored: _Existing | None,
         changed: bool,
         publication: DeclaredPublication | None,
+        taken: set[str],
     ) -> None:
         """Parse one file and write its row, resetting the cover when needed."""
         mtime = dt.datetime.fromtimestamp(found.mtime_ns / 1_000_000_000)
@@ -597,7 +605,19 @@ class Scanner:
         kind = publication.kind_for(library.kind) if publication is not None else library.kind
         title = titles.resolve(connection, owner, kind, issue, publication)
         now = utc_now()
-        identifier = stored.id if stored is not None else issue_id(found.rel_path)
+        # An issue's identity is its content, not its path: a new row is
+        # never written without reading the file first. `stored` carries the
+        # hash of an existing row forward once P1.3.2 stops rehashing it on
+        # every touch; for now every upsert reads the file it is about to
+        # catalogue. Two different paths sharing the same bytes would derive
+        # the same id, so a new one falls back to `_unique` exactly as a
+        # colliding title name does.
+        digest = content_hash(self.settings.library / found.rel_path)
+        if stored is not None:
+            identifier = stored.id
+        else:
+            identifier = _unique(issue_id(digest), taken)
+            taken.add(identifier)
         values = (
             identifier,
             owner,
@@ -616,6 +636,7 @@ class Scanner:
             int(issue.has_dedup_suffix),
             issue.variant,
             issue.volume,
+            digest,
             now,
             now,
             scan_id,

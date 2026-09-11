@@ -12,17 +12,19 @@ refused rather than silently mangled.
 
 Identity, which the scanner relies on: a library's id is the slug of its name,
 a title's id the slug of ``<library id>/<title name>`` and an issue's id the
-first sixteen hexadecimal characters of the SHA-1 of its path relative to the
-library root. Ids are stable across scans, which is what lets a cached cover
-survive one. Two *libraries* whose names slugify the same way are refused when
-the configuration is loaded; two *titles* that do are given ``-2``, ``-3``
-suffixes, because a title name is not something a user chose for Paperstand.
+first sixteen hexadecimal characters of the SHA-256 of its own bytes — an
+issue *is* its content, not its path. Renaming or moving a file keeps its id;
+a file replaced with different bytes is a new issue. Ids are stable across
+scans, which is what lets a cached cover survive one. Two *libraries* whose
+names slugify the same way are refused when the configuration is loaded; two
+*titles* that do, or two issues whose content hashes share their first sixteen
+characters, are given ``-2``, ``-3`` suffixes, because neither a title name
+nor a hash prefix is something a user chose for Paperstand.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-import hashlib
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -35,7 +37,7 @@ from paperstand.parsing.normalize import slugify
 log = get_logger(__name__)
 
 #: Version of the schema this build of Paperstand writes.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: How long a writer waits for a lock before giving up, in milliseconds.
 BUSY_TIMEOUT_MS = 10_000
@@ -171,8 +173,19 @@ COMMIT;
 PRAGMA foreign_keys = ON;
 """
 
+# `content_hash` is nullable: a row written before this migration has none
+# until the scanner backfills it, and `content_hash IS NULL` is how the fast
+# phase recognises a legacy row worth hashing. The index is what lets it find
+# a byte-identical copy — or the row a moved file used to be — by hash alone.
+SCHEMA_V3 = """
+BEGIN;
+ALTER TABLE issues ADD COLUMN content_hash TEXT;
+CREATE INDEX issues_hash ON issues (content_hash);
+COMMIT;
+"""
+
 #: One entry per schema version, in order. Append; never edit a released one.
-MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2)
+MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
 
 
 class DatabaseError(RuntimeError):
@@ -194,9 +207,15 @@ def title_id(library: str, name: str) -> str:
     return slugify(f"{library}/{name}")
 
 
-def issue_id(rel_path: str) -> str:
-    """Identifier of an issue: the truncated SHA-1 of its relative path."""
-    return hashlib.sha1(rel_path.encode("utf-8")).hexdigest()[:16]
+def issue_id(content_hash: str) -> str:
+    """Identifier of an issue: the truncated SHA-256 of its own bytes.
+
+    ``content_hash`` is the full 64-character digest
+    :func:`paperstand.scanner.hashing.content_hash` computes; only its first
+    sixteen characters become the id — the whole digest is stored separately,
+    for a future lookup by hash.
+    """
+    return content_hash[:16]
 
 
 def user_version(connection: sqlite3.Connection) -> int:

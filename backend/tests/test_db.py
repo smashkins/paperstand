@@ -10,6 +10,7 @@ import pytest
 
 from paperstand.db import (
     SCHEMA_V1,
+    SCHEMA_V2,
     SCHEMA_VERSION,
     Database,
     DatabaseError,
@@ -178,10 +179,15 @@ def test_title_ids_are_unique_across_libraries() -> None:
 
 
 def test_issue_ids_are_stable_and_short() -> None:
-    identifier = issue_id("Newspapers/2026/03/17/x.pdf")
-    assert identifier == issue_id("Newspapers/2026/03/17/x.pdf")
+    """An id is the first sixteen characters of a content digest, verbatim."""
+    digest = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    identifier = issue_id(digest)
+
+    assert identifier == digest[:16]
+    assert identifier == issue_id(digest)
     assert len(identifier) == 16
-    assert identifier != issue_id("Newspapers/2026/03/18/x.pdf")
+    other = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    assert identifier != issue_id(other)
 
 
 # -------------------------------------------------------------- schema 2 migration
@@ -288,6 +294,98 @@ def test_schema_2_keeps_the_titles_library_index(tmp_path: Path) -> None:
     }
 
     assert "titles_library" in index_names
+    database.close()
+
+
+# -------------------------------------------------------------- schema 3 migration
+
+
+def _populated_schema_2(path: Path) -> None:
+    """A schema-2 database, with one row in every table the migration touches
+    or must leave alone — the pattern of :func:`_populated_schema_1`, one
+    version further along."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(SCHEMA_V1)
+        connection.executescript(SCHEMA_V2)
+        connection.execute("PRAGMA user_version = 2")
+        with connection:
+            connection.execute(
+                "INSERT INTO libraries VALUES ('l', 'Newspapers', 'Newspapers', 'newspaper', "
+                "'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
+                "VALUES ('t', 'l', 'Corriere del Ponte', 'corriere del ponte', 'newspaper', "
+                "'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, "
+                "mtime_ns, date_precision, date_source, derived_title, label, matched_rule, "
+                "added_at, updated_at) VALUES ('i', 'l', 't', 'Newspapers/a.pdf', 'a.pdf', 1, 1, "
+                "'day', 'filename', 'Corriere del Ponte', '', 'D1', ?, ?)",
+                (utc_now(), utc_now()),
+            )
+            connection.execute("INSERT INTO reading_progress VALUES ('i', 12, 40, ?)", (utc_now(),))
+    finally:
+        connection.close()
+
+
+def test_a_schema_2_database_migrates_to_schema_3_keeping_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_2(path)
+
+    database = open_database(path)
+    connection = database.connection
+
+    assert user_version(connection) == SCHEMA_VERSION
+    assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM titles").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+
+    # The new column exists and carries no value for a row the migration did
+    # not touch: `content_hash IS NULL` is how the scanner recognises a
+    # legacy row still waiting to be hashed.
+    issue = connection.execute("SELECT content_hash FROM issues WHERE id = 'i'").fetchone()
+    assert issue["content_hash"] is None
+
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+def test_schema_3_keeps_the_issues_hash_index(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_2(path)
+    database = open_database(path)
+
+    index_names = {
+        str(row["name"])
+        for row in database.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'issues'"
+        )
+    }
+
+    assert "issues_hash" in index_names
+    database.close()
+
+
+def test_schema_3_accepts_a_content_hash(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_2(path)
+    database = open_database(path)
+    connection = database.connection
+
+    digest = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    with connection:
+        connection.execute("UPDATE issues SET content_hash = ? WHERE id = 'i'", (digest,))
+
+    row = connection.execute("SELECT content_hash FROM issues WHERE id = 'i'").fetchone()
+    assert row["content_hash"] == digest
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     database.close()
 
 

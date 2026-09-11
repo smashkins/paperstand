@@ -23,10 +23,10 @@ import yaml
 from PIL import Image
 
 from paperstand.config import Settings
-from paperstand.db import issue_id, open_database
+from paperstand.db import open_database
 from paperstand.scanner.covers import CoverError, CoverResult, cover_paths, has_cover, render_cover
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
-from tests.conftest import SampleLibrary, quiet_settings, write_sample_config
+from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
@@ -288,7 +288,7 @@ def test_deleting_a_file_removes_its_row_and_its_cache(
     scan_settings: Settings, sample_library: SampleLibrary
 ) -> None:
     scan_once(scan_settings)
-    identifier = issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
     assert has_cover(scan_settings.cache_path, identifier)
     sample_library.path(A_NEWSPAPER).unlink()
 
@@ -305,7 +305,7 @@ def test_a_changed_file_is_reparsed_and_its_cover_regenerated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scan_once(scan_settings)
-    identifier = issue_id(A_NEWSPAPER)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
     target = sample_library.path(A_NEWSPAPER)
     with target.open("ab") as handle:
         handle.write(b"\n% one more byte\n")
@@ -484,7 +484,10 @@ def test_an_unreadable_folder_keeps_the_rows_underneath_it(
     assert result.errors >= 1
     assert "could not be read" in (result.message or "")
     assert sorted(rel_paths(scan_settings)) == sorted(before)
-    assert all(has_cover(scan_settings.cache_path, issue_id(path)) for path in hidden)
+    assert all(
+        has_cover(scan_settings.cache_path, sample_issue_id(sample_library.root, path))
+        for path in hidden
+    )
 
 
 def test_colliding_library_names_fail_the_scan_instead_of_misfiling(
@@ -572,15 +575,21 @@ def stage_a_copy(sample_library: SampleLibrary, data_dir: Path) -> tuple[Path, P
     The copy carries a duplicate suffix, so once the original is back the
     original wins and the copy becomes the duplicate — which is exactly the
     order of events a reader would hit: read a file, then have a better copy of
-    the same issue turn up.
+    the same issue turn up. A trailing comment keeps the copy's bytes — and so
+    its id — distinct from the original's: what makes the two duplicates is
+    the date and the title they share, not identical content.
     """
     original = sample_library.path(A_NEWSPAPER)
     copy = original.with_name(f"{original.stem} (1){original.suffix}")
     shutil.copyfile(original, copy)
+    with copy.open("ab") as handle:
+        handle.write(b"\n% a distinct copy\n")
+    copy_rel = f"{A_NEWSPAPER.rsplit('/', 1)[0]}/{copy.name}"
+    loser = sample_issue_id(sample_library.root, copy_rel)
+    winner = sample_issue_id(sample_library.root, A_NEWSPAPER)
     parked = data_dir / "parked.pdf"
     shutil.move(str(original), parked)
-    copy_rel = f"{A_NEWSPAPER.rsplit('/', 1)[0]}/{copy.name}"
-    return original, parked, issue_id(copy_rel), issue_id(A_NEWSPAPER)
+    return original, parked, loser, winner
 
 
 def test_a_reading_position_follows_a_copy_onto_the_issue_that_wins(
