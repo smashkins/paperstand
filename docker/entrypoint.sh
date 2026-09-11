@@ -59,20 +59,32 @@ if [ "$current_uid" != "$PUID" ]; then
     usermod -o -u "$PUID" paperstand
 fi
 
-# Only touch /data, and only when it is not already owned correctly: a large
-# cache directory should not be walked on every start. `-xdev` keeps the walk
-# inside the mount, `chown -h` never follows a symlink out of it. Some bind
-# mounts (a few NAS setups) refuse chown while staying perfectly writable, so a
-# failure is reported and the server still starts.
-if [ -d /data ]; then
-    owner="$(stat -c '%u:%g' /data)"
-    if [ "$owner" != "$PUID:$PGID" ]; then
-        chown -h "$PUID:$PGID" /data \
-            || echo "entrypoint: cannot chown /data to $PUID:$PGID, continuing" >&2
-        find /data -xdev \( ! -user "$PUID" -o ! -group "$PGID" \) \
-            -exec chown -h "$PUID:$PGID" {} + \
-            || echo "entrypoint: cannot chown some files under /data, continuing" >&2
+# Chown one bind-mounted tree to $PUID:$PGID, only when it is not already
+# owned correctly: a large directory should not be walked on every start.
+# `-xdev` keeps the walk inside the mount, `chown -h` never follows a
+# symlink out of it. Some bind mounts (a few NAS setups) refuse chown while
+# staying perfectly writable, so a failure is reported and the start
+# continues regardless.
+chown_tree() {
+    _dir="$1"
+    if [ ! -d "$_dir" ]; then
+        return 0
     fi
-fi
+    _owner="$(stat -c '%u:%g' "$_dir")"
+    if [ "$_owner" = "$PUID:$PGID" ]; then
+        return 0
+    fi
+    chown -h "$PUID:$PGID" "$_dir" \
+        || echo "entrypoint: cannot chown $_dir to $PUID:$PGID, continuing" >&2
+    find "$_dir" -xdev \( ! -user "$PUID" -o ! -group "$PGID" \) \
+        -exec chown -h "$PUID:$PGID" {} + \
+        || echo "entrypoint: cannot chown some files under $_dir, continuing" >&2
+}
+
+# /data is the server's own writable directory; /inbox is only present for
+# the optional organizer service, mounted read-write for it to move files
+# out of — both have to be writable by $PUID:$PGID before privileges drop.
+chown_tree /data
+chown_tree /inbox
 
 exec gosu paperstand paperstand "$@"
