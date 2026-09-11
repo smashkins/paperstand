@@ -53,12 +53,19 @@ lowercase_words: [
   'to', 'at', 'by', 'from', 'an',
 ]
 
+# The declared-publication grammar: `<Title> - <ISO date>[ - [v<volume> ]n<number>][ -
+# <variant>]`, tried first so a canonical name is read as such rather than falling through
+# to the shapes below. `date` is day or month precision; a bare `year` is year precision.
+# `volume` only appears together with `number`; `variant` is whatever trails the last
+# " - " and is left to the scanner to tell declared from undeclared.
+#
 # Volume-and-issue numbering, common in real-world naming: a year-stamped
 # volume and a running issue number, in either order. Neither is anchored at
 # the end, so a trailing "<Month> YYYY" still reaches the generic date rules
 # below and yields month precision; without one, the pattern's own year
 # stands alone at year precision.
 patterns:
+  - '^(?P<title>.+?) - (?:(?P<date>\d{4}-\d{2}(?:-\d{2})?)|(?P<year>\d{4}))(?: - (?:v(?P<volume>\d{1,5}) )?n(?P<number>\d{1,5}))?(?: - (?P<variant>[^-\s][^\n]*?))?$'
   - '^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)'
   - '^(?P<title>.+?)\s+c(?P<number>\d{1,5})(?!\d)\s*-\s*v(?P<year>\d{4})(?!\d)'
 

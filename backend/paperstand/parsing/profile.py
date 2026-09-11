@@ -37,7 +37,19 @@ DEFAULT_PROFILE = "default"
 
 #: Named groups a pattern may capture.
 ALLOWED_GROUPS: frozenset[str] = frozenset(
-    {"title", "day", "month", "year", "date", "date_end", "number", "subtitle", "dedup"}
+    {
+        "title",
+        "day",
+        "month",
+        "year",
+        "date",
+        "date_end",
+        "number",
+        "subtitle",
+        "dedup",
+        "volume",
+        "variant",
+    }
 )
 
 #: Marker that makes a child list append to the parent's instead of replacing it.
@@ -207,6 +219,22 @@ def bundled_default() -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ProfileError("the bundled default profile is not a mapping")
     return loaded
+
+
+@lru_cache(maxsize=1)
+def canonical_pattern() -> str:
+    """The declared-publication grammar: the bundled profile's first pattern.
+
+    Read from the shipped YAML rather than duplicated as a Python constant, so
+    the naming rule still lives only in the profile (``AGENTS.md`` rule 2). A
+    custom profile that replaces ``patterns:`` without a leading ``"+"`` loses
+    this pattern along with the volume ones; the scanner uses this helper to
+    warn when that happens to a library holding a declared publication.
+    """
+    patterns = bundled_default().get("patterns")
+    if not isinstance(patterns, list) or not patterns:
+        raise ProfileError("the bundled default profile defines no patterns")
+    return str(patterns[0])
 
 
 def _resolve_raw(

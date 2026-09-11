@@ -106,6 +106,8 @@ class ParsedIssue:
     has_dedup_suffix: bool
     label: str
     matched_rule: str
+    volume: int | None = None
+    variant: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +234,7 @@ class Parser:
         number, number_rule, number_span = self._resolve_number(
             pattern, masked, config_match, trace
         )
+        volume, variant = self._resolve_volume_variant(pattern)
         cut = self._cut(date_spans, number_span)
         candidates = self._candidates(pattern, folders, spaced, cut)
         derived = self._derived_title(candidates, spaced)
@@ -252,6 +255,12 @@ class Parser:
             if part is not None
         ]
         rules.append(f"title:{title_source}")
+        if variant is not None:
+            # No publication reaches `parse` yet (that is added once the
+            # scanner learns `publication.yml`), so a captured variant is
+            # always undeclared for now.
+            declared = False
+            rules.append(f"variant:{'declared' if declared else 'undeclared'}")
         issue = ParsedIssue(
             title_name=title_name,
             title_source=title_source,
@@ -262,8 +271,10 @@ class Parser:
             issue_number=number,
             has_dedup_suffix=clean.has_dedup_suffix
             or "dedup" in (pattern.groups if pattern else {}),
-            label=format_label(issue_date, precision, number),
+            label=format_label(issue_date, precision, number, variant),
             matched_rule=" ".join(rules),
+            volume=volume,
+            variant=variant,
         )
         if trace is not None:
             trace.append(("result", repr(issue)))
@@ -395,6 +406,22 @@ class Parser:
         if hit is None:
             return None, None, None
         return hit.value, hit.rule, hit.span
+
+    def _resolve_volume_variant(self, pattern: PatternHit | None) -> tuple[int | None, str | None]:
+        """The canonical pattern's own ``volume`` and ``variant`` groups, if any.
+
+        ``number: false`` suppresses the volume along with the issue number —
+        a volume with no number to go with it is not something the canonical
+        grammar can even produce, since `volume` is only ever captured
+        alongside `number`.
+        """
+        if pattern is None:
+            return None, None
+        volume_text = pattern.groups.get("volume")
+        volume = int(volume_text) if volume_text and self.profile.number else None
+        variant_text = pattern.groups.get("variant")
+        variant = variant_text.strip() if variant_text else None
+        return volume, variant
 
     @staticmethod
     def _cut(date_spans: list[tuple[int, int]], number_span: tuple[int, int] | None) -> int | None:
@@ -604,7 +631,9 @@ def _parse_date_group(text: str) -> tuple[int, int | None, int | None] | None:
     return None
 
 
-def format_label(date: dt.date | None, precision: str, number: int | None) -> str:
+def format_label(
+    date: dt.date | None, precision: str, number: int | None, variant: str | None = None
+) -> str:
     """The human readable label of an issue, in English."""
     parts: list[str] = []
     if number is not None:
@@ -616,4 +645,6 @@ def format_label(date: dt.date | None, precision: str, number: int | None) -> st
             parts.append(f"{LABEL_MONTHS[date.month - 1]} {date.year}")
         elif precision == "year":
             parts.append(str(date.year))
+    if variant:
+        parts.append(variant)
     return " · ".join(parts)

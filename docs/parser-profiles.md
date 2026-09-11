@@ -94,7 +94,13 @@ so a misspelt `lowercase_word` is not quietly ignored — it stops the load with
 
 `title`, `day`, `month` (a number or a name in the active languages), `year`,
 `date` (`YYYYMMDD`, `YYYY-MM-DD` or `YYYY-MM`), `date_end` (the end of a range),
-`number`, `subtitle`, `dedup`.
+`number`, `subtitle`, `dedup`, `volume`, `variant`.
+
+`volume` and `variant` are read by the bundled canonical grammar (below), which is what a
+declared publication's files are named with; a custom pattern may capture them too. A
+`volume` is only meaningful together with `number` — the running number a volume groups
+issues by — and `variant` is whatever trails a canonical name's last ` - `, read back as
+`ParsedIssue.variant`.
 
 A pattern may capture only some of them: the missing pieces fall through to the generic
 rules and then to the fallbacks. A pattern that captures only `year` out of
@@ -205,10 +211,15 @@ lowercase_words: [
   'to', 'at', 'by', 'from', 'an',
 ]
 
+# The declared-publication grammar: `<Title> - <ISO date>[ - [v<volume> ]n<number>][ -
+# <variant>]`, tried first. `date` is day or month precision; a bare `year` is year
+# precision.
+#
 # Volume-and-issue numbering: a year-stamped volume and a running issue
 # number, in either order. Neither is anchored at the end, so a trailing
 # "<Month> YYYY" still reaches the generic date rules below.
 patterns:
+  - '^(?P<title>.+?) - (?:(?P<date>\d{4}-\d{2}(?:-\d{2})?)|(?P<year>\d{4}))(?: - (?:v(?P<volume>\d{1,5}) )?n(?P<number>\d{1,5}))?(?: - (?P<variant>[^-\s][^\n]*?))?$'
   - '^(?P<title>.+?)\s+v(?P<year>\d{4})(?!\d)\s+c(?P<number>\d{1,5})(?!\d)'
   - '^(?P<title>.+?)\s+c(?P<number>\d{1,5})(?!\d)\s*-\s*v(?P<year>\d{4})(?!\d)'
 
@@ -318,9 +329,10 @@ Zines/Bright_Meadows_v2024_c02_Febbraio_2024.pdf
 Zines/Bright_Meadows_c15_-_v2023.pdf
 ```
 
-No configuration at all: `default` carries both shapes. `parse-explain` on the first shows
-what the masking pays for — the `02` of `c02` stays out of D3's reach because the pattern
-captured it, not because it happens to be a date group:
+No configuration at all: `default` carries both shapes, below the canonical grammar, which
+does not recognise either — neither has a ` - ` before its date. `parse-explain` on the
+first shows what the masking pays for — the `02` of `c02` stays out of D3's reach because
+the pattern captured it, not because it happens to be a date group:
 
 ```
 steps:
@@ -328,7 +340,8 @@ steps:
   spaced                 'Bright Meadows v2024 c02 Febbraio 2024'
   squashed               'brightmeadowsv2024c02febbraio2024'
   folders                []
-  pattern[0]             matched, groups {'title': 'Bright Meadows', 'year': '2024', 'number': '02'}
+  pattern[0]             no match
+  pattern[1]             matched, groups {'title': 'Bright Meadows', 'year': '2024', 'number': '02'}
   masked                 '               v     c   Febbraio 2024'
   date D1                no match
   date D2                no match
@@ -341,14 +354,14 @@ result:
   issue_date     2024-02-01
   date_precision month
   issue_number   2
-  matched_rule   pattern[0] D6 title:pattern
+  matched_rule   pattern[1] D6 title:pattern
 ```
 
 The `masked` step is the pattern's own spans blanked out of `spaced`: `Bright Meadows`,
 `2024` and `02` are gone, but the `v` and `c` that are not part of any group survive, and so
 does `Febbraio 2024`, which D6 then reads at month precision. The second file has no
 trailing month, so `c15 - v2023` gives issue number 15 and the year 2023 alone, at year
-precision, `matched_rule: pattern[1] title:pattern`.
+precision, `matched_rule: pattern[2] title:pattern`.
 
 ### A pattern for one title only
 
@@ -406,6 +419,7 @@ steps:
   folders                ['2026', '03', '17']
   pattern[0]             no match
   pattern[1]             no match
+  pattern[2]             no match
   date D1                no match
   date D2                no match
   date D3                matched '17 Marzo' at (19, 27)

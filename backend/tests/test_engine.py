@@ -10,6 +10,7 @@ import yaml
 
 from paperstand.config import PaperstandConfig
 from paperstand.parsing import ParsedIssue, parse_path
+from paperstand.parsing.profile import canonical_pattern, load_profiles
 from tests.fixtures.filenames import (
     CONFIGURED,
     DISCOVERED,
@@ -36,6 +37,8 @@ def assert_matches(issue: ParsedIssue, expected: Expected) -> None:
     assert issue.date_precision == expected.precision
     assert issue.date_source == expected.source
     assert issue.issue_number == expected.number
+    assert issue.volume == expected.volume
+    assert issue.variant == expected.variant
     assert issue.has_dedup_suffix is expected.dedup
     assert issue.matched_rule == expected.rule
 
@@ -376,3 +379,35 @@ def test_a_range_that_ends_before_it_starts_does_not_match() -> None:
     config = config_with({"extends": "default", "patterns": [RANGE_PATTERN]})
     issue = parse_with(config, "M/Weekly_19-6_March_2026.pdf")
     assert issue.matched_rule.startswith("D")
+
+
+# ------------------------------------------------------------ the canonical grammar
+
+
+def test_canonical_pattern_is_the_first_pattern_of_the_default_profile() -> None:
+    default = load_profiles()["default"]
+    assert default.patterns[0] == canonical_pattern()
+
+
+@pytest.mark.parametrize(
+    ("rel_path", "number", "variant"),
+    [
+        ("Zines/Weekly - 2026-09 - n8.pdf", 8, None),
+        ("Zines/Weekly - 2026-09-06 - n2.pdf", 2, None),
+        ("Zines/Weekly - 2026-09-06 - Weekend.pdf", None, "Weekend"),
+    ],
+)
+def test_dedup_strip_never_eats_a_canonical_tail(
+    rel_path: str, number: int | None, variant: str | None, discovered: PaperstandConfig
+) -> None:
+    """The dedup strips (` (1)`, a trailing `-1`) run before the patterns, on the
+    whole stem: a canonical ` - n8`, ` - n2` or ` - Weekend` tail must survive
+    them untouched, exactly as the design was checked before this pattern was
+    written."""
+    library = discovered.library_for(rel_path)
+    assert library is not None
+    issue = parse_path(rel_path, library, discovered.profile_for(library), MTIME)
+    assert issue.has_dedup_suffix is False
+    assert issue.issue_number == number
+    assert issue.variant == variant
+    assert issue.matched_rule.startswith("pattern[0]")

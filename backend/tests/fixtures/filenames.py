@@ -47,6 +47,8 @@ class Expected:
     rule: str
     dedup: bool = False
     title_source: str = "config"
+    volume: int | None = None
+    variant: str | None = None
 
     @property
     def id(self) -> str:
@@ -458,6 +460,19 @@ CONFIGURED: tuple[Expected, ...] = (
         rule="D7 N1 title:unsorted",
         title_source="unsorted",
     ),
+    # The canonical grammar itself: a configured title still wins over the
+    # pattern that recognised it, so `title:config` stands even though the
+    # rule tag is `pattern[0]`.
+    Expected(
+        rel_path="Magazines/Confini/Confini - 2026 - n8.pdf",
+        title="Confini",
+        date="2026-01-01",
+        precision="year",
+        source="filename",
+        number=8,
+        derived="Confini",
+        rule="pattern[0] title:config",
+    ),
 )
 
 #: Files parsed with no configuration at all: auto-discovery does the work.
@@ -543,7 +558,7 @@ DISCOVERED: tuple[Expected, ...] = (
         source="filename",
         number=2,
         derived="Bright Meadows",
-        rule="pattern[0] D6 title:pattern",
+        rule="pattern[1] D6 title:pattern",
         title_source="pattern",
     ),
     Expected(
@@ -554,7 +569,7 @@ DISCOVERED: tuple[Expected, ...] = (
         source="filename",
         number=15,
         derived="Bright Meadows",
-        rule="pattern[1] title:pattern",
+        rule="pattern[2] title:pattern",
         title_source="pattern",
     ),
     Expected(
@@ -578,6 +593,20 @@ DISCOVERED: tuple[Expected, ...] = (
         derived="Cronaca 24 Pagine",
         rule="D3 title:filename",
         title_source="filename",
+    ),
+    # No title is configured here: the canonical pattern's own `title` group
+    # wins over the "Zines" folder it sits in, where before this pattern
+    # existed the folder would have won instead.
+    Expected(
+        rel_path="Zines/Random Mag - 2026-03-17.pdf",
+        title="Random Mag",
+        date="2026-03-17",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="Random Mag",
+        rule="pattern[0] title:pattern",
+        title_source="pattern",
     ),
 )
 
