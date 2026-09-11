@@ -261,6 +261,7 @@ def progress_summary(progress: ScanProgress | None) -> dict[str, Any] | None:
         "updated": progress.updated,
         "removed": progress.removed,
         "errors": progress.errors,
+        "hashed": progress.hashed,
         "covers_done": progress.covers_done,
         "covers_failed": progress.covers_failed,
         "covers_total": progress.covers_total,

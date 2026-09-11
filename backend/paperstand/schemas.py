@@ -86,6 +86,7 @@ class Issue(BaseModel):
     filename: str
     rel_path: str
     size: int
+    content_hash: str | None = None
     page_count: int | None = None
     aspect: Aspect | None = None
     cover_url: str
@@ -212,6 +213,10 @@ class ScanProgress(BaseModel):
     is ``covers_failed`` instead, so a bar or an "N of M" line wants
     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
     of that N were failures.
+
+    ``hashed`` counts the legacy rows the fast phase has read a file for, to
+    learn the content hash they never had — the only feedback while the
+    one-time backfill after an upgrade works through a whole library.
     """
 
     scan_id: int
@@ -223,6 +228,7 @@ class ScanProgress(BaseModel):
     updated: int
     removed: int
     errors: int
+    hashed: int
     covers_done: int
     covers_failed: int
     covers_total: int | None

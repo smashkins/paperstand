@@ -442,6 +442,8 @@ export interface components {
 			/** Added At */
 			added_at: string;
 			aspect?: components['schemas']['Aspect'] | null;
+			/** Content Hash */
+			content_hash?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -501,6 +503,8 @@ export interface components {
 			/** Added At */
 			added_at: string;
 			aspect?: components['schemas']['Aspect'] | null;
+			/** Content Hash */
+			content_hash?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -655,6 +659,10 @@ export interface components {
 		 *     is ``covers_failed`` instead, so a bar or an "N of M" line wants
 		 *     ``covers_done + covers_failed`` to reach ``covers_total`` even when some
 		 *     of that N were failures.
+		 *
+		 *     ``hashed`` counts the legacy rows the fast phase has read a file for, to
+		 *     learn the content hash they never had — the only feedback while the
+		 *     one-time backfill after an upgrade works through a whole library.
 		 */
 		ScanProgress: {
 			/** Added */
@@ -671,6 +679,8 @@ export interface components {
 			errors: number;
 			/** Files Seen */
 			files_seen: number;
+			/** Hashed */
+			hashed: number;
 			/**
 			 * Phase
 			 * @enum {string}

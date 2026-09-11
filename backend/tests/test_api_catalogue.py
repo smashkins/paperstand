@@ -358,6 +358,8 @@ def test_an_issue_carries_its_urls_its_rule_and_its_neighbours(
     assert issue["id"] == identifier
     assert issue["title_name"] == "Corriere del Ponte"
     assert issue["kind"] == "newspaper"
+    assert issue["content_hash"] is not None and len(issue["content_hash"]) == 64
+    assert issue["id"] == issue["content_hash"][:16]
     assert issue["issue_date"] == SAMPLE_TODAY.isoformat()
     assert issue["date_precision"] == "day"
     assert issue["rel_path"] == A_NEWSPAPER

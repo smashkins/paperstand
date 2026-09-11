@@ -66,11 +66,13 @@ NO_SUCH_PAGE = "the document has no such page"
 def caching(version: str | None, mtime_ns: int) -> str:
     """``immutable`` for the URL that names this version of the file, else not.
 
-    An image URL is only safe to keep for a year if it cannot come to mean
-    something else, and it can: the issue id is the hash of a path, so replacing
-    a PDF where an old one was leaves every URL identical. A ``v`` that is no
-    longer the file's modification time is a client holding an address that has
-    moved, and it is told to check back.
+    An id names one set of bytes for good — a PDF replaced with different
+    content is a new issue with a new id, never this one — but the URL is
+    still versioned by the file's modification time, which moves on a touch
+    even when the bytes, and so the id, do not. A ``v`` that is no longer the
+    file's current modification time is a client holding an address that may
+    have moved on, and it is told to check back rather than trust a stale
+    cache blindly.
     """
     return IMMUTABLE if version == str(mtime_ns) else REVALIDATE
 
