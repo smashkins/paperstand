@@ -96,6 +96,45 @@ def clear_cache(cache_root: Path, identifier: str) -> None:
     shutil.rmtree(page_cache_dir(cache_root, identifier), ignore_errors=True)
 
 
+def move_cache(cache_root: Path, old: str, new: str) -> None:
+    """Move everything cached for ``old`` onto ``new``, without re-rendering.
+
+    Called once, when a row's id changes to the content hash it always had —
+    the one-time backfill of a legacy row, or a rename that took the id along
+    with it in an older build. The bytes never changed, so the cover, the
+    thumbnail and every already-rendered page are still correct; only the name
+    they are filed under is wrong. A source that was never rendered is skipped,
+    not an error, and a target that already exists — rendered fresh under the
+    new id before this ran — wins: the source is discarded rather than
+    overwriting it.
+    """
+    old_cover, old_thumbnail = cover_paths(cache_root, old)
+    new_cover, new_thumbnail = cover_paths(cache_root, new)
+    new_cover.parent.mkdir(parents=True, exist_ok=True)
+    for source, target in ((old_cover, new_cover), (old_thumbnail, new_thumbnail)):
+        _move_file(source, target)
+
+    old_pages = page_cache_dir(cache_root, old)
+    new_pages = page_cache_dir(cache_root, new)
+    if not old_pages.is_dir():
+        return
+    if new_pages.exists():
+        shutil.rmtree(old_pages, ignore_errors=True)
+        return
+    new_pages.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(old_pages), str(new_pages))
+
+
+def _move_file(source: Path, target: Path) -> None:
+    """Move ``source`` onto ``target``, keeping whatever is already there."""
+    if not source.is_file():
+        return
+    if target.exists():
+        source.unlink(missing_ok=True)
+        return
+    os.replace(source, target)
+
+
 def has_cover(cache_root: Path, identifier: str) -> bool:
     """Whether both images of an issue are on disk."""
     cover, thumbnail = cover_paths(cache_root, identifier)

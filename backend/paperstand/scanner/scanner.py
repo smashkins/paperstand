@@ -2,14 +2,21 @@
 
 Two phases, deliberately unequal.
 
-The **fast phase** never opens a file. It walks the library, compares each PDF's
-``(size, mtime_ns)`` with the row already in the database, and only parses the
-names that are new or that changed. Files that disappeared take their rows and
-their cached images with them, titles left without issues are dropped, and every
-surviving group of same-day, same-number files is resolved into one winner and
-its duplicates. When the configuration changed since the last scan — a title
-added, a library renamed — every row is re-parsed from its path alone, so the
-catalogue is reorganised without a single PDF being opened.
+The **fast phase** walks the library and compares each PDF's ``(size, mtime_ns)``
+with the row already in the database; that pair alone decides whether a file
+needs a closer look. A file that does — new, touched or genuinely changed — is
+opened just long enough to hash it, because an issue's identity is its content,
+not its path: a rename or a move keeps the same id, cover, pages and reading
+position, a byte-identical copy is a duplicate wherever it sits, and only
+different bytes make a new issue. A file whose stat has not moved and already
+carries a hash is never reopened. Files that disappeared take their rows and
+their cached images with them — unless the same content turns up again
+elsewhere in the same scan, in which case the row moves rather than being
+replaced — titles left without issues are dropped, and every surviving group of
+same-day, same-number files is resolved into one winner and its duplicates.
+When the configuration changed since the last scan — a title added, a library
+renamed — every row that already carries a hash is re-parsed from its path
+alone, without being reopened.
 
 The **slow phase** opens the PDFs whose cover is still missing, on a small worker
 pool, and records what it finds. A file that cannot be read costs that row an
@@ -50,6 +57,7 @@ from paperstand.scanner.covers import (
     CoverResult,
     clear_cache,
     has_cover,
+    move_cache,
     render_cover,
 )
 from paperstand.scanner.hashing import content_hash
@@ -118,6 +126,7 @@ class ScanProgress:
     updated: int = 0
     removed: int = 0
     errors: int = 0
+    hashed: int = 0
     covers_done: int = 0
     covers_failed: int = 0
     covers_total: int | None = None
@@ -135,6 +144,7 @@ class ScanResult:
     removed: int = 0
     covers_done: int = 0
     errors: int = 0
+    hashed: int = 0
     message: str | None = None
     duration: float = 0.0
 
@@ -142,7 +152,8 @@ class ScanResult:
         """One line, the way the logs and the command line report a scan."""
         return (
             f"files_seen={self.files_seen} added={self.added} updated={self.updated} "
-            f"removed={self.removed} covers_done={self.covers_done} errors={self.errors}"
+            f"removed={self.removed} covers_done={self.covers_done} errors={self.errors} "
+            f"hashed={self.hashed}"
         )
 
 
@@ -153,6 +164,9 @@ class _Existing:
     id: str
     size: int
     mtime_ns: int
+    content_hash: str | None
+    """``None`` marks a legacy row, written before schema 3, still waiting to
+    be hashed once — the fast phase's own backfill, not a migration script."""
 
 
 class Scanner:
@@ -253,6 +267,7 @@ class Scanner:
         updated: int = 0,
         removed: int = 0,
         errors: int = 0,
+        hashed: int = 0,
         covers_done: int = 0,
         covers_failed: int = 0,
         covers_total: int | None = None,
@@ -270,6 +285,7 @@ class Scanner:
                 updated=updated,
                 removed=removed,
                 errors=errors,
+                hashed=hashed,
                 covers_done=covers_done,
                 covers_failed=covers_failed,
                 covers_total=covers_total,
@@ -277,7 +293,7 @@ class Scanner:
         )
 
     def _fast_phase(self, scan_id: int, config: PaperstandConfig, started_at: str) -> ScanResult:
-        """Walk, parse what changed, remove what is gone, resolve duplicates."""
+        """Walk, hash what needs it, remove what is gone, resolve duplicates."""
         root = self.settings.library
         connection = self.database.connection
         stored_hash = get_meta(connection, "config_hash")
@@ -288,19 +304,36 @@ class Scanner:
 
         existing = {
             str(row["rel_path"]): _Existing(
-                id=str(row["id"]), size=int(row["size"]), mtime_ns=int(row["mtime_ns"])
+                id=str(row["id"]),
+                size=int(row["size"]),
+                mtime_ns=int(row["mtime_ns"]),
+                content_hash=row["content_hash"],
             )
-            for row in connection.execute("SELECT id, rel_path, size, mtime_ns FROM issues")
+            for row in connection.execute(
+                "SELECT id, rel_path, size, mtime_ns, content_hash FROM issues"
+            )
         }
         # Every id already spoken for, kept apart from `existing` so that
         # popping a matched path never shrinks it: an id stays taken for the
         # whole scan, whether its row was just matched or not touched at all.
         taken = {item.id for item in existing.values()}
+        legacy = sum(1 for item in existing.values() if item.content_hash is None)
+        if legacy:
+            log.info(
+                "scan %d: %d row(s) predate content hashing and will be hashed once",
+                scan_id,
+                legacy,
+            )
 
-        files_seen = added = updated = errors = 0
+        files_seen = added = updated = removed = errors = hashed = 0
         unchanged: list[str] = []
+        # Files whose path matched no row in pass one, carried into pass two
+        # once `gone` is known: only then can a rename or a move be told apart
+        # from an unrelated arrival. A replacement already has its hash by the
+        # time it is queued, so pass two never reads that file a second time.
+        queue: list[tuple[LibraryFile, LibraryConfig, DeclaredPublication | None, str | None]] = []
 
-        def snapshot(*, removed: int = 0) -> None:
+        def snapshot() -> None:
             self._publish(
                 scan_id,
                 "catalogue",
@@ -310,6 +343,7 @@ class Scanner:
                 updated=updated,
                 removed=removed,
                 errors=errors,
+                hashed=hashed,
             )
 
         snapshot()
@@ -335,42 +369,85 @@ class Scanner:
         self._warn_missing_canonical_pattern(scan_id, config, walk.publications)
 
         with self.database.transaction():
+            # Pass one: every file whose path is already catalogued.
             for found in buffered:
                 library = config.library_for(found.rel_path)
                 if library is None:
                     snapshot()
                     continue
                 stored = existing.pop(found.rel_path, None)
-                changed = stored is not None and (
-                    stored.size != found.size or stored.mtime_ns != found.mtime_ns
-                )
-                if stored is not None and not changed and not reparse_all:
-                    unchanged.append(stored.id)
+                publication = index.resolve(found.publication_dir, library, config)
+                if stored is None:
+                    queue.append((found, library, publication, None))
                     snapshot()
                     continue
-                publication = index.resolve(found.publication_dir, library, config)
+
                 try:
-                    self._upsert(
-                        connection,
-                        scan_id,
-                        found,
-                        library,
-                        config,
-                        titles,
-                        stored,
-                        changed,
-                        publication,
-                        taken,
-                    )
-                except (sqlite3.Error, ValueError) as error:
+                    if stored.content_hash is None:
+                        # A legacy row: there was never a hash to compare
+                        # against, so whatever this path holds now becomes its
+                        # content identity, once.
+                        found_hash = content_hash(root / found.rel_path)
+                        stored = self._rewrite_id(connection, stored, found_hash, taken)
+                        self._upsert(
+                            connection,
+                            scan_id,
+                            found,
+                            library,
+                            config,
+                            titles,
+                            stored,
+                            found_hash,
+                            publication,
+                            taken,
+                        )
+                        hashed += 1
+                        updated += 1
+                    elif stored.size == found.size and stored.mtime_ns == found.mtime_ns:
+                        if not reparse_all:
+                            unchanged.append(stored.id)
+                            snapshot()
+                            continue
+                        self._upsert(
+                            connection,
+                            scan_id,
+                            found,
+                            library,
+                            config,
+                            titles,
+                            stored,
+                            stored.content_hash,
+                            publication,
+                            taken,
+                        )
+                        updated += 1
+                    else:
+                        found_hash = content_hash(root / found.rel_path)
+                        if found_hash == stored.content_hash:
+                            # A touch: the bytes are exactly what they were.
+                            self._upsert(
+                                connection,
+                                scan_id,
+                                found,
+                                library,
+                                config,
+                                titles,
+                                stored,
+                                found_hash,
+                                publication,
+                                taken,
+                            )
+                            updated += 1
+                        else:
+                            # A replacement is a new issue; the old one leaves
+                            # nothing for it to inherit.
+                            removed += self._remove(connection, {found.rel_path: stored})
+                            queue.append((found, library, publication, found_hash))
+                except (sqlite3.Error, ValueError, OSError) as error:
                     errors += 1
                     log.warning("scan %d: cannot catalogue %s: %s", scan_id, found.rel_path, error)
                     snapshot()
                     continue
-                if stored is None:
-                    added += 1
-                else:
-                    updated += 1
                 snapshot()
 
             connection.executemany(
@@ -384,7 +461,75 @@ class Scanner:
                 rel_path: stored for rel_path, stored in existing.items() if walk.covers(rel_path)
             }
             kept = len(existing) - len(gone)
-            removed = self._remove(connection, gone)
+
+            # Pass two: files no row was matched to in pass one. A gone row
+            # sharing a queued file's content hash is that same issue, moved —
+            # never a deletion plus an unrelated arrival.
+            by_hash: dict[str, list[str]] = defaultdict(list)
+            for rel_path, stored in gone.items():
+                if stored.content_hash is not None:
+                    by_hash[stored.content_hash].append(rel_path)
+            for paths in by_hash.values():
+                paths.sort()
+
+            for found, library, publication, precomputed in queue:
+                try:
+                    found_hash = (
+                        precomputed
+                        if precomputed is not None
+                        else content_hash(root / found.rel_path)
+                    )
+                    matches = by_hash.get(found_hash)
+                    if matches:
+                        old_rel_path = matches.pop(0)
+                        moved = gone.pop(old_rel_path)
+                        self._upsert(
+                            connection,
+                            scan_id,
+                            found,
+                            library,
+                            config,
+                            titles,
+                            moved,
+                            found_hash,
+                            publication,
+                            taken,
+                        )
+                        updated += 1
+                        log.info("scan %d: %s moved to %s", scan_id, old_rel_path, found.rel_path)
+                    else:
+                        self._upsert(
+                            connection,
+                            scan_id,
+                            found,
+                            library,
+                            config,
+                            titles,
+                            None,
+                            found_hash,
+                            publication,
+                            taken,
+                        )
+                        added += 1
+                except (sqlite3.Error, ValueError, OSError) as error:
+                    errors += 1
+                    log.warning("scan %d: cannot catalogue %s: %s", scan_id, found.rel_path, error)
+                snapshot()
+
+            # A row about to be removed hands its reading position to a row
+            # that shares its content hash, if one is still live: the copy
+            # that stays is the one a reader would expect to pick up from.
+            for stored in gone.values():
+                if stored.content_hash is None:
+                    continue
+                survivor = connection.execute(
+                    "SELECT id FROM issues WHERE content_hash = ? AND id != ?",
+                    (stored.content_hash, stored.id),
+                ).fetchone()
+                if survivor is not None:
+                    self._migrate_progress(connection, [(str(survivor["id"]), stored.id)])
+
+            removed += self._remove(connection, gone)
             titles.drop_empty(connection)
             if walk.complete:
                 # A library row is only forgotten when the scan saw the whole
@@ -402,7 +547,7 @@ class Scanner:
             # upsert ever raised for it.
             if not walk.complete:
                 errors += max(1, len(walk.unreadable))
-            snapshot(removed=removed)
+            snapshot()
 
         message = self._incomplete(scan_id, walk, kept)
         return ScanResult(
@@ -413,6 +558,7 @@ class Scanner:
             updated=updated,
             removed=removed,
             errors=errors,
+            hashed=hashed,
             message=message,
         )
 
@@ -490,6 +636,7 @@ class Scanner:
                 updated=result.updated,
                 removed=result.removed,
                 errors=result.errors + failed,
+                hashed=result.hashed,
                 covers_done=done,
                 covers_failed=failed,
                 covers_total=total,
@@ -594,28 +741,31 @@ class Scanner:
         config: PaperstandConfig,
         titles: _TitleCache,
         stored: _Existing | None,
-        changed: bool,
+        digest: str,
         publication: DeclaredPublication | None,
         taken: set[str],
     ) -> None:
-        """Parse one file and write its row, resetting the cover when needed."""
+        """Parse one file and write its row, keeping an existing id or minting one.
+
+        ``digest`` is always supplied by the caller, the only place that knows
+        whether a file actually needs (re)hashing: pass one reuses a stored
+        hash for a touch or a plain re-parse, pass two always has a fresh one.
+        `_upsert` itself never opens a file, and never clears a cache — a row
+        it writes either keeps the bytes its cache was rendered from, or is a
+        brand new row whose cover starts out pending like any other.
+        """
         mtime = dt.datetime.fromtimestamp(found.mtime_ns / 1_000_000_000)
         issue = parse_path(found.rel_path, library, config.profile_for(library), mtime, publication)
         owner = library_id(library.name)
         kind = publication.kind_for(library.kind) if publication is not None else library.kind
         title = titles.resolve(connection, owner, kind, issue, publication)
         now = utc_now()
-        # An issue's identity is its content, not its path: a new row is
-        # never written without reading the file first. `stored` carries the
-        # hash of an existing row forward once P1.3.2 stops rehashing it on
-        # every touch; for now every upsert reads the file it is about to
-        # catalogue. Two different paths sharing the same bytes would derive
-        # the same id, so a new one falls back to `_unique` exactly as a
-        # colliding title name does.
-        digest = content_hash(self.settings.library / found.rel_path)
         if stored is not None:
             identifier = stored.id
         else:
+            # Two different paths sharing the same bytes derive the same id;
+            # the second one found falls back to `_unique`, exactly like a
+            # colliding title name does.
             identifier = _unique(issue_id(digest), taken)
             taken.add(identifier)
         values = (
@@ -656,15 +806,41 @@ class Scanner:
             f"UPDATE issues SET {assignments}, updated_at = ?, last_seen_scan = ? WHERE id = ?",
             (*values[1:-3], now, scan_id, identifier),
         )
-        if changed:
-            # The bytes changed, so everything rendered from them is stale.
-            clear_cache(self.settings.cache_path, identifier)
-            connection.execute(
-                "UPDATE issues SET cover_status = 'pending', cover_error = NULL, "
-                "page_count = NULL, page_w = NULL, page_h = NULL, first_page_text = NULL "
-                "WHERE id = ?",
-                (identifier,),
-            )
+
+    def _rewrite_id(
+        self, connection: sqlite3.Connection, stored: _Existing, digest: str, taken: set[str]
+    ) -> _Existing:
+        """Give a legacy row the id its content always implied.
+
+        Called once per row, the scan its hash is first computed. SQLite
+        refuses to update a primary key while another row's ``duplicate_of``
+        still references it, so those pointers are cleared first —
+        :meth:`_mark_duplicates` recomputes them before the scan ends — and
+        the row's cache and any reading position move with it. A digest that
+        happens to already collide with a *different* live row's id is the
+        same case a brand new file falls back to `_unique` for.
+        """
+        candidate = issue_id(digest)
+        if candidate == stored.id:
+            new_id = stored.id
+        else:
+            new_id = _unique(candidate, taken - {stored.id})
+            taken.discard(stored.id)
+            taken.add(new_id)
+
+        if new_id == stored.id:
+            connection.execute("UPDATE issues SET content_hash = ? WHERE id = ?", (digest, new_id))
+            return replace(stored, content_hash=digest)
+
+        connection.execute(
+            "UPDATE issues SET duplicate_of = NULL WHERE duplicate_of = ?", (stored.id,)
+        )
+        connection.execute(
+            "UPDATE issues SET id = ?, content_hash = ? WHERE id = ?", (new_id, digest, stored.id)
+        )
+        move_cache(self.settings.cache_path, stored.id, new_id)
+        self._migrate_progress(connection, [(new_id, stored.id)])
+        return replace(stored, id=new_id, content_hash=digest)
 
     def _remove(self, connection: sqlite3.Connection, gone: dict[str, _Existing]) -> int:
         """Delete the rows of files that are no longer there, and their caches."""

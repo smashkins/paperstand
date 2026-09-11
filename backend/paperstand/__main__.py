@@ -123,7 +123,7 @@ def scan(
     print(f"scan {result.scan_id} {result.status} in {result.duration:.2f}s")
     print(f"  library      {settings.library}")
     print(f"  database     {settings.db_path}")
-    for field in ("files_seen", "added", "updated", "removed", "covers_done", "errors"):
+    for field in ("files_seen", "added", "updated", "removed", "covers_done", "errors", "hashed"):
         print(f"  {field:<12} {getattr(result, field)}")
     if result.message:
         print(f"  message      {result.message}")
