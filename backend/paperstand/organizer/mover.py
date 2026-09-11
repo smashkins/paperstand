@@ -22,10 +22,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from paperstand.logging import get_logger
-
-log = get_logger(__name__)
-
 __all__ = ["DestinationOccupied", "move_file", "park", "remove_sidecar", "sidecar_path"]
 
 #: errno values meaning a filesystem does not support hard links at all, as
@@ -78,9 +74,12 @@ def _copy_and_link(source: Path, destination: Path) -> None:
     Written under a dot-prefixed ``.part`` name — invisible to a walk, which
     skips dot-prefixed files — fsynced, and stamped with the source's own
     atime and mtime before it is ever linked to ``destination``, so a copy
-    never looks like a fresh touch. Only ``os.link`` (or, when the
-    destination filesystem does not support hard links either,
-    ``os.replace``) makes the bytes visible at ``destination``.
+    never looks like a fresh touch. Only ``os.link`` makes the bytes visible
+    at ``destination``: there is no fallback to a plain, non-atomic replace
+    when the destination filesystem does not support hard links either — the
+    temporary file is removed and the :class:`OSError` propagates, so the
+    library filesystem not supporting hard links is a move that fails and is
+    reported, never one that silently loses atomicity.
     """
     info = source.stat()
     with tempfile.NamedTemporaryFile(
@@ -102,14 +101,12 @@ def _copy_and_link(source: Path, destination: Path) -> None:
             if error.errno in _LINK_UNSUPPORTED:
                 if destination.exists():
                     raise DestinationOccupied(f"{destination} already exists") from error
-                log.warning(
-                    "%s does not support hard links; falling back to a non-atomic replace",
-                    destination.parent,
-                )
-                os.replace(tmp_path, destination)
-                consumed = True
-            else:
-                raise
+                raise OSError(
+                    error.errno,
+                    f"{destination.parent} does not support hard links; "
+                    "the organizer cannot place files there safely",
+                ) from error
+            raise
         else:
             tmp_path.unlink()
             consumed = True

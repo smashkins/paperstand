@@ -73,7 +73,9 @@ It mounts `LIBRARY_PATH` **read-write** — the only service that ever does, and
 adds is a file moved in from the inbox — and `INBOX_PATH` at `/inbox`. The inbox, like `/data`,
 has to be a local filesystem of the host running it: the organizer takes an exclusive lock
 there for the length of each run, and that lock is as unreliable over NFS or SMB as SQLite's
-own locking is.
+own locking is. `LIBRARY_PATH`'s own filesystem, wherever it is mounted from, must support hard
+links: a move that cannot link a file into place fails, and is reported, rather than falling
+back to a plain, non-atomic copy.
 
 ### Rendering and the page cache
 

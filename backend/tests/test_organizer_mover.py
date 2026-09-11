@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import logging
 import os
 from pathlib import Path
 
@@ -120,10 +119,10 @@ def test_occupied_at_the_final_link_after_a_cross_device_copy(
     assert list(destination.parent.glob(".*")) == []
 
 
-def test_link_unsupported_everywhere_falls_back_to_replace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+def test_link_unsupported_everywhere_raises_and_removes_the_temp_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    source = _write(tmp_path / "inbox" / "Confini - 2026.pdf", b"replace bytes")
+    source = _write(tmp_path / "inbox" / "Confini - 2026.pdf", b"original bytes")
     destination = tmp_path / "library" / "Confini" / "2026" / source.name
 
     def always_eperm(*_args: object, **_kwargs: object) -> None:
@@ -131,13 +130,12 @@ def test_link_unsupported_everywhere_falls_back_to_replace(
 
     monkeypatch.setattr("paperstand.organizer.mover.os.link", always_eperm)
 
-    with caplog.at_level(logging.WARNING, logger="paperstand"):
+    with pytest.raises(OSError, match="does not support hard links"):
         move_file(source, destination)
 
-    assert not source.exists()
-    assert destination.read_bytes() == b"replace bytes"
-    assert destination.stat().st_mtime == REFERENCE_MTIME
-    assert any("hard link" in message for message in caplog.messages)
+    assert source.read_bytes() == b"original bytes"
+    assert not destination.exists()
+    assert list(destination.parent.glob(".*")) == []
 
 
 # -------------------------------------------------------------------------- park

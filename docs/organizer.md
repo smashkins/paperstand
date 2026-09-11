@@ -97,8 +97,10 @@ can never race over the same inbox and claim the same destination twice. A run t
 lock already held prints one line and exits `0` — nothing is read, nothing is written. This
 is why the inbox has to be a local filesystem of the host running the organizer: `flock` is
 unreliable over NFS and SMB, the same way SQLite's own locking is for `/data`. The library
-itself may still be remote, as long as hard links work there; where they do not, the
-cross-filesystem copy above applies.
+itself may still be remote, as long as it supports hard links — required either way, since the
+cross-filesystem copy above still finishes with a hard link into place, never a plain replace.
+A library filesystem that does not support hard links fails every move into it; each one is
+reported `Failed` (exit code `1`) rather than being written non-atomically.
 
 ### `--every`, and exit codes
 
