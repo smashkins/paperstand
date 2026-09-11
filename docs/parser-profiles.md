@@ -56,6 +56,19 @@ strip: ['^\d+_\d+_'] #  replaces the parent's list
 strip: ["+", '^scan_'] #  keeps the parent's and adds one
 ```
 
+`patterns:` is a list like any other, so the same rule applies to it: a child that sets
+`patterns:` **without** a leading `"+"` starts from nothing, losing `default`'s
+volume-and-issue patterns exactly as it always has — and, since the canonical grammar
+(below) is itself the first entry of `default`'s own `patterns:`, losing that too. A
+declared publication's own folder still wins the title on such a profile — that comes from
+the `publication.yml` sitting in the folder, not from the pattern — but nothing reads its
+name the way the grammar means it to be read: the volume and the variant, which only the
+canonical pattern's own groups ever capture, come back empty, and a file the grammar would
+date to the month or the year falls back to whatever the generic date rules make of it
+instead. The scanner logs one warning per scan for a library whose profile lacks the
+bundled pattern and holds a publication folder, so a profile missing the `"+"` does not
+fail silently.
+
 Every profile is validated when it is loaded: regexes must compile, named groups must be
 ones the engine knows, languages must have a month table, `extends` must point at an
 existing profile. A failure names the profile and the offending pattern and stops the load:

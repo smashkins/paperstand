@@ -12,7 +12,7 @@ Generate a library of them with:
 make sample-library OUT=./library
 ```
 
-That writes about 110 PDFs, all generated: a coloured cover with the masthead and the date,
+That writes about 120 PDFs, all generated: a coloured cover with the masthead and the date,
 a few pages of filler text, and `SAMPLE LIBRARY · GENERATED CONTENT` printed at the foot of
 every page. It also writes a `.paperstand-sample-library` marker, which is the only thing
 `--clean` will delete a directory for.
@@ -21,9 +21,9 @@ every page. It also writes a `.paperstand-sample-library` marker, which is the o
 
 | Publication | What it is there for |
 | --- | --- |
-| **Corriere del Ponte** | The plain case: a three-word masthead, no article, no number. Its weekend supplement, `Corriere_del_Ponte_Weekend_…`, is the *Unsorted* case — a file whose name starts with a configured title but is not that title. |
+| **Corriere del Ponte** | The plain case: a three-word masthead, no article, no number. Its weekend supplement, `Corriere_del_Ponte_Weekend_…`, is the *Unsorted* case — a file whose name starts with a configured title but is not that title. `Newspapers/Corriere del Ponte/` is also a **declared publication** (`publication.yml`, `supplements: [Weekend]`): under that folder the same masthead has a declared `- Weekend` variant and an undeclared `- Speciale` one, both catalogued, only the tail of `matched_rule` telling them apart. |
 | **La Gazzetta del Lago** | The leading article is optional, so `La_Gazzetta_del_Lago_…` and `Gazzetta_del_Lago_…` are the same publication, and so is the squashed `laGazzettaDelLago30Agosto2026`. |
-| **La Gazzetta del Lago Valdora** | A regional edition, and the case for configuring one. A title only matches when what follows it is a number, a month or nothing, so `…del_Lago_Valdora_…` is *not* swallowed by the shorter `La Gazzetta del Lago`: unconfigured it lands in *Unsorted*, and adding it to the list promotes it to a title of its own. |
+| **La Gazzetta del Lago Valdora** | A regional edition, and the case for configuring one. A title only matches when what follows it is a number, a month or nothing, so `…del_Lago_Valdora_…` is *not* swallowed by the shorter `La Gazzetta del Lago`: unconfigured it lands in *Unsorted*, and adding it to the list promotes it to a title of its own. `Newspapers/La Gazzetta del Lago (Valdora)/` declares the same title under a folder name that is not identical to it — the parenthesised edition is part of the folder and the file name, not the declared `title:` — so its one file joins the same title row the date-folder files already feed. |
 | **La Gazzetta del Lago Sud** | A second regional edition, deliberately *not* configured, so it has to land in *Unsorted* rather than in the national title. Fixture table only. |
 | **W La Gazzetta del Lago** | A supplement whose name is a letter in front of another title. It must not match the title it contains. |
 | **Giornale della Costa Alta** | A four-word masthead with no article, to check that a long name survives the date rules intact. |
@@ -41,8 +41,8 @@ every page. It also writes a `.paperstand-sample-library` marker, which is the o
 | **OPQ The Other Orizzonte** | A prefix. Same rule from the other side: a title that *contains* a configured name is not that name. |
 | **Confini** | Issue numbers in two spellings, `Confini_n._8_2026` and `Confini_N_3_…`, and a subtitle after the number that has to be dropped from the title. |
 | **L'Almanacco** | The apostrophe, in every spelling that turns up: `L'Almanacco`, `LAlmanacco` and `L'_Almanacco`, the last with a space the parser has to close up. |
-| **Circuito** | A `#` before the number, and a flat folder with no year in it. |
-| **Bright Meadows** | Volume-and-issue numbering, in either order: `Bright_Meadows_v2024_c02_Febbraio_2024` (month precision, the volume year and a trailing month) and `Bright_Meadows_c15_-_v2023` (year precision, no month). The pattern's `number` group is what keeps the issue number out of the date — without it, `c02` reads as day 2. |
+| **Circuito** | A `#` before the number, and a flat folder with no year in it. `Magazines/Circuito/publication.yml` is also **invalid** (`frequenzy` is a typo for `frequency`): the folder is treated as undeclared, `Circuito`'s own file is unaffected, and the one `log.warning` naming the file and the key is the only visible effect — on every sample scan. |
+| **Bright Meadows** | Volume-and-issue numbering, in either order: `Bright_Meadows_v2024_c02_Febbraio_2024` (month precision, the volume year and a trailing month) and `Bright_Meadows_c15_-_v2023` (year precision, no month). The pattern's `number` group is what keeps the issue number out of the date — without it, `c02` reads as day 2. `Magazines/Bright Meadows/` is a **declared publication** too, with a `v2024 n03` file: no `titles:` entry names it in the configured `Magazines` library, so without the declaration this file would be *Unsorted* there — the declaration alone makes it a real title, with `volume: 2024`. |
 | **Random Mag**, **Something** | No date in the name at all. One falls back to the folder, the other to the file's modification time. |
 
 ## Places
@@ -55,7 +55,7 @@ configuration example. When you need another one, invent another one.
 
 | File | What it holds |
 | --- | --- |
-| `scripts/make_sample_library.py` | The generator: the titles, the layouts, the file name variants, the covers |
+| `scripts/make_sample_library.py` | The generator: the titles, the layouts, the file name variants, the covers, and the `publication.yml` declarations |
 | `backend/tests/fixtures/filenames.py` | The fixture table: one row per naming shape, with the exact result the parser must produce |
 | `paperstand.example.yml` | The configuration those titles are catalogued with |
 

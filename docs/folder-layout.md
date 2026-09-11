@@ -26,6 +26,49 @@ every kind, a numeric or handle-like prefix, a duplicate suffix (`-1`, `(1)`), a
 year, a month with no day, a date with no separators at all. What is recognised, and how to
 change it, is [`parser-profiles.md`](parser-profiles.md).
 
+## Declared publications
+
+A fifth arrangement, additive to the four above and to whatever else the library already
+holds: a folder anywhere under a library that contains a `publication.yml` is a **declared
+publication**, and every PDF beneath it, at any depth, belongs to the title it declares —
+never to Unsorted, whatever its own name looks like. Nested declarations: the nearest
+ancestor wins.
+
+```
+Newspapers/Corriere del Ponte/publication.yml
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17 - Weekend.pdf
+```
+
+Written the same way it is read, the grammar a declared folder's own files follow is:
+
+```
+<Title>/<YYYY>/<Title> - <ISO date>[ - [v<volume> ]n<number>][ - <variant>].pdf
+```
+
+`<Title>` here is the declaring folder's own name, not necessarily the yml's `title:` — see
+[`configuration.md`](configuration.md#publicationyml) for the full field reference; every key
+is optional, and `{}` or an empty file already declares "this folder is a publication,
+defaults everywhere". A file under the folder does not have to follow the grammar at all —
+an old-shaped name is still catalogued under the declared title, exactly like every other
+file beneath it.
+
+A few things worth knowing:
+
+- **A variant not listed under the yml's `supplements` is still accepted.** It is
+  catalogued under the title with that variant, and `matched_rule` says `variant:undeclared`
+  instead of `variant:declared` — a strict check belongs to the organizer's write mode, not
+  the scanner. `label` carries the variant too: `17 March 2026 · Weekend`.
+- **The kind is per-title.** A folder's `kind:` overrides the library's own, so one title
+  declared `kind: magazine` inside a newspaper library shows up among the magazines.
+- **The title is optional.** With no `title:` key the declaring folder's own basename is the
+  display title too — `title_source` is `publication` either way.
+- **An invalid `publication.yml` is one warning, never a failed scan.** It names the file and
+  the offending key, and the folder is then treated exactly as if it held no declaration at
+  all — nothing beneath it is skipped, it is simply parsed by the usual rules.
+- **A yml at the library root is ignored**, with a warning: a whole library cannot itself be
+  "a publication".
+
 ## Libraries
 
 With a `paperstand.yml`, each library is declared explicitly:

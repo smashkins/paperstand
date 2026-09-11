@@ -49,6 +49,30 @@ rather than guessed at:
 - the variant itself contains ` - `, which the canonical grammar reads as a field separator:
   writing it verbatim would produce a name the parser could not read back to the same variant.
 
+## Declared publications
+
+A folder holding a `publication.yml` — see
+[`folder-layout.md`](folder-layout.md#declared-publications) — changes where its title
+plans to. Instead of `<Title>/<YYYY>`, an issue whose title a declaration owns plans into
+`<publication folder>/<YYYY>`, named after the *folder's own basename*, not the yml's
+`title:`, which may read differently: the folder stays the identity, the yml only adds
+metadata to it. That reaches every file the title's name is resolved to, not only the ones
+physically inside the declared folder — a date-folder file elsewhere in the library that a
+configured title already joins to the same declaration plans into its folder too, the same
+way the scanner already catalogues it under one title row.
+
+A file already named the way its folder requires — the common case, once a collection has
+been organized once — prints `-> in place` instead of a destination:
+
+```
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf -> in place
+```
+
+Two folders declaring the same title is a configuration mistake, not something to pick
+silently: `organize-plan` logs a warning naming both, and the first one found while walking
+— folders are visited in name order — keeps the title; every file that resolves to it,
+from either folder, plans there.
+
 ## Reading the output
 
 One line per file, in the walker's deterministic order, followed by any collisions and a
@@ -58,8 +82,9 @@ summary:
 Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf -> Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
 Newspapers/2026/03/17/La_Gazzetta_del_Lago_Sud_17_Marzo_2026.pdf -> unsorted: no configured title matches "La Gazzetta del Lago Sud"
 Magazines/Orizzonte/Orizzonte_1630_-_5_settembre_2026.pdf -> Orizzonte/2026/Orizzonte - 2026-09-05 - n1630.pdf
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-16.pdf -> in place
 
-2 planned, 1 unsorted, 0 collision(s)
+2 planned, 1 in place, 1 unsorted, 0 collision(s)
 ```
 
 When two or more files resolve to the same canonical path — a real duplicate under a
@@ -73,10 +98,12 @@ COLLISION Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
   Newspapers/2026/03/17/Corriere_del_Ponte_2026-03-17.pdf
 ```
 
+A file already `in place` still takes part in collision detection: it is a collision, not a
+free pass, when another file's plan lands on the exact path it already occupies.
+
 ## What it does not do, yet
 
 This is a preview, nothing else. `organize-plan` never creates, moves, renames or deletes a
 file, and what it prints does not reach the running server, the database or the page cache
-in any way. Resolving a name against an existing `publication.yml` folder, and any actual
-move of a file, are not part of this command yet; they belong to later work on the canonical
-library layout.
+in any way. Any actual move of a file is not part of this command yet; it belongs to later
+work on the canonical library layout.
