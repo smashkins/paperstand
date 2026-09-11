@@ -108,7 +108,12 @@ sends.
 | --- | --- |
 | `0` | Every file has an outcome — moved, duplicate and unsorted all count as success — including a run that found the lock held. |
 | `1` | A move failed on an unexpected error; the file involved was left exactly where it was. |
-| `2` | A usage error: the inbox or the library is not a directory, or an explicit `--config` does not exist. |
+| `2` | A usage error: the inbox or the library is not a directory, one is inside the other, or an explicit `--config` does not exist. |
+
+The inbox and the library must be two entirely separate trees — neither inside the other, and
+never the same directory — checked before anything is read: a `publication.yml`, an `unsorted/`
+or a `duplicates/` folder is meaningful in one and not the other, and letting them overlap would
+let the organizer read its own output back as new input.
 
 ### The compose profile
 

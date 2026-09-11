@@ -29,6 +29,7 @@ from paperstand.cli.parse import (
     missing_explicit_config,
     parse_file,
 )
+from paperstand.config import Settings, get_settings
 from paperstand.logging import get_logger
 from paperstand.organizer import (
     OrganizeReport,
@@ -129,15 +130,21 @@ def organize_plan(
 
 
 def _default_organize_config_path(data: Path) -> Path | None:
-    """The configuration file ``organize`` uses by default: ``<data>/paperstand.yml``.
+    """The configuration file ``organize`` uses by default.
 
     The same idea as :func:`paperstand.cli.parse.default_config_path`, but
     against the ``--data`` this run was actually given rather than against
     the environment: a caller that passed ``--data`` explicitly must see
     *that* directory's configuration, not whatever ``PAPERSTAND_DATA`` is set
-    to.
+    to. Honours ``PAPERSTAND_CONFIG`` exactly as ``Settings.config_path``
+    does for the server and for ``scan``: an explicit configuration file
+    still wins over ``<data>/paperstand.yml`` even when ``--data`` points
+    somewhere else.
     """
-    candidate = data / "paperstand.yml"
+    settings = get_settings()
+    if settings.data != data:
+        settings = Settings(**{**settings.model_dump(), "data": data})
+    candidate = settings.config_path
     return candidate if candidate.is_file() else None
 
 
@@ -182,15 +189,25 @@ def organize(
     time — until SIGTERM or SIGINT; without it, the run happens once.
 
     Exit codes: ``2`` for a usage error (``inbox`` or ``library`` is not a
-    directory, or an explicit ``--config`` does not exist); ``1`` when a move
-    failed on an unexpected error; ``0`` otherwise, including when unsorted
-    or duplicate files were found, and when another run already held the
-    lock.
+    directory, one is inside the other, or an explicit ``--config`` does not
+    exist); ``1`` when a move failed on an unexpected error; ``0`` otherwise,
+    including when unsorted or duplicate files were found, and when another
+    run already held the lock.
     """
     stream = out or sys.stdout
     inbox_root = inbox.resolve()
     library_root = library.resolve()
     data_root = data.resolve()
+    if (
+        inbox_root == library_root
+        or inbox_root.is_relative_to(library_root)
+        or library_root.is_relative_to(inbox_root)
+    ):
+        print(
+            "organize: the inbox must not be inside the library nor contain it",
+            file=sys.stderr,
+        )
+        return 2
     if not inbox_root.is_dir():
         print(f"organize: {inbox} is not a directory", file=sys.stderr)
         return 2

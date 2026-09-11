@@ -201,11 +201,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "organize":
         from paperstand.cli.organize import organize
 
+        overrides = {
+            key: value
+            for key, value in (
+                ("inbox", args.inbox),
+                ("library", args.library),
+                ("data", args.data),
+            )
+            if value is not None
+        }
         settings = get_settings()
+        if overrides:
+            settings = Settings(**{**settings.model_dump(), **overrides})
         return organize(
-            args.inbox if args.inbox is not None else settings.inbox,
-            args.library if args.library is not None else settings.library,
-            args.data if args.data is not None else settings.data,
+            settings.inbox,
+            settings.library,
+            settings.data,
             args.config,
             apply=args.apply,
             settle=args.settle,

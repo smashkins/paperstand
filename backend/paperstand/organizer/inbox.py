@@ -322,6 +322,12 @@ def _process_one(
     claims[destination_rel] = found.rel_path
 
     destination = library / destination_rel
+    if not destination.resolve().is_relative_to(library.resolve()):
+        # `LibraryConfig.path` is a free string and may contain `..`: without
+        # this check a configured path like `../outside` would plan a
+        # destination that escapes the library root entirely.
+        reason = f"destination {destination_rel} is outside the library"
+        return _park_unsorted(found, inbox, reason, apply=apply)
     outcome = (
         _apply_move(found, inbox, destination, destination_rel, digest)
         if apply

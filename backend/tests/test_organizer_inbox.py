@@ -422,6 +422,39 @@ def test_no_catalogue_warns_in_the_header_and_still_moves(
     assert report.outcomes == [Moved("Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)]
 
 
+# ------------------------------------------------------------------ escaping
+
+
+def test_a_destination_escaping_the_library_is_parked_unsorted(
+    inbox: Path, catalogue_settings: Settings
+) -> None:
+    """``LibraryConfig.path`` is a free string: a `..` in it must never let
+    a planned destination escape the library root."""
+    escaping_config = PaperstandConfig.model_validate(
+        {
+            "libraries": [
+                {
+                    "name": "Newspapers",
+                    "path": "../outside",
+                    "kind": "newspaper",
+                    "titles": ["Il Mattutino"],
+                }
+            ]
+        }
+    )
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    report, _text = _run(inbox, catalogue_settings, escaping_config, apply=True)
+
+    reason = (
+        "destination ../outside/Il Mattutino/2026/Il Mattutino - 2026-03-21.pdf "
+        "is outside the library"
+    )
+    assert report.outcomes == [Parked("Il_Mattutino_2026-03-21.pdf", reason)]
+    assert (inbox / "unsorted" / "Il_Mattutino_2026-03-21.pdf").is_file()
+    assert not (catalogue_settings.library.parent / "outside").exists()
+
+
 # ---------------------------------------------------------------------- lock
 
 
@@ -572,6 +605,37 @@ def test_organize_uses_the_data_configuration_when_none_is_given(
     assert (catalogue_settings.library / IL_MATTUTINO_DESTINATION).is_file()
 
 
+def test_organize_honours_paperstand_config_without_an_explicit_flag(
+    inbox: Path,
+    catalogue_settings: Settings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--config`` absent falls back to ``settings.config_path``, which
+    honours ``PAPERSTAND_CONFIG`` — not just ``<data>/paperstand.yml``, which
+    also exists here and would otherwise silently win."""
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    elsewhere_config = tmp_path / "elsewhere" / "paperstand.yml"
+    elsewhere_config.parent.mkdir(parents=True)
+    elsewhere_config.write_text(catalogue_settings.config_path.read_text("utf-8"), encoding="utf-8")
+    monkeypatch.setenv("PAPERSTAND_CONFIG", str(elsewhere_config))
+    out = io.StringIO()
+
+    code = organize(
+        inbox,
+        catalogue_settings.library,
+        catalogue_settings.data,
+        None,
+        apply=True,
+        settle=0,
+        out=out,
+    )
+
+    assert code == 0
+    assert f"configuration: {elsewhere_config}" in out.getvalue()
+    assert (catalogue_settings.library / IL_MATTUTINO_DESTINATION).is_file()
+
+
 def test_organize_refuses_a_missing_inbox_directory(
     tmp_path: Path, catalogue_settings: Settings
 ) -> None:
@@ -588,6 +652,51 @@ def test_organize_refuses_a_missing_library_directory(
     missing = tmp_path / "no-library"
     code = organize(inbox, missing, catalogue_settings.data, None, out=io.StringIO())
     assert code == 2
+
+
+def test_organize_refuses_an_inbox_inside_the_library(
+    catalogue_settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    inbox_inside = catalogue_settings.library / "inbox"
+    inbox_inside.mkdir()
+    code = organize(
+        inbox_inside, catalogue_settings.library, catalogue_settings.data, None, out=io.StringIO()
+    )
+    assert code == 2
+    assert (
+        "organize: the inbox must not be inside the library nor contain it"
+        in capsys.readouterr().err
+    )
+
+
+def test_organize_refuses_a_library_inside_the_inbox(
+    inbox: Path, catalogue_settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    library_inside = inbox / "library"
+    library_inside.mkdir()
+    code = organize(inbox, library_inside, catalogue_settings.data, None, out=io.StringIO())
+    assert code == 2
+    assert (
+        "organize: the inbox must not be inside the library nor contain it"
+        in capsys.readouterr().err
+    )
+
+
+def test_organize_refuses_the_inbox_and_the_library_being_the_same_directory(
+    catalogue_settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = organize(
+        catalogue_settings.library,
+        catalogue_settings.library,
+        catalogue_settings.data,
+        None,
+        out=io.StringIO(),
+    )
+    assert code == 2
+    assert (
+        "organize: the inbox must not be inside the library nor contain it"
+        in capsys.readouterr().err
+    )
 
 
 def test_organize_refuses_a_missing_explicit_config(
