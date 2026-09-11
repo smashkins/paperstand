@@ -387,6 +387,7 @@ class Scanner:
                         # A legacy row: there was never a hash to compare
                         # against, so whatever this path holds now becomes its
                         # content identity, once.
+                        stale = stored.size != found.size or stored.mtime_ns != found.mtime_ns
                         found_hash = content_hash(root / found.rel_path)
                         stored = self._rewrite_id(connection, stored, found_hash, taken)
                         self._upsert(
@@ -401,6 +402,11 @@ class Scanner:
                             publication,
                             taken,
                         )
+                        if stale:
+                            # The file changed while no hash was on record, so
+                            # there is no telling whether the bytes did too:
+                            # nothing rendered from them can be trusted.
+                            self._reset_derivatives(connection, stored.id)
                         hashed += 1
                         updated += 1
                     elif stored.size == found.size and stored.mtime_ns == found.mtime_ns:
@@ -805,6 +811,16 @@ class Scanner:
         connection.execute(
             f"UPDATE issues SET {assignments}, updated_at = ?, last_seen_scan = ? WHERE id = ?",
             (*values[1:-3], now, scan_id, identifier),
+        )
+
+    def _reset_derivatives(self, connection: sqlite3.Connection, identifier: str) -> None:
+        """Forget everything rendered from a row's bytes: cache, cover, pages."""
+        clear_cache(self.settings.cache_path, identifier)
+        connection.execute(
+            "UPDATE issues SET cover_status = 'pending', cover_error = NULL, "
+            "page_count = NULL, page_w = NULL, page_h = NULL, first_page_text = NULL "
+            "WHERE id = ?",
+            (identifier,),
         )
 
     def _rewrite_id(

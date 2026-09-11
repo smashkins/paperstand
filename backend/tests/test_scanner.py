@@ -537,6 +537,29 @@ def _make_legacy(settings: Settings) -> dict[str, str]:
     return mapping
 
 
+def test_a_legacy_row_whose_file_changed_meanwhile_is_rendered_again(
+    scan_settings: Settings, sample_library: SampleLibrary
+) -> None:
+    """A legacy row has no hash to compare against, so a file whose stat moved
+    since the last pre-upgrade scan may well hold different bytes: its cover
+    is rendered again, while every other legacy row keeps the cover it had."""
+    scan_once(scan_settings)
+    _make_legacy(scan_settings)
+    target = sample_library.path(A_NEWSPAPER)
+    with target.open("ab") as handle:
+        handle.write(b"\n%% changed before the upgrade scan\n")
+
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    assert result.hashed == sample_library.catalogued_files
+    assert result.covers_done == 1
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    assert has_cover(scan_settings.cache_path, identifier)
+    row = query(scan_settings, "SELECT cover_status FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["cover_status"] == "ok"
+
+
 def test_a_legacy_catalogue_is_backfilled_once_and_stays_quick_after(
     scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
 ) -> None:
