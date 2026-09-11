@@ -97,6 +97,38 @@ def test_a_declared_folder_basename_differing_from_the_title_works_as_an_alias(
     )
 
 
+def test_a_declared_folder_basename_aliases_an_already_configured_title(
+    tmp_path: Path,
+) -> None:
+    """When the title a declared folder names is *already* configured, its
+    basename must be merged into that title's own aliases, not skipped: a
+    name spelled after the folder still has to resolve."""
+    root = tmp_path / "library"
+    folder = root / "Magazines" / "Edizione Sud"
+    folder.mkdir(parents=True)
+    (folder / "publication.yml").write_text("title: Orizzonte\n", encoding="utf-8")
+    config = PaperstandConfig.model_validate(
+        {
+            "libraries": [
+                {
+                    "name": "Magazines",
+                    "path": "Magazines",
+                    "kind": "magazine",
+                    "titles": ["Orizzonte"],
+                }
+            ]
+        }
+    )
+
+    resolved = Resolver(root, config).resolve("Edizione Sud - 2026-03-17.pdf", MTIME)
+
+    assert isinstance(resolved, Resolved)
+    assert resolved.issue.title_name == "Orizzonte"
+    assert resolved.destination.rel_path == (
+        "Magazines/Edizione Sud/2026/Edizione Sud - 2026-03-17.pdf"
+    )
+
+
 def test_the_same_title_configured_in_two_libraries_is_ambiguous(tmp_path: Path) -> None:
     root = tmp_path / "library"
     root.mkdir()

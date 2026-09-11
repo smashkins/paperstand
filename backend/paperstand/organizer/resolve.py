@@ -93,17 +93,28 @@ def _augmented(library: LibraryConfig, title_folders: dict[tuple[str, str], str]
     Every publication declared somewhere under this library that
     ``paperstand.yml`` does not already name becomes a configured title of
     its own, aliased to its folder's basename when that differs from the
-    declared display title — the canonical file name is spelled after the
-    folder, so the parser must recognise both spellings.
+    declared display title. A folder whose title is already configured
+    instead has its basename merged into that title's own aliases — either
+    way, the canonical file name is spelled after the folder, so the parser
+    must recognise both spellings, even for a title ``paperstand.yml``
+    already names.
     """
-    configured = set(library.title_names)
-    extra: list[TitleConfig] = []
+    titles = list(library.titles)
+    by_name = {title.name: index for index, title in enumerate(titles)}
     for (owner, title), folder in title_folders.items():
-        if owner != library.name or title in configured:
+        if owner != library.name:
             continue
         basename = PurePosixPath(folder).name
-        extra.append(TitleConfig(name=title, aliases=[basename] if basename != title else []))
-    return library.model_copy(update={"titles": [*library.titles, *extra]})
+        index = by_name.get(title)
+        if index is None:
+            titles.append(TitleConfig(name=title, aliases=[basename] if basename != title else []))
+            continue
+        if basename == title or basename in titles[index].aliases:
+            continue
+        titles[index] = titles[index].model_copy(
+            update={"aliases": [*titles[index].aliases, basename]}
+        )
+    return library.model_copy(update={"titles": titles})
 
 
 class Resolver:
