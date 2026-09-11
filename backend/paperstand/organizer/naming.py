@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 from paperstand.parsing import ParsedIssue
 
@@ -112,8 +113,15 @@ def _is_safe_component(name: str) -> bool:
     return bool(name.strip()) and "/" not in name and name not in (".", "..")
 
 
-def plan_issue(issue: ParsedIssue) -> OrganizePlan:
+def plan_issue(issue: ParsedIssue, *, publication_folder: str | None = None) -> OrganizePlan:
     """Where ``issue`` would live under the canonical layout, or why it would not.
+
+    ``publication_folder``, when given, is the folder — relative to the library
+    root — of the declared publication ``issue``'s title belongs to. The issue
+    then plans into ``<publication_folder>/<YYYY>/``, and the *folder's own*
+    basename, not ``issue.title_name`` (which may be the yml's display title),
+    goes into the file name: a file already inside its declared folder, named
+    after the folder the way the grammar requires, plans onto itself.
 
     Checked in this order, the first that applies wins:
 
@@ -133,16 +141,23 @@ def plan_issue(issue: ParsedIssue) -> OrganizePlan:
         return Unsorted(reason="no date in the name or the folder")
     if issue.date_source == "mtime":
         return Unsorted(reason="date would come from the file's modification time")
-    if not _is_safe_component(issue.title_name):
-        return Unsorted(reason=f'title "{issue.title_name}" is not a valid folder name')
+    title = (
+        PurePosixPath(publication_folder).name
+        if publication_folder is not None
+        else issue.title_name
+    )
+    if not _is_safe_component(title):
+        return Unsorted(reason=f'title "{title}" is not a valid folder name')
     if issue.variant is not None and " - " in issue.variant:
         return Unsorted(
             reason=f'variant "{issue.variant}" contains " - ", which a canonical name '
             "could not read back"
         )
     date = iso_date(issue.issue_date, issue.date_precision)
-    folder = canonical_folder(issue.title_name, issue.issue_date.year)
-    filename = canonical_filename(
-        issue.title_name, date, issue.issue_number, issue.volume, issue.variant
+    folder = (
+        f"{publication_folder}/{issue.issue_date.year:04d}"
+        if publication_folder is not None
+        else canonical_folder(title, issue.issue_date.year)
     )
+    filename = canonical_filename(title, date, issue.issue_number, issue.volume, issue.variant)
     return CanonicalPath(folder=folder, filename=filename)

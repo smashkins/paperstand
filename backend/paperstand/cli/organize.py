@@ -2,9 +2,10 @@
 
 Mirrors ``parse-report``: same walk, same configuration discovery, same parser.
 The only difference is what gets printed for each file — the canonical path it
-would get under `<Title>/<YYYY>/<Title> - <ISO date>[ - n<number>].pdf`, or why
-it would stay put. Nothing is ever opened for writing: this command builds
-names, it does not create, move, rename or delete a single file.
+would get under `<Title>/<YYYY>/<Title> - <ISO date>[ - n<number>].pdf`, or
+inside its own declared publication folder, or why it would stay put. Nothing
+is ever opened for writing: this command builds names, it does not create,
+move, rename or delete a single file.
 """
 
 from __future__ import annotations
@@ -20,10 +21,42 @@ from paperstand.cli.parse import (
     missing_explicit_config,
     parse_file,
 )
+from paperstand.logging import get_logger
 from paperstand.organizer import Unsorted, plan_issue
-from paperstand.scanner.walker import iter_library_files
+from paperstand.publication import PublicationIndex
+from paperstand.scanner.walker import Walk
+
+log = get_logger(__name__)
 
 __all__ = ["organize_plan"]
+
+
+def _declared_title_folders(index: PublicationIndex, folders: dict[str, str]) -> dict[str, str]:
+    """Every declared title's own folder, keyed by the title it declares.
+
+    Lets a file that is *not itself* inside a declared folder — a date-folder
+    file whose configured title a `publication.yml` elsewhere also declares —
+    plan into that folder too, the same way the scanner joins it to the same
+    title row. Two folders declaring the same title is a mistake worth a
+    warning, not a silent pick: the first one found while walking is kept.
+    """
+    mapping: dict[str, str] = {}
+    for folder in folders:
+        declared = index.get(folder)
+        if declared is None:
+            continue
+        existing = mapping.get(declared.title)
+        if existing is None:
+            mapping[declared.title] = declared.folder
+        elif existing != declared.folder:
+            log.warning(
+                "%r is declared by both %s and %s; %s wins",
+                declared.title,
+                existing,
+                declared.folder,
+                existing,
+            )
+    return mapping
 
 
 def organize_plan(
@@ -46,26 +79,39 @@ def organize_plan(
     print(f"configuration: {resolved_config or 'auto-discovered'}", file=stream)
     print(file=stream)
 
+    walk = Walk(root, config)
+    buffered = list(walk)
+    index = PublicationIndex(root)
+    index.load_all(walk.publications)
+    title_folders = _declared_title_folders(index, walk.publications)
+
     # Source paths grouped by the canonical path they resolve to, so that two
     # (or more) files landing on the same name can be reported together instead
     # of one silently winning.
     sources_by_canonical: dict[str, list[str]] = defaultdict(list)
     planned = 0
+    in_place = 0
     unsorted = 0
-    for rel_path in iter_library_files(root, config):
-        issue = parse_file(rel_path, root, config)
+    for found in buffered:
+        rel_path = found.rel_path
+        publication = index.get(found.publication_dir) if found.publication_dir else None
+        issue = parse_file(rel_path, root, config, publication)
         if issue is None:
             # Belongs to no configured library: parse-report skips it the same
             # way, since no profile ran on it at all.
             continue
-        plan = plan_issue(issue)
+        plan = plan_issue(issue, publication_folder=title_folders.get(issue.title_name))
         if isinstance(plan, Unsorted):
             unsorted += 1
             print(f"{rel_path} -> unsorted: {plan.reason}", file=stream)
             continue
-        planned += 1
         sources_by_canonical[plan.rel_path].append(rel_path)
-        print(f"{rel_path} -> {plan.rel_path}", file=stream)
+        if plan.rel_path == rel_path:
+            in_place += 1
+            print(f"{rel_path} -> in place", file=stream)
+        else:
+            planned += 1
+            print(f"{rel_path} -> {plan.rel_path}", file=stream)
 
     collisions = {
         canonical: sources
@@ -80,5 +126,9 @@ def organize_plan(
                 print(f"  {source}", file=stream)
 
     print(file=stream)
-    print(f"{planned} planned, {unsorted} unsorted, {len(collisions)} collision(s)", file=stream)
+    print(
+        f"{planned} planned, {in_place} in place, {unsorted} unsorted, "
+        f"{len(collisions)} collision(s)",
+        file=stream,
+    )
     return 0
