@@ -17,6 +17,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+import pymupdf
 import pytest
 import yaml
 from PIL import Image
@@ -999,6 +1000,26 @@ def test_issue_key_number_groups_same_numbered_issues_and_never_numberless_ones(
     # Both numberless: never grouped together on that basis alone.
     assert rows[plain_a][1] is None
     assert rows[plain_b][1] is None
+
+
+def test_an_undecodable_publication_yml_is_a_warning_not_a_failed_scan(tmp_path: Path) -> None:
+    """`path.read_text("utf-8")` raising `UnicodeDecodeError` must land the
+    same way an invalid yml does: one warning, the folder left undeclared,
+    the scan still `ok` with no error charged to it."""
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Weekly"
+    folder.mkdir(parents=True)
+    (folder / "publication.yml").write_bytes(b"\xff\xfe")
+    document = pymupdf.open()
+    document.new_page()
+    document.save(folder / "Weekly - 2026-01-01.pdf")
+    document.close()
+
+    settings = quiet_settings(root, tmp_path / "data")
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert result.errors == 0
 
 
 def test_a_scan_never_writes_inside_the_library(

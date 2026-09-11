@@ -119,7 +119,13 @@ def load_publication(path: Path) -> PublicationConfig:
     ``<path>: <key>: <msg>``, so a caller can log or raise it verbatim.
     """
     try:
-        raw = yaml.safe_load(path.read_text("utf-8"))
+        text = path.read_text("utf-8")
+    except UnicodeDecodeError as error:
+        raise PublicationError(f"{path}: not valid UTF-8: {error}") from error
+    except OSError as error:
+        raise PublicationError(f"{path}: cannot be read: {error}") from error
+    try:
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise PublicationError(f"{path}: not valid YAML: {error}") from error
     if raw is None:

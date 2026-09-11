@@ -81,6 +81,26 @@ def test_an_unknown_key_names_the_file_and_the_key(tmp_path: Path) -> None:
     assert "frequenzy" in message
 
 
+def test_not_valid_utf8(tmp_path: Path) -> None:
+    directory = tmp_path / "Corriere del Ponte"
+    directory.mkdir()
+    path = directory / PUBLICATION_FILE
+    path.write_bytes(b"\xff\xfe")
+    with pytest.raises(PublicationError, match="not valid UTF-8"):
+        load_publication(path)
+
+
+def test_cannot_be_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = write(tmp_path, "Corriere del Ponte", "id: corriere-del-ponte\n")
+
+    def forbidden(self: Path, encoding: str) -> str:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(Path, "read_text", forbidden)
+    with pytest.raises(PublicationError, match="cannot be read"):
+        load_publication(path)
+
+
 def test_not_valid_yaml(tmp_path: Path) -> None:
     path = write(tmp_path, "Corriere del Ponte", "id: [unterminated\n")
     with pytest.raises(PublicationError, match="not valid YAML"):
@@ -187,6 +207,23 @@ def test_index_warns_once_and_caches(tmp_path: Path, caplog: pytest.LogCaptureFi
     warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
     assert len(warnings) == 1
     assert "frequenzy" in warnings[0].message
+
+
+def test_index_warns_once_on_undecodable_bytes(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    directory = tmp_path / "Corriere del Ponte"
+    directory.mkdir()
+    (directory / PUBLICATION_FILE).write_bytes(b"\xff\xfe")
+    index = PublicationIndex(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        first = index.get("Corriere del Ponte")
+        second = index.get("Corriere del Ponte")
+    assert first is None
+    assert second is None
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert "not valid UTF-8" in warnings[0].message
 
 
 def test_a_yml_at_the_library_root_is_ignored_with_a_warning(
