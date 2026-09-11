@@ -171,6 +171,10 @@ class Parser:
         would thrash if each one needed a parser of its own.
         """
         path = PurePosixPath(rel_path)
+        if trace is not None:
+            trace.append(
+                ("publication", f"declared at {publication.folder!r}" if publication else "none")
+            )
         folders = self._folder_components(path, publication)
         clean = clean_stem(path.stem, self._strip, self._replace, trace)
         spaced = clean.spaced
