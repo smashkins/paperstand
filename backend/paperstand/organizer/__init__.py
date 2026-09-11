@@ -1,10 +1,20 @@
-"""Working out the canonical name of an issue, read-only.
+"""Planning, and now performing, an issue's move into the canonical layout.
 
-This package never writes, moves, renames or deletes anything: it turns a
+:mod:`paperstand.organizer.naming` is pure and read-only: it turns a
 :class:`~paperstand.parsing.ParsedIssue` into the path it would get under the
-canonical library layout. See :mod:`paperstand.organizer.naming`.
+canonical library layout, nothing else. :mod:`paperstand.organizer.mover` is
+the first code in this package that touches the filesystem for anything but
+reading — one atomic, never-overwriting move, reused for the library, for
+`<inbox>/unsorted/` and for `<inbox>/duplicates/` alike.
 """
 
+from paperstand.organizer.mover import (
+    DestinationOccupied,
+    move_file,
+    park,
+    remove_sidecar,
+    sidecar_path,
+)
 from paperstand.organizer.naming import (
     CanonicalPath,
     OrganizePlan,
@@ -17,10 +27,15 @@ from paperstand.organizer.naming import (
 
 __all__ = [
     "CanonicalPath",
+    "DestinationOccupied",
     "OrganizePlan",
     "Unsorted",
     "canonical_filename",
     "canonical_folder",
     "iso_date",
+    "move_file",
+    "park",
     "plan_issue",
+    "remove_sidecar",
+    "sidecar_path",
 ]
