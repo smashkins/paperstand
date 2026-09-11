@@ -34,6 +34,39 @@ services:
     restart: unless-stopped
     # The image carries its own HEALTHCHECK (GET /api/health every 30s), so
     # `docker compose ps` reports healthy without anything declared here.
+
+  # Optional. Watches INBOX_PATH and imports the PDFs it finds into
+  # LIBRARY_PATH, on a loop — off unless started explicitly:
+  #
+  #   docker compose --profile organizer up -d
+  #
+  # This is the only container that ever writes into the library, and the
+  # only thing it ever does there is add a file moved in from the inbox; a
+  # file already in the library is never touched. See docs/organizer.md.
+  organizer:
+    profiles: ['organizer']
+    image: ghcr.io/smashkins/paperstand:latest
+    # Uncomment to build the image from this checkout instead of pulling it.
+    # build: .
+    container_name: paperstand-organizer
+    volumes:
+      # Where new PDFs are dropped. Must be a local filesystem of the host
+      # running this container: the organizer takes an exclusive lock here
+      # for the length of each run, and `flock` is unreliable over NFS or SMB.
+      - ${INBOX_PATH:-./inbox}:/inbox
+      # Read-write, unlike the main service's mount above.
+      - ${LIBRARY_PATH:-./library}:/library
+      - ${DATA_PATH:-./data}:/data
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+    command: ['organize', '--apply', '--every', '${PAPERSTAND_ORGANIZE_INTERVAL:-300}']
+    restart: unless-stopped
+    # Never serves HTTP, so the image's own HEALTHCHECK (GET /api/health)
+    # would never pass here — nothing is wrong, it just does not apply.
+    healthcheck:
+      disable: true
 # ---------------------------------------------------------------------------
 # On a Synology NAS
 # ---------------------------------------------------------------------------
@@ -52,7 +85,9 @@ services:
 # Keep DATA_PATH on a local volume. The database is SQLite in WAL mode, and
 # SQLite locking is not safe over SMB or NFS — a remote DATA_PATH will corrupt
 # it sooner or later. LIBRARY_PATH may be anywhere the NAS can read, remote
-# mounts included, because nothing ever writes to it.
+# mounts included, because the server never writes to it; the optional
+# organizer service above is the only container that does, and all it ever
+# adds is a file moved in from the inbox.
 #
 # If the library lives on a different share, mount it as a second read-only
 # volume rather than symlinking into it: a symlink out of /library is not

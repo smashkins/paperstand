@@ -1,12 +1,14 @@
 #!/bin/sh
-# Adjust the `paperstand` user to PUID/PGID, then drop privileges and start the
-# server. When the container is already started as a non-root user (`user:` in
-# compose, `--user` on the command line) nothing is adjusted and the process
-# simply runs as whoever it was started as.
+# Adjust the `paperstand` user to PUID/PGID, then drop privileges and run the
+# command it was given — `serve` (the Dockerfile's default `CMD`) or
+# `organize`, for the optional second service. When the container is already
+# started as a non-root user (`user:` in compose, `--user` on the command
+# line) nothing is adjusted and the process simply runs as whoever it was
+# started as.
 set -eu
 
 if [ "$(id -u)" != "0" ]; then
-    exec paperstand serve
+    exec paperstand "$@"
 fi
 
 PUID="${PUID:-1000}"
@@ -73,4 +75,4 @@ if [ -d /data ]; then
     fi
 fi
 
-exec gosu paperstand paperstand serve
+exec gosu paperstand paperstand "$@"

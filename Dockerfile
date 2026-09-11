@@ -69,10 +69,11 @@ WORKDIR /app
 COPY --from=deps /app/.venv /app/.venv
 COPY --from=web /build/build /app/static
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh && mkdir -p /library /data && chown paperstand:paperstand /data
+RUN chmod +x /entrypoint.sh && mkdir -p /library /data /inbox && chown paperstand:paperstand /data
 
 ENV PAPERSTAND_STATIC=/app/static \
     PAPERSTAND_LIBRARY=/library \
+    PAPERSTAND_INBOX=/inbox \
     PAPERSTAND_DATA=/data \
     PORT=8080
 
@@ -86,4 +87,8 @@ STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/api/health').status==200 else 1)"
 
+# The entrypoint passes its arguments straight to `paperstand`, so a bare
+# `docker run` gets the server; the optional organizer service in
+# docker-compose.yml overrides this with `["organize", ...]`.
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["serve"]
