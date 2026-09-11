@@ -25,8 +25,9 @@ proxies already know what those mean.
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `PAPERSTAND_LIBRARY` | `/library` | The read-only root of the PDF collection. Nothing is ever written inside it. |
-| `PAPERSTAND_DATA` | `/data` | The writable directory: the database, the covers, the page cache. Everything Paperstand writes is under here. |
+| `PAPERSTAND_LIBRARY` | `/library` | The root of the PDF collection. The server never writes inside it; the optional organizer service is the only thing that does, and all it ever adds is a file moved in from the inbox. |
+| `PAPERSTAND_INBOX` | `/inbox` | Where `paperstand organize` imports PDFs from — see [Organizer](#organizer) below. Read only by that command; the server never looks at it. |
+| `PAPERSTAND_DATA` | `/data` | The writable directory: the database, the covers, the page cache. Everything the server writes is under here. |
 | `PAPERSTAND_CONFIG` | `<data>/paperstand.yml` | An explicit path for the configuration file, when it should not live on the data volume. |
 | `PAPERSTAND_STATIC` | unset | The directory holding the built web interface. Unset means the API runs without one; the container image sets it to `/app/static`. |
 
@@ -54,6 +55,25 @@ once — before the catalogue is written. The first scan after upgrading to a bu
 content-hash identity reads nearly every file in the library this way, and `hashed` is the only
 feedback while that one-time backfill works through it. A second scan hashes only what actually
 changed: an untouched file costs the fast phase nothing.
+
+### Organizer
+
+`paperstand organize` — [`organizer.md`](organizer.md) — is a second, optional service in the
+container, off by default:
+
+```bash
+docker compose --profile organizer up -d
+```
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PAPERSTAND_ORGANIZE_INTERVAL` | `300` | Seconds between organizer runs, when that profile is started. Read only by the organizer service, never by the main one. |
+
+It mounts `LIBRARY_PATH` **read-write** — the only service that ever does, and all it ever
+adds is a file moved in from the inbox — and `INBOX_PATH` at `/inbox`. The inbox, like `/data`,
+has to be a local filesystem of the host running it: the organizer takes an exclusive lock
+there for the length of each run, and that lock is as unreliable over NFS or SMB as SQLite's
+own locking is.
 
 ### Rendering and the page cache
 
