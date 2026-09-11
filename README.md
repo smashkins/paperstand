@@ -48,7 +48,8 @@ declarative profiles you can extend.
 - **Understands the layouts you already have.** Date folders, one folder per title, one
   folder per year, flat directories, and the messy file names that come with them: numeric
   prefixes, `@handle_` prefixes, duplicate suffixes, Italian and English month names, issue
-  numbers with and without a token in front of them.
+  numbers with and without a token in front of them. A folder can also declare itself a
+  title with a small `publication.yml`, and everything beneath it is filed under that title.
 - **Knows what "today" means.** The front page is the day's newspapers, and falls back to
   the most recent day that has some, saying which day that is.
 - **Covers first.** A shelf per title, a calendar of issues for a daily, year sections for a
@@ -132,7 +133,19 @@ Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf   ← date folders
 Magazines/Orizzonte/Orizzonte_1655_-_6_Marzo_2026.pdf        ← one folder per title
 Magazines/2026/Confini/03/Confini_N_3_Marzo_2026.pdf         ← year and month folders
 Zines/Something.pdf                                           ← flat, no date at all
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17 - Weekend.pdf
+                                                              ← a declared folder
 ```
+
+The last one is a **declared publication**: the folder holds a `publication.yml` that names
+the title and what a file name cannot say — a stable slug, newspaper or magazine, how often
+it comes out, its language, which supplements exist (`Weekend` above), and the main title a
+regional edition belongs to. Every PDF beneath that folder, at any depth, is catalogued under
+that title, never Unsorted, and its name is read as `<Title> - <ISO date>[ - n<number>][ -
+<variant>]`. Declared folders sit next to the other layouts in the same library; a bad
+`publication.yml` is one warning in the log, never a failed scan. See
+[`docs/folder-layout.md`](docs/folder-layout.md#declared-publications) and
+[`docs/configuration.md`](docs/configuration.md#publicationyml).
 
 A file whose title cannot be worked out is not dropped: it goes into an **Unsorted** shelf,
 still readable, with its date and its file name.
@@ -153,8 +166,9 @@ See [`docs/folder-layout.md`](docs/folder-layout.md) for the layouts and
 [`docs/parser-profiles.md`](docs/parser-profiles.md) for how to teach the parser a shape it
 does not know.
 
-`organize-plan` previews a canonical, one-name-per-issue layout for the same files, read-only
-and dry-run only for now: see [`docs/organizer.md`](docs/organizer.md).
+`organize-plan` previews a canonical, one-name-per-issue layout for the same files — into a
+title's declared folder when it has one — read-only and dry-run only for now: see
+[`docs/organizer.md`](docs/organizer.md).
 
 ## OPDS
 
