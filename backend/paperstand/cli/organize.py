@@ -21,54 +21,15 @@ from paperstand.cli.parse import (
     missing_explicit_config,
     parse_file,
 )
-from paperstand.config import PaperstandConfig
 from paperstand.logging import get_logger
 from paperstand.organizer import Unsorted, plan_issue
+from paperstand.organizer.resolve import declared_title_folders
 from paperstand.publication import PublicationIndex
 from paperstand.scanner.walker import Walk
 
 log = get_logger(__name__)
 
 __all__ = ["organize_plan"]
-
-
-def _declared_title_folders(
-    index: PublicationIndex, folders: dict[str, str], config: PaperstandConfig
-) -> dict[tuple[str, str], str]:
-    """Every declared title's own folder, keyed by (library name, title).
-
-    Lets a file that is *not itself* inside a declared folder — a date-folder
-    file whose configured title a `publication.yml` elsewhere also declares —
-    plan into that folder too, the same way the scanner joins it to the same
-    title row. Keyed by the declaring library as well as the title, so two
-    libraries that happen to declare the same title never plan across a
-    library boundary; a folder belonging to no configured library declares
-    nothing here. Two folders in the *same* library declaring the same title
-    is a mistake worth a warning, not a silent pick: the first one found
-    while walking is kept.
-    """
-    mapping: dict[tuple[str, str], str] = {}
-    for folder in folders:
-        declared = index.get(folder)
-        if declared is None:
-            continue
-        library = config.library_for(folder)
-        if library is None:
-            continue
-        key = (library.name, declared.title)
-        existing = mapping.get(key)
-        if existing is None:
-            mapping[key] = declared.folder
-        elif existing != declared.folder:
-            log.warning(
-                "%r is declared by both %s and %s in library %r; %s wins",
-                declared.title,
-                existing,
-                declared.folder,
-                library.name,
-                existing,
-            )
-    return mapping
 
 
 def organize_plan(
@@ -95,7 +56,7 @@ def organize_plan(
     buffered = list(walk)
     index = PublicationIndex(root)
     index.load_all(walk.publications)
-    title_folders = _declared_title_folders(index, walk.publications, config)
+    title_folders = declared_title_folders(index, walk.publications, config)
 
     # Source paths grouped by the canonical path they resolve to, so that two
     # (or more) files landing on the same name can be reported together instead
