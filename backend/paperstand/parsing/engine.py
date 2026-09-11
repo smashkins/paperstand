@@ -428,9 +428,23 @@ class Parser:
             if trace is not None:
                 trace.append(("number", "disabled by the profile"))
             return None, None, None
-        end = config_match.end if config_match is not None else 0
+        title_span = pattern.spans.get("title") if pattern is not None else None
+        if config_match is not None:
+            end = config_match.end
+            search_text = masked
+        elif title_span is not None:
+            # No configured title matched this pattern's `title` capture — a
+            # declared publication's title is never represented by
+            # `config_match` — so the span itself is masked out before N1/N2
+            # search the name: a title's own digits, or a token-shaped word
+            # inside it (`No 5 Weekly`), must never be read as an issue number.
+            end = title_span[1]
+            search_text = mask(masked, [title_span])
+        else:
+            end = 0
+            search_text = masked
         hit = find_number(
-            masked,
+            search_text,
             self._numbers,
             allow_bare=allow_bare,
             bare_from=end,

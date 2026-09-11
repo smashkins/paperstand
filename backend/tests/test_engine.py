@@ -476,6 +476,53 @@ def test_n2_follows_the_publications_kind_not_the_librarys() -> None:
     assert suppressed.issue_number is None
 
 
+def test_a_declared_titles_own_digits_are_not_read_as_the_issue_number() -> None:
+    """Under a declaration the title is never represented by `config_match`
+    (it is not a configured title, only a declared one), so `Cronaca 24
+    Pagine` — a number *inside* the masthead — must not fall through to the
+    bare-number rule N2 the way a newspaper library's own N2 suppression
+    would otherwise no longer protect it from, once the library is a
+    magazine."""
+    config = config_with({"extends": "default"})
+    library = config.library_for("M/x.pdf")
+    assert library is not None
+    profile = config.profile_for(library)
+    publication = DeclaredPublication(folder="M/Cronaca 24 Pagine", config=PublicationConfig())
+
+    issue = parse_path(
+        "M/Cronaca 24 Pagine/Cronaca 24 Pagine - 2026-03-17.pdf",
+        library,
+        profile,
+        MTIME,
+        publication,
+    )
+
+    assert issue.title_name == "Cronaca 24 Pagine"
+    assert issue.issue_number is None
+
+
+def test_a_declared_titles_own_digits_do_not_hide_a_real_issue_number() -> None:
+    """The same masthead, with a genuine ` - n7` tail: the title span is
+    masked out of the search, but the pattern's own `number` group is read
+    exactly as before."""
+    config = config_with({"extends": "default"})
+    library = config.library_for("M/x.pdf")
+    assert library is not None
+    profile = config.profile_for(library)
+    publication = DeclaredPublication(folder="M/Cronaca 24 Pagine", config=PublicationConfig())
+
+    issue = parse_path(
+        "M/Cronaca 24 Pagine/Cronaca 24 Pagine - 2026-03-17 - n7.pdf",
+        library,
+        profile,
+        MTIME,
+        publication,
+    )
+
+    assert issue.title_name == "Cronaca 24 Pagine"
+    assert issue.issue_number == 7
+
+
 def test_folder_components_exclude_the_publication_folder_itself() -> None:
     """Without the exclusion, a publication folder that happens to look like a
     year would shadow the real date folder underneath it (F1)."""
