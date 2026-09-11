@@ -630,7 +630,7 @@ def search_issues(
 
 
 class EntryFacts(NamedTuple):
-    """The two things an OPDS entry needs that no REST response carries.
+    """What an OPDS entry needs that no REST response carries.
 
     ``updated_at`` is Atom's ``<updated>``, which a client polls on. It has to be
     the instant the *entry* last changed rather than the instant the issue was
@@ -644,13 +644,17 @@ class EntryFacts(NamedTuple):
     shelf nobody can read; the parser worked out something from the file name
     even when it could not place it, and that is what to show.
 
-    Neither is on :class:`~paperstand.schemas.Issue`: the web interface has no
-    use for them, and the generated TypeScript client should not grow fields for
-    a feed it never reads.
+    ``language`` is the issue's title's declared language tag, or ``None`` when
+    the title is not a declared publication or declares none.
+
+    None of the three is on :class:`~paperstand.schemas.Issue`: the web
+    interface has no use for them, and the generated TypeScript client should
+    not grow fields for a feed it never reads.
     """
 
     updated_at: str
     display_name: str | None
+    language: str | None
 
 
 def file_stem(filename: str) -> str:
@@ -666,7 +670,7 @@ def entry_facts(connection: sqlite3.Connection, issue_ids: Sequence[str]) -> dic
     placeholders = ", ".join("?" * len(issue_ids))
     rows = connection.execute(
         "SELECT i.id AS id, i.updated_at AS updated_at, i.derived_title AS derived_title, "
-        "i.filename AS filename, t.source AS source "
+        "i.filename AS filename, t.source AS source, t.language AS language "
         f"FROM issues i JOIN titles t ON t.id = i.title_id WHERE i.id IN ({placeholders})",
         tuple(issue_ids),
     ).fetchall()
@@ -675,7 +679,7 @@ def entry_facts(connection: sqlite3.Connection, issue_ids: Sequence[str]) -> dic
         name: str | None = None
         if row["source"] == "unsorted":
             name = str(row["derived_title"]).strip() or file_stem(str(row["filename"]))
-        facts[str(row["id"])] = EntryFacts(str(row["updated_at"]), name)
+        facts[str(row["id"])] = EntryFacts(str(row["updated_at"]), name, row["language"])
     return facts
 
 
