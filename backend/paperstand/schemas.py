@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 Kind = Literal["newspaper", "magazine"]
 DatePrecision = Literal["day", "month", "year", "none"]
 DateSource = Literal["filename", "mixed", "folder", "mtime", "none"]
-TitleSource = Literal["config", "folder", "filename", "pattern", "unsorted"]
+TitleSource = Literal["config", "folder", "filename", "pattern", "unsorted", "publication"]
 IssueSort = Literal["date_desc", "date_asc", "added_desc"]
 TitleSort = Literal["name", "latest"]
 ScanPhase = Literal["catalogue", "covers"]

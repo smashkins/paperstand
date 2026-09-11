@@ -796,7 +796,7 @@ export interface components {
 			 * Source
 			 * @enum {string}
 			 */
-			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted';
+			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted' | 'publication';
 			/** Thumb Url */
 			thumb_url?: string | null;
 		};
@@ -829,7 +829,7 @@ export interface components {
 			 * Source
 			 * @enum {string}
 			 */
-			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted';
+			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted' | 'publication';
 			/** Thumb Url */
 			thumb_url?: string | null;
 			/** Years */

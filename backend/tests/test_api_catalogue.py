@@ -155,10 +155,17 @@ def test_the_calendar_maps_every_day_to_its_issue(catalogue_client: TestClient) 
     title = title_named(catalogue_client, "Corriere del Ponte")
 
     calendar = catalogue_client.get(f"/api/titles/{title['id']}/calendar").json()
+    issues = catalogue_client.get(
+        "/api/issues", params={"title": title["id"], "limit": 200}
+    ).json()["items"]
+    distinct_dates = {issue["issue_date"] for issue in issues}
 
     assert calendar["year"] == SAMPLE_TODAY.year
     assert calendar["years"] == [{"year": SAMPLE_TODAY.year, "count": title["issue_count"]}]
-    assert len(calendar["days"]) == title["issue_count"]
+    # A day may hold both the daily and a same-day supplement; the calendar maps
+    # one issue per day, so it has as many entries as there are distinct dates,
+    # not one per issue.
+    assert len(calendar["days"]) == len(distinct_dates)
     assert SAMPLE_TODAY.isoformat() in calendar["days"]
     for day, identifier in calendar["days"].items():
         issue = catalogue_client.get(f"/api/issues/{identifier}").json()

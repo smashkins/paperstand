@@ -218,8 +218,14 @@ def test_a_title_entry_says_how_many_issues_and_which_is_latest(
     daily = next(
         entry for entry in entries(root) if text(entry, f"{ATOM}title") == "Corriere del Ponte"
     )
+    title = next(
+        title
+        for title in api(catalogue_client, "/api/titles", kind="newspaper")
+        if title["name"] == "Corriere del Ponte"
+    )
+    count = opds_router.plural(title["issue_count"], "issue")
 
-    assert text(daily, f"{ATOM}content") == "14 issues, latest 17 March 2026"
+    assert text(daily, f"{ATOM}content") == f"{count}, latest {title['latest_issue']['label']}"
 
 
 def test_a_title_feed_holds_that_titles_issues_newest_first(

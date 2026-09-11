@@ -8,6 +8,7 @@ typed out by hand.
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import shutil
 import sqlite3
@@ -40,7 +41,7 @@ NEWSPAPER_TITLES = {
     "The Daily Ledger",
     "Unsorted",
 }
-MAGAZINE_TITLES = {"Orizzonte", "Confini", "L'Almanacco", "Unsorted"}
+MAGAZINE_TITLES = {"Orizzonte", "Confini", "L'Almanacco", "Bright Meadows", "Unsorted"}
 ZINE_TITLES = {"Random Mag", "Something", "Circuito", "Bright Meadows"}
 
 
@@ -331,15 +332,18 @@ def test_a_changed_file_is_reparsed_and_its_cover_regenerated(
 def test_changing_the_configuration_reassigns_titles_without_rendering(
     scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """ "Giornale della Costa Alta", not "La Gazzetta del Lago Valdora" or
+    "Corriere del Ponte": those two are also declared publications now, and a
+    declared title is never Unsorted regardless of `titles:`."""
     first = scan_once(scan_settings)
-    assert "La Gazzetta del Lago Valdora" in title_names(scan_settings, "newspapers")
+    assert "Giornale della Costa Alta" in title_names(scan_settings, "newspapers")
     moved = issues_in(scan_settings, "newspapers")
 
     config = yaml.safe_load(scan_settings.config_path.read_text("utf-8"))
     for library in config["libraries"]:
         if library["name"] == "Newspapers":
             library["titles"] = [
-                title for title in library["titles"] if title != "La Gazzetta del Lago Valdora"
+                title for title in library["titles"] if title != "Giornale della Costa Alta"
             ]
     scan_settings.config_path.write_text(yaml.safe_dump(config, sort_keys=False), "utf-8")
 
@@ -351,7 +355,7 @@ def test_changing_the_configuration_reassigns_titles_without_rendering(
 
     assert (result.added, result.removed, result.covers_done) == (0, 0, 0)
     assert result.updated == first.added
-    assert "La Gazzetta del Lago Valdora" not in title_names(scan_settings, "newspapers")
+    assert "Giornale della Costa Alta" not in title_names(scan_settings, "newspapers")
     assert issues_in(scan_settings, "newspapers") == moved
     unsorted = query(
         scan_settings,
@@ -787,3 +791,234 @@ def test_the_final_catalogue_snapshot_counts_the_unreadable_path_error(
     last = snapshots[-1]
     assert last.phase == "catalogue"
     assert last.errors == result.errors
+
+
+# ------------------------------------------------------------- declared publications
+
+
+def test_declared_rows_carry_the_publications_metadata(
+    scanned: tuple[Settings, ScanResult, SampleLibrary],
+) -> None:
+    settings, _, _ = scanned
+    row = query(
+        settings,
+        "SELECT source, kind, slug, frequency, language, issue_key, supplements FROM titles "
+        "WHERE library_id = 'newspapers' AND name = 'Corriere del Ponte'",
+    )[0]
+
+    assert row["source"] == "publication"
+    assert row["kind"] == "newspaper"
+    assert row["slug"] == "corriere-del-ponte"
+    assert row["frequency"] == "daily"
+    assert row["language"] == "it"
+    assert row["issue_key"] == "date"
+    assert row["supplements"] == '["Weekend"]'
+
+
+def test_weekend_and_speciale_are_not_duplicates_of_the_plain_issue(
+    scanned: tuple[Settings, ScanResult, SampleLibrary],
+) -> None:
+    settings, _, _ = scanned
+    rows = {
+        str(row["rel_path"]): row["duplicate_of"]
+        for row in query(
+            settings,
+            "SELECT rel_path, duplicate_of FROM issues "
+            "WHERE rel_path LIKE 'Newspapers/Corriere del Ponte/%'",
+        )
+    }
+    assert len(rows) == 3
+    assert all(duplicate_of is None for duplicate_of in rows.values())
+
+
+def test_the_valdora_files_share_the_configured_title_and_upgrade_it(
+    scanned: tuple[Settings, ScanResult, SampleLibrary],
+) -> None:
+    """The declared folder differs from the declared title: the file still
+    joins the row the date-folder files already feed — a canonical name
+    migrates a title one file at a time, not by starting a new one — and,
+    once processed, the row itself says "publication" with a parent_slug."""
+    settings, _, _ = scanned
+    title = query(
+        settings,
+        "SELECT id, source, parent_slug FROM titles WHERE library_id = 'newspapers' "
+        "AND name = 'La Gazzetta del Lago Valdora'",
+    )[0]
+    rel_paths_for_title = [
+        str(row["rel_path"])
+        for row in query(settings, "SELECT rel_path FROM issues WHERE title_id = ?", (title["id"],))
+    ]
+    declared_prefix = "Newspapers/La Gazzetta del Lago (Valdora)/"
+    declared = [path for path in rel_paths_for_title if path.startswith(declared_prefix)]
+    dated = [path for path in rel_paths_for_title if not path.startswith(declared_prefix)]
+
+    assert declared, "the declared file did not join the configured title"
+    assert dated, "the date-folder files should still be under the same title"
+    assert title["source"] == "publication"
+    assert title["parent_slug"] == "la-gazzetta-del-lago"
+
+
+def test_bright_meadows_is_declared_not_unsorted(
+    scanned: tuple[Settings, ScanResult, SampleLibrary],
+) -> None:
+    """No `titles:` entry names it in the configured Magazines library — only
+    the declaration keeps it out of Unsorted."""
+    settings, _, _ = scanned
+    row = query(
+        settings,
+        "SELECT t.name, t.source, i.volume FROM issues i JOIN titles t ON t.id = i.title_id "
+        "WHERE i.rel_path LIKE 'Magazines/Bright Meadows/%'",
+    )[0]
+
+    assert row["name"] == "Bright Meadows"
+    assert row["source"] == "publication"
+    assert row["volume"] == 2024
+
+
+def test_an_invalid_publication_yml_warns_naming_the_file_and_the_key(
+    sample_library: SampleLibrary, data_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Circuito's own file stays exactly as it always has: the warning is the
+    only visible effect, and it costs the scan no error."""
+    settings = prepare(sample_library.root, data_dir)
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert result.errors == 0
+    matches = [
+        record.message
+        for record in caplog.records
+        if record.levelno >= logging.WARNING
+        and "Circuito" in record.message
+        and "frequenzy" in record.message
+    ]
+    assert matches, "expected a warning naming the invalid yml's file and its offending key"
+    unsorted = {
+        str(row["derived_title"])
+        for row in query(
+            settings,
+            "SELECT i.derived_title FROM issues i JOIN titles t ON t.id = i.title_id "
+            "WHERE t.name = 'Unsorted' AND i.library_id = 'magazines'",
+        )
+    }
+    assert "Circuito" in unsorted
+
+
+def test_editing_a_publication_yml_reparses_without_rendering_a_cover(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_once(scan_settings)
+    rel_path = str(
+        query(scan_settings, "SELECT rel_path FROM issues WHERE variant = 'Weekend'")[0]["rel_path"]
+    )
+    before = query(scan_settings, "SELECT matched_rule FROM issues WHERE rel_path = ?", (rel_path,))
+    assert "variant:declared" in str(before[0]["matched_rule"])
+
+    yml_path = sample_library.path("Newspapers/Corriere del Ponte/publication.yml")
+    edited = yml_path.read_text("utf-8").replace("supplements: [Weekend]", "supplements: []")
+    yml_path.write_text(edited, "utf-8")
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while only a publication.yml changed")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    assert result.added == 0
+    after = query(scan_settings, "SELECT matched_rule FROM issues WHERE rel_path = ?", (rel_path,))
+    assert "variant:undeclared" in str(after[0]["matched_rule"])
+
+
+def test_removing_a_publication_yml_reverts_to_the_configured_title(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_once(scan_settings)
+    rel_path = str(
+        query(
+            scan_settings,
+            "SELECT rel_path FROM issues WHERE rel_path LIKE "
+            "'Newspapers/Corriere del Ponte/%' AND variant IS NULL",
+        )[0]["rel_path"]
+    )
+    before = query(scan_settings, "SELECT matched_rule FROM issues WHERE rel_path = ?", (rel_path,))
+    assert "title:publication" in str(before[0]["matched_rule"])
+
+    sample_library.path("Newspapers/Corriere del Ponte/publication.yml").unlink()
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while only a publication.yml was removed")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    assert result.added == 0
+    after = query(scan_settings, "SELECT matched_rule FROM issues WHERE rel_path = ?", (rel_path,))
+    assert "title:config" in str(after[0]["matched_rule"])
+
+
+def test_issue_key_number_groups_same_numbered_issues_and_never_numberless_ones(
+    tmp_path: Path,
+) -> None:
+    """A title declared `issue_key: number`: two files sharing a number are
+    duplicates of one another no matter their dates, but two files that both
+    lack a number are never folded together just because neither has one —
+    a missing key component falls back to the full key."""
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Weekly"
+    folder.mkdir(parents=True)
+    (folder / "publication.yml").write_text("issue_key: number\n", encoding="utf-8")
+    (folder / "Weekly - 2026-01-01 - n1.pdf").write_bytes(b"%PDF-1.7\n" + b"a" * 200)
+    (folder / "Weekly - 2026-02-01 - n1.pdf").write_bytes(b"%PDF-1.7\n" + b"b" * 100)
+    (folder / "Weekly - 2026-03-01.pdf").write_bytes(b"%PDF-1.7\n" + b"c" * 200)
+    (folder / "Weekly - 2026-04-01.pdf").write_bytes(b"%PDF-1.7\n" + b"d" * 200)
+
+    settings = quiet_settings(root, tmp_path / "data")
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    rows = {
+        str(row["rel_path"]): (str(row["id"]), row["duplicate_of"])
+        for row in query(settings, "SELECT id, rel_path, duplicate_of FROM issues")
+    }
+    n1a = "Zines/Weekly/Weekly - 2026-01-01 - n1.pdf"
+    n1b = "Zines/Weekly/Weekly - 2026-02-01 - n1.pdf"
+    plain_a = "Zines/Weekly/Weekly - 2026-03-01.pdf"
+    plain_b = "Zines/Weekly/Weekly - 2026-04-01.pdf"
+
+    # Same number, different dates: one wins, the other is its duplicate.
+    id_a, dup_a = rows[n1a]
+    id_b, dup_b = rows[n1b]
+    assert (dup_a is None) != (dup_b is None)
+    winner_id = id_a if dup_a is None else id_b
+    loser_dup = dup_b if dup_a is None else dup_a
+    assert loser_dup == winner_id
+
+    # Both numberless: never grouped together on that basis alone.
+    assert rows[plain_a][1] is None
+    assert rows[plain_b][1] is None
+
+
+def test_a_scan_never_writes_inside_the_library(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    before = _fingerprint(sample_library.root)
+    assert before, "the sample library fixture produced no files to check"
+    settings = prepare(sample_library.root, data_dir)
+
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert _fingerprint(sample_library.root) == before
+
+
+def _fingerprint(root: Path) -> dict[str, tuple[int, bytes]]:
+    """Every file under ``root``, keyed by path, to its mtime and its bytes."""
+    fingerprints: dict[str, tuple[int, bytes]] = {}
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            path = Path(dirpath) / name
+            fingerprints[str(path)] = (path.stat().st_mtime_ns, path.read_bytes())
+    return fingerprints
