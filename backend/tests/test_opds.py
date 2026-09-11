@@ -218,8 +218,14 @@ def test_a_title_entry_says_how_many_issues_and_which_is_latest(
     daily = next(
         entry for entry in entries(root) if text(entry, f"{ATOM}title") == "Corriere del Ponte"
     )
+    title = next(
+        title
+        for title in api(catalogue_client, "/api/titles", kind="newspaper")
+        if title["name"] == "Corriere del Ponte"
+    )
+    count = opds_router.plural(title["issue_count"], "issue")
 
-    assert text(daily, f"{ATOM}content") == "14 issues, latest 17 March 2026"
+    assert text(daily, f"{ATOM}content") == f"{count}, latest {title['latest_issue']['label']}"
 
 
 def test_a_title_feed_holds_that_titles_issues_newest_first(
@@ -234,6 +240,44 @@ def test_a_title_feed_holds_that_titles_issues_newest_first(
     dates = [text(entry, f"{DC}date") for entry in entries(root)]
     assert dates == sorted(dates, reverse=True)
     assert href(root, "up").endswith(f"/opds/kind/{title['kind']}")
+
+
+def test_a_declared_titles_language_is_dc_language(catalogue_client: TestClient) -> None:
+    """Corriere del Ponte declares ``language: it``; Random Mag declares none."""
+    _, newspapers = fetch(catalogue_client, "/opds/kind/newspaper")
+    daily = next(
+        entry
+        for entry in entries(newspapers)
+        if text(entry, f"{ATOM}title") == "Corriere del Ponte"
+    )
+    assert text(daily, f"{DC}language") == "it"
+
+    _, magazines = fetch(catalogue_client, "/opds/kind/magazine")
+    random_mag = next(
+        entry for entry in entries(magazines) if text(entry, f"{ATOM}title") == "Random Mag"
+    )
+    assert random_mag.find(f"{DC}language") is None
+
+
+def test_an_issue_entrys_dc_language_matches_its_title(catalogue_client: TestClient) -> None:
+    daily = next(
+        title
+        for title in api(catalogue_client, "/api/titles", kind="newspaper")
+        if title["name"] == "Corriere del Ponte"
+    )
+    random_mag = next(
+        title
+        for title in api(catalogue_client, "/api/titles", kind="magazine")
+        if title["name"] == "Random Mag"
+    )
+
+    _, daily_feed = fetch(catalogue_client, f"/opds/titles/{daily['id']}")
+    _, random_mag_feed = fetch(catalogue_client, f"/opds/titles/{random_mag['id']}")
+
+    assert entries(daily_feed)
+    assert all(text(entry, f"{DC}language") == "it" for entry in entries(daily_feed))
+    assert entries(random_mag_feed)
+    assert all(entry.find(f"{DC}language") is None for entry in entries(random_mag_feed))
 
 
 def test_an_unknown_title_is_a_404(catalogue_client: TestClient) -> None:

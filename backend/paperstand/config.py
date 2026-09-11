@@ -350,10 +350,17 @@ def load_config(
     except ProfileError as error:
         raise ConfigError(f"{path}: {error}") from error
     except ValidationError as error:
-        raise ConfigError(f"{path}: {_config_message(error)}") from error
+        raise ConfigError(f"{path}: {validation_message(error)}") from error
 
 
-def _config_message(error: ValidationError) -> str:
+def validation_message(error: ValidationError) -> str:
+    """A single ``key: message; key: message`` line out of a pydantic error.
+
+    Shared by every YAML file Paperstand validates with pydantic —
+    ``paperstand.yml`` here, ``publication.yml`` in
+    :mod:`paperstand.publication` — so the two report a malformed file in the
+    same shape.
+    """
     messages = []
     for item in error.errors():
         location = ".".join(str(part) for part in item["loc"]) or "config"

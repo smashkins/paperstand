@@ -12,6 +12,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A dry-run `organize-plan` command that prints where each file would live
   under a canonical `<Title>/<YYYY>/<Title> - <ISO date>[ - n<number>].pdf`
   layout; nothing it does reaches the running server yet.
+- `publication.yml`: a folder anywhere under a library can now declare itself
+  a title — a slug, a display title, a kind, a frequency, a language, what
+  counts as a duplicate, its declared supplements, a parent — and every PDF
+  beneath it, at any depth, is catalogued under that title, never Unsorted.
+  See [`folder-layout.md`](docs/folder-layout.md#declared-publications) and
+  [`configuration.md`](docs/configuration.md#publicationyml).
+- The canonical grammar now reads a volume and a variant off a name —
+  `<Title> - <ISO date>[ - [v<volume> ]n<number>][ - <variant>]` — exposed as
+  `volume` and `variant` on an issue through the API; the variant is also part
+  of the issue label, which OPDS entries show.
+- `Title` gains `slug`, `frequency`, `language`, `issue_key`, `parent_slug`
+  and `supplements`; `Issue` gains `variant` and `volume`; all nullable, and
+  set only for a declared publication.
+- OPDS entries carry `dc:language` when their title declares one.
+- `organize-plan` plans a declared title's files into its own folder, named
+  after the folder's own basename, and prints `-> in place` for a file
+  already shaped that way; the summary gains that count.
+
+### Changed
+
+- The bundled profile now tries the canonical declared-publication grammar
+  before its other patterns, so a name shaped `<Title> - <ISO date>` is read
+  by it first even outside a declared folder. A file whose name disagrees
+  with the folder it sits in now has the name win: `Title - 2026-03.pdf` in a
+  folder-titled layout used to take its title from the folder, and now takes
+  it from the name, matching every other layout.
 
 ## [0.2.1] - 2026-09-08
 

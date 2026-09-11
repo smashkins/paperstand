@@ -112,16 +112,18 @@ export function formatDateAtPrecision(
 }
 
 /**
- * The line under a cover: `N. 8 · 17 mar 2026`, either half optional.
+ * The line under a cover: `N. 8 · 17 mar 2026 · Weekend`, each part optional.
  *
- * An issue with neither a number nor a date falls back to its file name, the
- * only thing left that identifies it.
+ * The variant is data, not UI text — carried through untranslated, the same
+ * way the backend's own `label` appends it. An issue with none of the three
+ * falls back to its file name, the only thing left that identifies it.
  */
 export function formatIssueLabel(
 	issue: {
 		issue_date?: string | null;
 		date_precision: DatePrecision;
 		issue_number?: string | null;
+		variant?: string | null;
 		filename?: string;
 	},
 	locale = 'en'
@@ -132,6 +134,7 @@ export function formatIssueLabel(
 	}
 	const date = formatDateAtPrecision(issue.issue_date, issue.date_precision, locale);
 	if (date) parts.push(date);
+	if (issue.variant) parts.push(issue.variant);
 	if (parts.length === 0) return issue.filename ?? '';
 	return parts.join(' · ');
 }

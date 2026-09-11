@@ -488,6 +488,10 @@ export interface components {
 			title_id: string;
 			/** Title Name */
 			title_name: string;
+			/** Variant */
+			variant?: string | null;
+			/** Volume */
+			volume?: number | null;
 		};
 		/**
 		 * IssueDetail
@@ -553,6 +557,10 @@ export interface components {
 			title_id: string;
 			/** Title Name */
 			title_name: string;
+			/** Variant */
+			variant?: string | null;
+			/** Volume */
+			volume?: number | null;
 		};
 		/**
 		 * IssuePage
@@ -776,15 +784,21 @@ export interface components {
 			cover_url?: string | null;
 			/** First Date */
 			first_date?: string | null;
+			/** Frequency */
+			frequency?: ('daily' | 'weekly' | 'monthly' | 'irregular') | null;
 			/** Id */
 			id: string;
 			/** Issue Count */
 			issue_count: number;
+			/** Issue Key */
+			issue_key?: ('date' | 'number' | 'date+number') | null;
 			/**
 			 * Kind
 			 * @enum {string}
 			 */
 			kind: 'newspaper' | 'magazine';
+			/** Language */
+			language?: string | null;
 			/** Last Date */
 			last_date?: string | null;
 			latest_issue?: components['schemas']['Issue'] | null;
@@ -792,11 +806,17 @@ export interface components {
 			library_id: string;
 			/** Name */
 			name: string;
+			/** Parent Slug */
+			parent_slug?: string | null;
+			/** Slug */
+			slug?: string | null;
 			/**
 			 * Source
 			 * @enum {string}
 			 */
-			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted';
+			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted' | 'publication';
+			/** Supplements */
+			supplements?: string[] | null;
 			/** Thumb Url */
 			thumb_url?: string | null;
 		};
@@ -809,15 +829,21 @@ export interface components {
 			cover_url?: string | null;
 			/** First Date */
 			first_date?: string | null;
+			/** Frequency */
+			frequency?: ('daily' | 'weekly' | 'monthly' | 'irregular') | null;
 			/** Id */
 			id: string;
 			/** Issue Count */
 			issue_count: number;
+			/** Issue Key */
+			issue_key?: ('date' | 'number' | 'date+number') | null;
 			/**
 			 * Kind
 			 * @enum {string}
 			 */
 			kind: 'newspaper' | 'magazine';
+			/** Language */
+			language?: string | null;
 			/** Last Date */
 			last_date?: string | null;
 			latest_issue?: components['schemas']['Issue'] | null;
@@ -825,11 +851,17 @@ export interface components {
 			library_id: string;
 			/** Name */
 			name: string;
+			/** Parent Slug */
+			parent_slug?: string | null;
+			/** Slug */
+			slug?: string | null;
 			/**
 			 * Source
 			 * @enum {string}
 			 */
-			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted';
+			source: 'config' | 'folder' | 'filename' | 'pattern' | 'unsorted' | 'publication';
+			/** Supplements */
+			supplements?: string[] | null;
 			/** Thumb Url */
 			thumb_url?: string | null;
 			/** Years */

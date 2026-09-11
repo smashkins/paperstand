@@ -474,6 +474,97 @@ def build_zines(builder: LibraryBuilder, year: int) -> None:
     )
 
 
+def build_publications(builder: LibraryBuilder, today: dt.date) -> None:
+    """``publication.yml`` folders — additive to every layout above.
+
+    Dated 30 and 31 days before ``today``, outside the 14-day date-folder
+    window ``build_newspapers`` fills, so nothing here collides with a file
+    the date-folder layout already wrote for the same title and day.
+    """
+    d1 = today - dt.timedelta(days=30)
+    d2 = today - dt.timedelta(days=31)
+    label1 = f"{d1.day} {MONTHS_IT[d1.month - 1]} {d1.year}"
+    label2 = f"{d2.day} {MONTHS_IT[d2.month - 1]} {d2.year}"
+
+    corriere = "Newspapers/Corriere del Ponte"
+    builder.raw(
+        f"{corriere}/publication.yml",
+        (
+            b"id: corriere-del-ponte\n"
+            b"title: Corriere del Ponte\n"
+            b"kind: newspaper\n"
+            b"frequency: daily\n"
+            b"language: it\n"
+            b"issue_key: date\n"
+            b"supplements: [Weekend]\n"
+        ),
+        group="publication.yml",
+    )
+    builder.pdf(
+        f"{corriere}/{d1.year}/Corriere del Ponte - {d1.isoformat()}.pdf",
+        title="Corriere del Ponte",
+        subtitle=label1,
+        size=BROADSHEET,
+        group="Newspapers/<Title> (declared)",
+    )
+    builder.pdf(
+        f"{corriere}/{d1.year}/Corriere del Ponte - {d1.isoformat()} - Weekend.pdf",
+        title="Corriere del Ponte",
+        subtitle=f"{label1} - Weekend",
+        size=BROADSHEET,
+        group="Newspapers/<Title> (declared)",
+    )
+    builder.pdf(
+        f"{corriere}/{d1.year}/Corriere del Ponte - {d2.isoformat()} - Speciale.pdf",
+        title="Corriere del Ponte",
+        subtitle=f"{label2} - Speciale",
+        size=BROADSHEET,
+        group="Newspapers/<Title> (declared)",
+    )
+
+    # The declared title drops the parenthesised edition; the folder — and
+    # the file name, which repeats it — keeps it. A folder differing from the
+    # declared title is exactly the point: this file joins the *configured*
+    # "La Gazzetta del Lago Valdora" title row, which the date-folder files
+    # elsewhere in Newspapers/ already feed.
+    valdora = "Newspapers/La Gazzetta del Lago (Valdora)"
+    builder.raw(
+        f"{valdora}/publication.yml",
+        (b"title: La Gazzetta del Lago Valdora\nparent: la-gazzetta-del-lago\nlanguage: it\n"),
+        group="publication.yml",
+    )
+    builder.pdf(
+        f"{valdora}/{d1.year}/La Gazzetta del Lago (Valdora) - {d1.isoformat()}.pdf",
+        title="La Gazzetta del Lago Valdora",
+        subtitle=label1,
+        size=BROADSHEET,
+        group="Newspapers/<Title> (declared)",
+    )
+
+    # No `titles:` entry names "Bright Meadows" in the configured Magazines
+    # library — without the declaration this file would be Unsorted there.
+    bright_meadows = "Magazines/Bright Meadows"
+    builder.raw(
+        f"{bright_meadows}/publication.yml",
+        b"kind: magazine\nfrequency: monthly\nlanguage: en\n",
+        group="publication.yml",
+    )
+    builder.pdf(
+        f"{bright_meadows}/2024/Bright Meadows - 2024-03 - v2024 n03.pdf",
+        title="Bright Meadows",
+        subtitle="Vol. 2024 No. 3 - March 2024",
+        size=A4,
+        group="Magazines/<Title> (declared)",
+    )
+
+    # Invalid: `frequenzy` is a typo `publication.yml` refuses. Circuito's own
+    # PDF, written by build_magazines, stays exactly as it is today — this
+    # only exercises the one-warning-per-folder path on every sample scan.
+    builder.raw(
+        "Magazines/Circuito/publication.yml", b"frequenzy: monthly\n", group="publication.yml"
+    )
+
+
 def build_noise(builder: LibraryBuilder, today: dt.date) -> None:
     """Files and folders that the walker has to skip."""
     folder = f"Newspapers/{today.year}/{today.month:02d}/{today.day:02d}"
@@ -546,6 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     build_newspapers(builder, args.today, args.days)
     build_magazines(builder, args.today.year)
     build_zines(builder, args.today.year)
+    build_publications(builder, args.today)
     build_noise(builder, args.today)
     elapsed = time.perf_counter() - started
 
@@ -554,6 +646,9 @@ def main(argv: list[str] | None = None) -> int:
         "Magazines/<Title>",
         "Magazines/YYYY/<Title>/MM",
         "Zines (flat)",
+        "Newspapers/<Title> (declared)",
+        "Magazines/<Title> (declared)",
+        "publication.yml",
         "ignored",
     ]
     pdf_count = sum(1 for _ in out.rglob("*.pdf"))

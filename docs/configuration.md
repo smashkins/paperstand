@@ -220,6 +220,47 @@ hand, and covers are not re-rendered.
 
 ---
 
+## `publication.yml`
+
+Where `paperstand.yml` configures the whole library, `publication.yml` declares one title:
+dropped into a folder anywhere under the library root, it turns that folder into a
+**declared publication** — see [`folder-layout.md`](folder-layout.md#declared-publications)
+for what that means for the files beneath it. Every key is optional; `{}` or an empty file
+already says "this folder is a publication, defaults everywhere":
+
+```yaml
+id: corriere-del-ponte        # slug; default: slugify(title)
+title: Corriere del Ponte     # display name; default: the folder's own basename
+kind: newspaper                # newspaper | magazine; default: the library's own kind
+frequency: daily                # daily | weekly | monthly | irregular
+language: it                    # a language tag, e.g. it or en-GB
+issue_key: date                 # date | number | date+number (default): what a duplicate is
+supplements: [Weekend]          # this title's declared variants
+parent: la-gazzetta-del-lago    # the slug of a parent publication, e.g. a regional edition's
+```
+
+| Key | Type | What it does |
+| --- | --- | --- |
+| `id` | slug | The identifying slug stored in the catalogue. Default: `title`, slugified. |
+| `title` | string | The display name. Default: the declaring folder's own basename — the folder stays the identity either way. |
+| `kind` | `newspaper` \| `magazine` | Overrides the library's own kind for this one title. |
+| `frequency` | `daily` \| `weekly` \| `monthly` \| `irregular` | How often it is published. Informational; nothing in Paperstand schedules on it yet. |
+| `language` | language tag | Reaches the API's `language` field and OPDS's `dc:language`. |
+| `issue_key` | `date` \| `number` \| `date+number` | What makes two files the same issue. Default `date+number`, today's behaviour: same date *and* same number (when both are known) makes a duplicate. |
+| `supplements` | list of strings | The variants this title declares, e.g. `[Weekend]`. A variant not listed here is still catalogued, not rejected — only `matched_rule`'s tail says `variant:undeclared` instead of `variant:declared`. |
+| `parent` | slug | The slug of a parent publication — a regional edition naming its main title, say. Not validated against an existing folder. |
+
+Unknown keys are refused, the same way `paperstand.yml`'s are. An invalid file is one
+`log.warning` naming the file and the offending key; the folder is then treated exactly as
+if it declared nothing.
+
+`publication.yml` files are hashed into the scan state the same way `paperstand.yml` is:
+editing one — fixing a typo, adding a supplement — re-parses every file beneath the folders
+that changed at the next scan, without opening a single PDF; removing one reverts those files
+to whatever the usual rules would have made of them.
+
+---
+
 ## Running the server
 
 The container's entrypoint runs `paperstand serve`, and so does `make dev-api`. If you start

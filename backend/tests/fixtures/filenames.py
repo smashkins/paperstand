@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from paperstand.config import PaperstandConfig, config_from_folders, load_config
+from paperstand.publication import DeclaredPublication, PublicationConfig
 
 #: Injected modification time, so that the mtime fallback is deterministic.
 MTIME = dt.date(2026, 4, 1)
@@ -47,6 +48,8 @@ class Expected:
     rule: str
     dedup: bool = False
     title_source: str = "config"
+    volume: int | None = None
+    variant: str | None = None
 
     @property
     def id(self) -> str:
@@ -75,6 +78,41 @@ def example_config() -> PaperstandConfig:
 def discovered_config() -> PaperstandConfig:
     """What Paperstand uses when there is no configuration file at all."""
     return config_from_folders(DISCOVERED_FOLDERS)
+
+
+#: Declared publications the table's rows are parsed under, keyed by their folder.
+PUBLICATIONS: dict[str, DeclaredPublication] = {
+    "Newspapers/Corriere del Ponte": DeclaredPublication(
+        folder="Newspapers/Corriere del Ponte",
+        config=PublicationConfig.model_validate({"supplements": ["Weekend"]}),
+    ),
+    "Newspapers/La Gazzetta del Lago (Valdora)": DeclaredPublication(
+        folder="Newspapers/La Gazzetta del Lago (Valdora)",
+        config=PublicationConfig.model_validate(
+            {"title": "La Gazzetta del Lago Valdora", "parent": "la-gazzetta-del-lago"}
+        ),
+    ),
+    "Zines/Bright Meadows": DeclaredPublication(
+        folder="Zines/Bright Meadows", config=PublicationConfig()
+    ),
+}
+
+
+def publication_for(rel_path: str) -> DeclaredPublication | None:
+    """The declared publication whose folder is the nearest ancestor of ``rel_path``.
+
+    Mirrors :meth:`paperstand.publication.PublicationIndex.nearest`, without a
+    filesystem behind it: the table's rows are parsed with no library on disk.
+    """
+    if "/" not in rel_path:
+        return None
+    parts = rel_path.rsplit("/", 1)[0].split("/")
+    for depth in range(len(parts), 0, -1):
+        folder = "/".join(parts[:depth])
+        found = PUBLICATIONS.get(folder)
+        if found is not None:
+            return found
+    return None
 
 
 #: Files parsed with `paperstand.example.yml`.
@@ -458,6 +496,94 @@ CONFIGURED: tuple[Expected, ...] = (
         rule="D7 N1 title:unsorted",
         title_source="unsorted",
     ),
+    # The canonical grammar itself: a configured title still wins over the
+    # pattern that recognised it, so `title:config` stands even though the
+    # rule tag is `pattern[0]`.
+    Expected(
+        rel_path="Magazines/Confini/Confini - 2026 - n8.pdf",
+        title="Confini",
+        date="2026-01-01",
+        precision="year",
+        source="filename",
+        number=8,
+        derived="Confini",
+        rule="pattern[0] title:config",
+    ),
+    # A variant with no `publication.yml` to declare it against: undeclared,
+    # not rejected — an undeclared supplement is still catalogued (P1.2 design
+    # decision 2), only its rule tail says so.
+    Expected(
+        rel_path="Magazines/Confini/Confini - 2026 - n8 - Speciale.pdf",
+        title="Confini",
+        date="2026-01-01",
+        precision="year",
+        source="filename",
+        number=8,
+        derived="Confini",
+        rule="pattern[0] title:config variant:undeclared",
+        variant="Speciale",
+    ),
+    # A declared publication: the title is the publication's, never Unsorted,
+    # and `derived_title` is unaffected — what the pattern itself captured.
+    Expected(
+        rel_path="Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-09-06.pdf",
+        title="Corriere del Ponte",
+        date="2026-09-06",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="Corriere del Ponte",
+        rule="pattern[0] title:publication",
+        title_source="publication",
+    ),
+    # The declared supplement: `Weekend` is in the publication's own
+    # `supplements`, so the tail says `variant:declared`.
+    Expected(
+        rel_path="Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-09-06 - Weekend.pdf",
+        title="Corriere del Ponte",
+        date="2026-09-06",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="Corriere del Ponte",
+        rule="pattern[0] title:publication variant:declared",
+        title_source="publication",
+        variant="Weekend",
+    ),
+    # An undeclared variant under the same declared publication: accepted and
+    # catalogued under the title all the same (design decision 2), only the
+    # tail differs from Weekend's.
+    Expected(
+        rel_path=(
+            "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-09-05 - Speciale.pdf"
+        ),
+        title="Corriere del Ponte",
+        date="2026-09-05",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="Corriere del Ponte",
+        rule="pattern[0] title:publication variant:undeclared",
+        title_source="publication",
+        variant="Speciale",
+    ),
+    # The publication's `title:` overrides the folder's own name, which keeps
+    # the parenthesised edition: `derived_title` still shows it, since it comes
+    # straight off the file name, untouched by the declaration.
+    Expected(
+        rel_path=(
+            "Newspapers/La Gazzetta del Lago (Valdora)/2026/"
+            "La Gazzetta del Lago (Valdora) - 2026-09-06.pdf"
+        ),
+        title="La Gazzetta del Lago Valdora",
+        date="2026-09-06",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="La Gazzetta del Lago (Valdora)",
+        rule="pattern[0] title:publication",
+        title_source="publication",
+    ),
 )
 
 #: Files parsed with no configuration at all: auto-discovery does the work.
@@ -543,7 +669,7 @@ DISCOVERED: tuple[Expected, ...] = (
         source="filename",
         number=2,
         derived="Bright Meadows",
-        rule="pattern[0] D6 title:pattern",
+        rule="pattern[1] D6 title:pattern",
         title_source="pattern",
     ),
     Expected(
@@ -554,7 +680,7 @@ DISCOVERED: tuple[Expected, ...] = (
         source="filename",
         number=15,
         derived="Bright Meadows",
-        rule="pattern[1] title:pattern",
+        rule="pattern[2] title:pattern",
         title_source="pattern",
     ),
     Expected(
@@ -578,6 +704,62 @@ DISCOVERED: tuple[Expected, ...] = (
         derived="Cronaca 24 Pagine",
         rule="D3 title:filename",
         title_source="filename",
+    ),
+    # No title is configured here: the canonical pattern's own `title` group
+    # wins over the "Zines" folder it sits in, where before this pattern
+    # existed the folder would have won instead.
+    Expected(
+        rel_path="Zines/Random Mag - 2026-03-17.pdf",
+        title="Random Mag",
+        date="2026-03-17",
+        precision="day",
+        source="filename",
+        number=None,
+        derived="Random Mag",
+        rule="pattern[0] title:pattern",
+        title_source="pattern",
+    ),
+    # The canonical grammar's own volume: unlike the old `v<year> c<number>`
+    # shape, `ParsedIssue.volume` is actually populated here.
+    Expected(
+        rel_path="Zines/Bright Meadows - 2024-03 - v2024 n03.pdf",
+        title="Bright Meadows",
+        date="2024-03-01",
+        precision="month",
+        source="filename",
+        number=3,
+        derived="Bright Meadows",
+        rule="pattern[0] title:pattern",
+        title_source="pattern",
+        volume=2024,
+    ),
+    # The same volume file, this time under a declared "Zines/Bright Meadows"
+    # publication: the title comes from the declaration, not the pattern.
+    Expected(
+        rel_path="Zines/Bright Meadows/2024/Bright Meadows - 2024-03 - v2024 n03.pdf",
+        title="Bright Meadows",
+        date="2024-03-01",
+        precision="month",
+        source="filename",
+        number=3,
+        derived="Bright Meadows",
+        rule="pattern[0] title:publication",
+        title_source="publication",
+        volume=2024,
+    ),
+    # An old-shaped name under the same declaration: a publication works
+    # alongside any pattern that matches, not only the canonical one — the
+    # `v<year> c<number>` pattern captures its year as `year`, not `volume`.
+    Expected(
+        rel_path="Zines/Bright Meadows/Bright_Meadows_v2024_c02_Febbraio_2024.pdf",
+        title="Bright Meadows",
+        date="2024-02-01",
+        precision="month",
+        source="filename",
+        number=2,
+        derived="Bright Meadows",
+        rule="pattern[1] D6 title:publication",
+        title_source="publication",
     ),
 )
 

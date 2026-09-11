@@ -17,6 +17,10 @@ forgotten either: :class:`Walk` records it, and :meth:`Walk.covers` then answers
 for any stored path, whether the walk actually looked where that file lives. That
 is what stops a permission error or an unmounted volume from being read as "every
 one of those issues was deleted".
+
+The walk also notices a ``publication.yml`` sitting in a directory it lists — but
+never opens it: reading and validating one is :mod:`paperstand.publication`'s job,
+paid once per declaring folder by the scanner, not once per file the walk yields.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from pathlib import Path
 
 from paperstand.config import PaperstandConfig
 from paperstand.logging import get_logger
+from paperstand.publication import PUBLICATION_FILE
 
 log = get_logger(__name__)
 
@@ -45,6 +50,13 @@ class LibraryFile:
     rel_path: str
     size: int
     mtime_ns: int
+    publication_dir: str | None = None
+    """The nearest ancestor folder declaring a ``publication.yml``, if any.
+
+    Nested declarations: the nearest one wins, by construction — a folder is
+    only ever recorded as the current declaration for what is walked beneath
+    it once its own listing has been read.
+    """
 
     @property
     def filename(self) -> str:
@@ -66,12 +78,14 @@ class Walk:
         self.config = config
         self.root_ok = root.is_dir()
         self.unreadable: set[str] = set()
+        self.publications: dict[str, str] = {}
+        """Folder (relative to the root) -> its ``publication.yml``'s relative path."""
 
     def __iter__(self) -> Iterator[LibraryFile]:
         if not self.root_ok:
             log.warning("library root %s is not a directory; nothing to walk", self.root)
             return
-        yield from self._walk(self.root, self.root.resolve(), "", 0)
+        yield from self._walk(self.root, self.root.resolve(), "", 0, None)
 
     @property
     def complete(self) -> bool:
@@ -95,7 +109,12 @@ class Walk:
         log.warning("cannot read %s%s: %s", self.root, f"/{prefix}" if prefix else "", reason)
 
     def _walk(
-        self, directory: Path, resolved_root: Path, prefix: str, depth: int
+        self,
+        directory: Path,
+        resolved_root: Path,
+        prefix: str,
+        depth: int,
+        publication_dir: str | None,
     ) -> Iterator[LibraryFile]:
         if depth > MAX_DEPTH:
             self._give_up(prefix, f"more than {MAX_DEPTH} levels deep")
@@ -106,6 +125,18 @@ class Walk:
         except OSError as error:
             self._give_up(prefix, str(error))
             return
+        # Noticed before any file of this directory is yielded or any
+        # sub-directory is recursed into, so the declaration is in place for
+        # everything beneath it from the very first file. Never opened here:
+        # that reading and validating a publication.yml is
+        # `paperstand.publication`'s job, paid once per folder by the scanner.
+        if any(not _is_directory(entry) and entry.name == PUBLICATION_FILE for entry in listing):
+            if prefix:
+                folder = prefix.rstrip("/")
+                self.publications[folder] = f"{prefix}{PUBLICATION_FILE}"
+                publication_dir = folder
+            else:
+                log.warning("%s: a publication.yml at the library root is ignored", self.root)
         for entry in listing:
             directory_entry = _is_directory(entry)
             if self.config.is_ignored(entry.name, directory=directory_entry):
@@ -115,7 +146,9 @@ class Walk:
                 if entry.is_symlink() and not _inside(entry.path, resolved_root):
                     log.debug("skipping %s: a symlink leading out of the library", rel_path)
                     continue
-                yield from self._walk(Path(entry.path), resolved_root, f"{rel_path}/", depth + 1)
+                yield from self._walk(
+                    Path(entry.path), resolved_root, f"{rel_path}/", depth + 1, publication_dir
+                )
                 continue
             if not entry.name.lower().endswith(PDF_SUFFIX):
                 continue
@@ -127,7 +160,12 @@ class Walk:
             except OSError as error:
                 self._give_up(rel_path, str(error))
                 continue
-            yield LibraryFile(rel_path=rel_path, size=info.st_size, mtime_ns=info.st_mtime_ns)
+            yield LibraryFile(
+                rel_path=rel_path,
+                size=info.st_size,
+                mtime_ns=info.st_mtime_ns,
+                publication_dir=publication_dir,
+            )
 
 
 def top_level_folders(root: Path) -> list[str]:

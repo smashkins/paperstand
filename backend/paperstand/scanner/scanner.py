@@ -19,10 +19,12 @@ error message; the scan still ends ``ok``.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 import sqlite3
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Literal
@@ -41,6 +43,8 @@ from paperstand.db import (
 from paperstand.logging import get_logger
 from paperstand.parsing import ParsedIssue, parse_path
 from paperstand.parsing.normalize import strip_accents
+from paperstand.parsing.profile import canonical_pattern
+from paperstand.publication import DeclaredPublication, PublicationIndex
 from paperstand.scanner.covers import (
     CoverError,
     CoverResult,
@@ -71,6 +75,8 @@ ISSUE_COLUMNS = (
     "label",
     "matched_rule",
     "has_dedup_suffix",
+    "variant",
+    "volume",
     "added_at",
     "updated_at",
     "last_seen_scan",
@@ -273,9 +279,6 @@ class Scanner:
         root = self.settings.library
         connection = self.database.connection
         stored_hash = get_meta(connection, "config_hash")
-        reparse_all = stored_hash != config.config_hash
-        if reparse_all and stored_hash is not None:
-            log.info("scan %d: the configuration changed; every row is re-parsed", scan_id)
 
         with self.database.transaction():
             self._sync_libraries(connection, config)
@@ -290,7 +293,6 @@ class Scanner:
 
         files_seen = added = updated = errors = 0
         unchanged: list[str] = []
-        walk = Walk(root, config)
 
         def snapshot(*, removed: int = 0) -> None:
             self._publish(
@@ -304,10 +306,30 @@ class Scanner:
                 errors=errors,
             )
 
-        with self.database.transaction():
+        snapshot()
+        # The walk is buffered rather than processed as it streams: every
+        # `publication.yml` it finds has to be known before a single file is
+        # upserted, because the digest of the whole set is folded into the
+        # hash that decides whether everything gets re-parsed. `files_seen`
+        # still climbs snapshot by snapshot while this runs, so a caller
+        # watching progress sees the walk itself, not a stall before it.
+        walk = Walk(root, config)
+        buffered: list[LibraryFile] = []
+        for found in walk:
+            files_seen += 1
+            buffered.append(found)
             snapshot()
-            for found in walk:
-                files_seen += 1
+
+        index = PublicationIndex(root)
+        digest = index.load_all(walk.publications)
+        catalogue_hash = hashlib.sha256(f"{config.config_hash}\n{digest}".encode()).hexdigest()
+        reparse_all = stored_hash != catalogue_hash
+        if reparse_all and stored_hash is not None:
+            log.info("scan %d: the configuration changed; every row is re-parsed", scan_id)
+        self._warn_missing_canonical_pattern(scan_id, config, walk.publications)
+
+        with self.database.transaction():
+            for found in buffered:
                 library = config.library_for(found.rel_path)
                 if library is None:
                     snapshot()
@@ -320,9 +342,18 @@ class Scanner:
                     unchanged.append(stored.id)
                     snapshot()
                     continue
+                publication = index.resolve(found.publication_dir, library, config)
                 try:
                     self._upsert(
-                        connection, scan_id, found, library, config, titles, stored, changed
+                        connection,
+                        scan_id,
+                        found,
+                        library,
+                        config,
+                        titles,
+                        stored,
+                        changed,
+                        publication,
                     )
                 except (sqlite3.Error, ValueError) as error:
                     errors += 1
@@ -353,10 +384,10 @@ class Scanner:
                 # root: with no `paperstand.yml` the configuration is discovered
                 # from the very folders the walk could not list, and dropping
                 # libraries on that basis cascades the catalogue away. The
-                # configuration hash is held back for the same reason — an
+                # catalogue hash is held back for the same reason — an
                 # incomplete scan is no evidence that the catalogue is current.
                 self._drop_empty_libraries(connection, config)
-                set_meta(connection, "config_hash", config.config_hash)
+                set_meta(connection, "config_hash", catalogue_hash)
             self._mark_duplicates(connection)
             # Folded in before the final snapshot, not after, so that snapshot
             # and the ScanResult below report the same total: an unreadable
@@ -395,6 +426,38 @@ class Scanner:
             )
         log.warning("scan %d: %s", scan_id, message)
         return message
+
+    @staticmethod
+    def _warn_missing_canonical_pattern(
+        scan_id: int, config: PaperstandConfig, publications: Iterable[str]
+    ) -> None:
+        """One warning per scan per library whose profile has lost the grammar.
+
+        A custom profile that replaces ``patterns:`` without a leading ``"+"``
+        loses the two bundled volume patterns *and* the declared-publication
+        one along with them. The declaration itself still applies — every file
+        beneath the folder is filed under the declared title — but the volume
+        and the variant are no longer read off a canonical name, so a
+        supplement sharing its date with the plain issue is marked its
+        duplicate. Silent, unless a library actually holds a publication
+        folder; hence the warning.
+        """
+        warned: set[str] = set()
+        for folder in publications:
+            library = config.library_for(folder)
+            if library is None or library.name in warned:
+                continue
+            if canonical_pattern() not in config.profile_for(library).patterns:
+                warned.add(library.name)
+                log.warning(
+                    "scan %d: library %r uses parser %r, which does not include the "
+                    "canonical declared-publication pattern; files under its "
+                    "publication.yml folders keep the declared title but lose the "
+                    'volume and the variant (add "+" to the profile\'s patterns)',
+                    scan_id,
+                    library.name,
+                    library.parser,
+                )
 
     def _slow_phase(self, result: ScanResult, started_at: str) -> ScanResult:
         """Open every PDF whose cover is still missing, on a worker pool."""
@@ -525,12 +588,14 @@ class Scanner:
         titles: _TitleCache,
         stored: _Existing | None,
         changed: bool,
+        publication: DeclaredPublication | None,
     ) -> None:
         """Parse one file and write its row, resetting the cover when needed."""
         mtime = dt.datetime.fromtimestamp(found.mtime_ns / 1_000_000_000)
-        issue = parse_path(found.rel_path, library, config.profile_for(library), mtime)
+        issue = parse_path(found.rel_path, library, config.profile_for(library), mtime, publication)
         owner = library_id(library.name)
-        title = titles.resolve(connection, owner, library.kind, issue)
+        kind = publication.kind_for(library.kind) if publication is not None else library.kind
+        title = titles.resolve(connection, owner, kind, issue, publication)
         now = utc_now()
         identifier = stored.id if stored is not None else issue_id(found.rel_path)
         values = (
@@ -549,6 +614,8 @@ class Scanner:
             issue.label,
             issue.matched_rule,
             int(issue.has_dedup_suffix),
+            issue.variant,
+            issue.volume,
             now,
             now,
             scan_id,
@@ -607,21 +674,26 @@ class Scanner:
 
     @staticmethod
     def _mark_duplicates(connection: sqlite3.Connection) -> None:
-        """Resolve every same-title, same-date, same-number group into one winner.
+        """Resolve every group a title's own ``issue_key`` defines into one winner.
 
         The copy whose name carries no dedup suffix wins; when they all do — or
         none does — the largest file wins, which is the one most likely to be
-        the complete edition.
+        the complete edition. The variant is always part of the key: a
+        supplement never looks like a duplicate of the plain issue that shares
+        its date and number.
         """
-        groups: dict[tuple[str, str, str], list[sqlite3.Row]] = defaultdict(list)
+        groups: dict[tuple[str, str, str, str], list[sqlite3.Row]] = defaultdict(list)
         for row in connection.execute(
-            "SELECT id, title_id, issue_date, issue_number, has_dedup_suffix, size, "
-            "duplicate_of FROM issues ORDER BY id"
+            "SELECT i.id, i.title_id, i.issue_date, i.issue_number, i.variant, "
+            "i.has_dedup_suffix, i.size, i.duplicate_of, t.issue_key "
+            "FROM issues i JOIN titles t ON t.id = i.title_id ORDER BY i.id"
         ):
-            key = (
+            key = _duplicate_key(
                 str(row["title_id"]),
-                str(row["issue_date"]),
-                str(row["issue_number"]),
+                row["issue_date"],
+                row["issue_number"],
+                row["variant"],
+                row["issue_key"],
             )
             groups[key].append(row)
 
@@ -721,6 +793,13 @@ class _Title:
     sort_name: str
     kind: str
     source: str
+    slug: str | None = None
+    frequency: str | None = None
+    language: str | None = None
+    issue_key: str | None = None
+    parent_slug: str | None = None
+    supplements: str | None = None
+    """JSON array text, or ``None`` when the title is not declared."""
 
 
 class _TitleCache:
@@ -736,7 +815,8 @@ class _TitleCache:
         self._ids: set[str] = set()
         self._refreshed: set[str] = set()
         for row in connection.execute(
-            "SELECT id, library_id, name, sort_name, kind, source FROM titles"
+            "SELECT id, library_id, name, sort_name, kind, source, slug, frequency, "
+            "language, issue_key, parent_slug, supplements FROM titles"
         ):
             identifier = str(row["id"])
             self._by_key[(str(row["library_id"]), str(row["name"]))] = _Title(
@@ -744,6 +824,12 @@ class _TitleCache:
                 sort_name=str(row["sort_name"]),
                 kind=str(row["kind"]),
                 source=str(row["source"]),
+                slug=row["slug"],
+                frequency=row["frequency"],
+                language=row["language"],
+                issue_key=row["issue_key"],
+                parent_slug=row["parent_slug"],
+                supplements=row["supplements"],
             )
             self._ids.add(identifier)
 
@@ -753,6 +839,7 @@ class _TitleCache:
         owner: str,
         kind: str,
         issue: ParsedIssue,
+        publication: DeclaredPublication | None = None,
     ) -> str:
         """The id of ``issue``'s title, inserting or refreshing the title row.
 
@@ -760,8 +847,11 @@ class _TitleCache:
         depend on it — but not its classification: a name that used to be derived
         from a folder and is now a configured title, or a library that changed
         kind, has to be recorded as it is today. The refresh happens once per
-        title per scan, on the first issue that mentions it, so a title whose
-        issues disagree about where the name came from does not flap.
+        title per scan, on the first issue that mentions it — except a
+        ``publication`` source, which always applies: a canonical file may sort
+        after a non-canonical one belonging to the same title within the same
+        scan, and the row still has to end up describing the declaration, not
+        whichever file the walk reached first.
         """
         key = (owner, issue.title_name)
         wanted = _Title(
@@ -769,6 +859,14 @@ class _TitleCache:
             sort_name=sort_name(issue.title_name),
             kind=kind,
             source=issue.title_source,
+            slug=publication.slug if publication is not None else None,
+            frequency=publication.config.frequency if publication is not None else None,
+            language=publication.config.language if publication is not None else None,
+            issue_key=publication.config.issue_key if publication is not None else None,
+            parent_slug=publication.config.parent if publication is not None else None,
+            supplements=(
+                json.dumps(publication.config.supplements) if publication is not None else None
+            ),
         )
         known = self._by_key.get(key)
         if known is not None:
@@ -777,8 +875,9 @@ class _TitleCache:
 
         identifier = _unique(title_id(owner, issue.title_name), self._ids)
         connection.execute(
-            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, slug, "
+            "frequency, language, issue_key, parent_slug, supplements, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 identifier,
                 owner,
@@ -786,6 +885,12 @@ class _TitleCache:
                 wanted.sort_name,
                 wanted.kind,
                 wanted.source,
+                wanted.slug,
+                wanted.frequency,
+                wanted.language,
+                wanted.issue_key,
+                wanted.parent_slug,
+                wanted.supplements,
                 utc_now(),
             ),
         )
@@ -796,24 +901,49 @@ class _TitleCache:
         return identifier
 
     def _refresh(self, connection: sqlite3.Connection, known: _Title, wanted: _Title) -> None:
-        if known.id in self._refreshed:
+        already_refreshed = known.id in self._refreshed
+        if already_refreshed and (known.source == "publication" or wanted.source != "publication"):
             return
         self._refreshed.add(known.id)
-        if (known.sort_name, known.kind, known.source) == (
+        fields = (
             wanted.sort_name,
             wanted.kind,
             wanted.source,
-        ):
+            wanted.slug,
+            wanted.frequency,
+            wanted.language,
+            wanted.issue_key,
+            wanted.parent_slug,
+            wanted.supplements,
+        )
+        if (
+            known.sort_name,
+            known.kind,
+            known.source,
+            known.slug,
+            known.frequency,
+            known.language,
+            known.issue_key,
+            known.parent_slug,
+            known.supplements,
+        ) == fields:
             return
         connection.execute(
-            "UPDATE titles SET sort_name = ?, kind = ?, source = ? WHERE id = ?",
-            (wanted.sort_name, wanted.kind, wanted.source, known.id),
+            "UPDATE titles SET sort_name = ?, kind = ?, source = ?, slug = ?, frequency = ?, "
+            "language = ?, issue_key = ?, parent_slug = ?, supplements = ? WHERE id = ?",
+            (*fields, known.id),
         )
-        known.sort_name, known.kind, known.source = (
-            wanted.sort_name,
-            wanted.kind,
-            wanted.source,
-        )
+        (
+            known.sort_name,
+            known.kind,
+            known.source,
+            known.slug,
+            known.frequency,
+            known.language,
+            known.issue_key,
+            known.parent_slug,
+            known.supplements,
+        ) = fields
 
     def drop_empty(self, connection: sqlite3.Connection) -> None:
         """Delete titles no issue points at any more."""
@@ -827,6 +957,28 @@ class _TitleCache:
         self._by_key = {key: title for key, title in self._by_key.items() if title.id in live}
         self._ids &= live
         self._refreshed &= live
+
+
+def _duplicate_key(
+    title_id_: str,
+    issue_date: object,
+    issue_number: object,
+    variant: object,
+    issue_key: object,
+) -> tuple[str, str, str, str]:
+    """The group ``_mark_duplicates`` resolves one issue into, per its title.
+
+    ``date`` and ``number`` narrow the default key to one component, but only
+    when that component is actually there: an issue with no date, in a title
+    declared ``issue_key: date``, still has to land in *some* group, so a
+    missing key component falls back to the full ``date+number`` key rather
+    than grouping every dateless issue of the title together.
+    """
+    if issue_key == "date" and issue_date is not None:
+        return (title_id_, str(issue_date), "None", str(variant))
+    if issue_key == "number" and issue_number is not None:
+        return (title_id_, "None", str(issue_number), str(variant))
+    return (title_id_, str(issue_date), str(issue_number), str(variant))
 
 
 def sort_name(name: str) -> str:

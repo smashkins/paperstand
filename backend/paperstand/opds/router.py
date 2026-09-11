@@ -205,6 +205,7 @@ def issue_entry(issue: Issue, facts: queries.EntryFacts, absolute: Callable[[str
         category=(issue.kind, KIND_LABELS[issue.kind]),
         dc_date=issue.issue_date,
         dc_identifier=urn,
+        dc_language=facts.language,
         links=(
             Link(IMAGE_REL, absolute(issue.cover_url), JPEG),
             Link(THUMBNAIL_REL, absolute(issue.thumb_url), JPEG),
@@ -235,6 +236,7 @@ def title_entry(title: Title, updated: str, absolute: Callable[[str], str]) -> E
         title=title.name,
         updated=updated,
         content=title_content(title),
+        dc_language=title.language,
         links=tuple(links),
     )
 
@@ -352,13 +354,13 @@ def create_router(
         frame: Frame,
         updated: str,
     ) -> tuple[Entry, ...]:
-        """One entry per issue, with the two facts only the feed needs.
+        """One entry per issue, with the facts only the feed needs.
 
         One query for the lot, rather than one per entry: a page of fifty issues
         is one round trip either way, and the feed is what a phone waits on.
         """
         facts = queries.entry_facts(connection, [issue.id for issue in issues])
-        fallback = queries.EntryFacts(updated, None)
+        fallback = queries.EntryFacts(updated, None, None)
         return tuple(
             issue_entry(issue, facts.get(issue.id, fallback), frame.absolute) for issue in issues
         )

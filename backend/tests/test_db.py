@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from paperstand.db import (
+    SCHEMA_V1,
     SCHEMA_VERSION,
     Database,
     DatabaseError,
@@ -98,7 +99,9 @@ def test_reading_progress_survives_the_issue_disappearing(tmp_path: Path) -> Non
             "INSERT INTO libraries VALUES ('l', 'L', 'L', 'magazine', 'config', ?)", (utc_now(),)
         )
         connection.execute(
-            "INSERT INTO titles VALUES ('t', 'l', 'T', 't', 'magazine', 'config', ?)", (utc_now(),)
+            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
+            "VALUES ('t', 'l', 'T', 't', 'magazine', 'config', ?)",
+            (utc_now(),),
         )
         connection.execute(
             "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, mtime_ns, "
@@ -126,7 +129,9 @@ def test_deleting_a_library_takes_its_titles_and_issues_with_it(tmp_path: Path) 
             "INSERT INTO libraries VALUES ('l', 'L', 'L', 'magazine', 'config', ?)", (utc_now(),)
         )
         connection.execute(
-            "INSERT INTO titles VALUES ('t', 'l', 'T', 't', 'magazine', 'config', ?)", (utc_now(),)
+            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
+            "VALUES ('t', 'l', 'T', 't', 'magazine', 'config', ?)",
+            (utc_now(),),
         )
         connection.execute("DELETE FROM libraries WHERE id = 'l'")
 
@@ -177,6 +182,113 @@ def test_issue_ids_are_stable_and_short() -> None:
     assert identifier == issue_id("Newspapers/2026/03/17/x.pdf")
     assert len(identifier) == 16
     assert identifier != issue_id("Newspapers/2026/03/18/x.pdf")
+
+
+# -------------------------------------------------------------- schema 2 migration
+
+
+def _populated_schema_1(path: Path) -> None:
+    """A schema-1 database, built straight from ``SCHEMA_V1``, with one row
+    in every table the migration touches or must leave alone."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(SCHEMA_V1)
+        connection.execute("PRAGMA user_version = 1")
+        with connection:
+            connection.execute(
+                "INSERT INTO libraries VALUES ('l', 'Newspapers', 'Newspapers', 'newspaper', "
+                "'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO titles VALUES ('t', 'l', 'Corriere del Ponte', "
+                "'corriere del ponte', 'newspaper', 'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, "
+                "mtime_ns, date_precision, date_source, derived_title, label, matched_rule, "
+                "added_at, updated_at) VALUES ('i', 'l', 't', 'Newspapers/a.pdf', 'a.pdf', 1, 1, "
+                "'day', 'filename', 'Corriere del Ponte', '', 'D1', ?, ?)",
+                (utc_now(), utc_now()),
+            )
+            connection.execute("INSERT INTO reading_progress VALUES ('i', 12, 40, ?)", (utc_now(),))
+    finally:
+        connection.close()
+
+
+def test_a_schema_1_database_migrates_to_schema_2_keeping_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_1(path)
+
+    database = open_database(path)
+    connection = database.connection
+
+    assert user_version(connection) == SCHEMA_VERSION
+    assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+
+    title = connection.execute("SELECT * FROM titles WHERE id = 't'").fetchone()
+    assert title["name"] == "Corriere del Ponte"
+    assert title["source"] == "config"
+    # The new columns exist and carry no value for a row the migration did not touch.
+    assert title["slug"] is None
+    assert title["frequency"] is None
+    assert title["language"] is None
+    assert title["issue_key"] is None
+    assert title["parent_slug"] is None
+    assert title["supplements"] is None
+
+    issue = connection.execute("SELECT variant, volume FROM issues WHERE id = 'i'").fetchone()
+    assert issue["variant"] is None
+    assert issue["volume"] is None
+
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+def test_schema_2_accepts_a_declared_title_and_its_new_columns(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_1(path)
+    database = open_database(path)
+    connection = database.connection
+
+    with connection:
+        connection.execute(
+            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, slug, "
+            "frequency, language, issue_key, parent_slug, supplements, created_at) VALUES "
+            "('t2', 'l', 'Bright Meadows', 'bright meadows', 'magazine', 'publication', "
+            "'bright-meadows', 'monthly', 'en', 'date+number', NULL, '[\"Weekend\"]', ?)",
+            (utc_now(),),
+        )
+        connection.execute("UPDATE issues SET variant = 'Weekend', volume = 2024 WHERE id = 'i'")
+
+    declared = connection.execute("SELECT * FROM titles WHERE id = 't2'").fetchone()
+    assert declared["source"] == "publication"
+    assert declared["slug"] == "bright-meadows"
+    assert declared["supplements"] == '["Weekend"]'
+    issue = connection.execute("SELECT variant, volume FROM issues WHERE id = 'i'").fetchone()
+    assert (issue["variant"], issue["volume"]) == ("Weekend", 2024)
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+def test_schema_2_keeps_the_titles_library_index(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_1(path)
+    database = open_database(path)
+
+    index_names = {
+        str(row["name"])
+        for row in database.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'titles'"
+        )
+    }
+
+    assert "titles_library" in index_names
+    database.close()
 
 
 def test_closing_twice_is_harmless(tmp_path: Path) -> None:

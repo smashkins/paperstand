@@ -52,13 +52,17 @@ class SampleLibrary:
 
     @property
     def newspaper_files(self) -> int:
-        """PDFs written under ``Newspapers/``."""
-        return self.counts["Newspapers/YYYY/MM/DD"]
+        """PDFs written under ``Newspapers/``, date-foldered or declared."""
+        return self.counts["Newspapers/YYYY/MM/DD"] + self.counts["Newspapers/<Title> (declared)"]
 
     @property
     def magazine_files(self) -> int:
-        """PDFs written under ``Magazines/``, in either layout."""
-        return self.counts["Magazines/<Title>"] + self.counts["Magazines/YYYY/<Title>/MM"]
+        """PDFs written under ``Magazines/``, in every layout."""
+        return (
+            self.counts["Magazines/<Title>"]
+            + self.counts["Magazines/YYYY/<Title>/MM"]
+            + self.counts["Magazines/<Title> (declared)"]
+        )
 
     @property
     def zine_files(self) -> int:
@@ -101,6 +105,7 @@ def generate_sample_library(out: Path, today: dt.date = SAMPLE_TODAY) -> SampleL
     generator.build_newspapers(builder, today, SAMPLE_DAYS)
     generator.build_magazines(builder, today.year)
     generator.build_zines(builder, today.year)
+    generator.build_publications(builder, today)
     generator.build_noise(builder, today)
     counts: Counter[str] = builder.counts
     return SampleLibrary(root=out, counts=counts, today=today)

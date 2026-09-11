@@ -17,6 +17,7 @@ from paperstand.parsing.profile import Profile
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
     from paperstand.config import LibraryConfig
+    from paperstand.publication import DeclaredPublication
 
 __all__ = ["ParsedIssue", "Parser", "explain_path", "get_parser", "parse_path"]
 
@@ -49,9 +50,15 @@ def parse_path(
     library: LibraryConfig,
     profile: Profile,
     mtime: dt.datetime | dt.date,
+    publication: DeclaredPublication | None = None,
 ) -> ParsedIssue:
-    """Parse ``rel_path`` — relative to the library root — into an issue."""
-    return get_parser(profile, library).parse(rel_path, mtime)
+    """Parse ``rel_path`` — relative to the library root — into an issue.
+
+    ``publication`` is the declaration whose folder is the nearest ancestor
+    of ``rel_path``, when there is one — a per-call argument, never part of
+    the compiled parser itself. See :meth:`paperstand.parsing.engine.Parser.parse`.
+    """
+    return get_parser(profile, library).parse(rel_path, mtime, publication=publication)
 
 
 def explain_path(
@@ -59,8 +66,11 @@ def explain_path(
     library: LibraryConfig,
     profile: Profile,
     mtime: dt.datetime | dt.date,
+    publication: DeclaredPublication | None = None,
 ) -> tuple[ParsedIssue, Trace]:
     """Parse ``rel_path`` and return every step that was taken, in order."""
     trace: Trace = []
-    issue = get_parser(profile, library).parse(rel_path, mtime, trace=trace)
+    issue = get_parser(profile, library).parse(
+        rel_path, mtime, publication=publication, trace=trace
+    )
     return issue, trace

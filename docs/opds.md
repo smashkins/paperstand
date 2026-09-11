@@ -42,6 +42,10 @@ A few details worth knowing:
 - **Three feeds are paged**, fifty issues at a time: a title's issues, *Unsorted* and a
   search. `?page=N` asks for one page directly, and a feed that has more than one carries
   the `first`, `last`, `previous` and `next` links a client follows on its own.
+- **A declared publication's language becomes `dc:language`.** A title whose
+  [`publication.yml`](folder-layout.md#declared-publications) sets `language` carries it on
+  its own entry and on every one of its issues; a title with no declared language, or no
+  `publication.yml` at all, carries no `dc:language` element.
 
 Each issue entry carries its cover, its thumbnail and one acquisition link to the PDF:
 
@@ -53,6 +57,7 @@ Each issue entry carries its cover, its thumbnail and one acquisition link to th
   <author><name>Corriere del Ponte</name></author>
   <dc:identifier>urn:paperstand:issue:5e6b9e5fa985d8c6</dc:identifier>
   <dc:date>2026-03-17</dc:date>
+  <dc:language>it</dc:language>
   <category term="newspaper" label="Newspaper"/>
   <summary type="text">Corriere del Ponte · 17 March 2026 · 48 pages · 41.8 MB</summary>
   <link rel="http://opds-spec.org/image" href="…/cover.jpg?v=…" type="image/jpeg"/>
@@ -61,6 +66,9 @@ Each issue entry carries its cover, its thumbnail and one acquisition link to th
         title="Download PDF"/>
 </entry>
 ```
+
+`<dc:language>` appears here because Corriere del Ponte declares `language: it`; most titles
+declare none, and their entries simply have no such element.
 
 Reading in the app therefore means downloading the PDF. Page streaming — the OPDS-PSE
 extension, which would let a client fetch one rendered page at a time from Paperstand — is

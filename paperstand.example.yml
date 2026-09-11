@@ -4,6 +4,9 @@
 # library per top-level folder under /library and derives titles from folder and
 # file names. Configuring titles is what turns a pile of PDFs into a catalogue,
 # because it lets Paperstand tell "La Gazzetta del Lago" from "La Gazzetta del Lago Valdora".
+#
+# A folder anywhere under a library can also declare itself a title with its own
+# publication.yml, titles: entry or not — see docs/folder-layout.md and docs/configuration.md.
 
 # Folders skipped everywhere in the library, on top of the always-ignored
 # `@*`, `.*` and `#*` entries.

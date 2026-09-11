@@ -59,6 +59,7 @@ from paperstand.parsing.titles import (
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
     from paperstand.config import LibraryConfig
+    from paperstand.publication import DeclaredPublication
 
 #: Title a file is filed under when titles are configured and none of them match.
 UNSORTED_TITLE = "Unsorted"
@@ -106,6 +107,8 @@ class ParsedIssue:
     has_dedup_suffix: bool
     label: str
     matched_rule: str
+    volume: int | None = None
+    variant: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,11 +160,22 @@ class Parser:
         rel_path: str,
         mtime: dt.datetime | dt.date,
         *,
+        publication: DeclaredPublication | None = None,
         trace: Trace | None = None,
     ) -> ParsedIssue:
-        """Parse one path, relative to the **library root**, into an issue."""
+        """Parse one path, relative to the **library root**, into an issue.
+
+        ``publication`` is a per-call argument, not part of the parser's own
+        state: a library can hold hundreds of declared folders, and the
+        compiled-parser cache (:func:`paperstand.parsing.parse.get_parser`)
+        would thrash if each one needed a parser of its own.
+        """
         path = PurePosixPath(rel_path)
-        folders = self._folder_components(path)
+        if trace is not None:
+            trace.append(
+                ("publication", f"declared at {publication.folder!r}" if publication else "none")
+            )
+        folders = self._folder_components(path, publication)
         clean = clean_stem(path.stem, self._strip, self._replace, trace)
         spaced = clean.spaced
         if trace is not None:
@@ -229,13 +243,24 @@ class Parser:
                 )
             )
 
-        number, number_rule, number_span = self._resolve_number(
-            pattern, masked, config_match, trace
+        allow_bare = (
+            self.profile.number and publication.kind_for(self.library.kind) != "newspaper"
+            if publication is not None
+            else self.allow_bare_number
         )
+        number, number_rule, number_span = self._resolve_number(
+            pattern, masked, config_match, allow_bare, trace
+        )
+        volume, variant = self._resolve_volume_variant(pattern)
         cut = self._cut(date_spans, number_span)
         candidates = self._candidates(pattern, folders, spaced, cut)
         derived = self._derived_title(candidates, spaced)
         title_name, title_source = self._resolve_title(pattern, config_match, candidates, derived)
+        if publication is not None:
+            # A declared publication always wins: every file beneath it is
+            # filed under the title it declares, never sent to Unsorted.
+            # `derived` stays what the name itself suggests, unaffected.
+            title_name, title_source = publication.title, "publication"
 
         date_hit, date_source, fallback_rule = self._apply_fallbacks(
             date_hit, folders, mtime, trace
@@ -252,6 +277,9 @@ class Parser:
             if part is not None
         ]
         rules.append(f"title:{title_source}")
+        if variant is not None:
+            declared = publication is not None and publication.declares(variant)
+            rules.append(f"variant:{'declared' if declared else 'undeclared'}")
         issue = ParsedIssue(
             title_name=title_name,
             title_source=title_source,
@@ -262,8 +290,10 @@ class Parser:
             issue_number=number,
             has_dedup_suffix=clean.has_dedup_suffix
             or "dedup" in (pattern.groups if pattern else {}),
-            label=format_label(issue_date, precision, number),
+            label=format_label(issue_date, precision, number, variant),
             matched_rule=" ".join(rules),
+            volume=volume,
+            variant=variant,
         )
         if trace is not None:
             trace.append(("result", repr(issue)))
@@ -271,8 +301,22 @@ class Parser:
 
     # ----------------------------------------------------------------- private
 
-    def _folder_components(self, path: PurePosixPath) -> tuple[str, ...]:
+    def _folder_components(
+        self, path: PurePosixPath, publication: DeclaredPublication | None
+    ) -> tuple[str, ...]:
+        """Folders under the library root, minus the library's own path.
+
+        Under a declaration, the publication's own folder is stripped too —
+        it already implies the library prefix, being nested inside it — so a
+        ``2026/`` sub-folder beneath it still reaches the folder-date
+        fallback (F1) on its own, undisturbed by whatever the declaring
+        folder happens to be named.
+        """
         parts = path.parts[:-1]
+        if publication is not None:
+            pub_parts = PurePosixPath(publication.folder).parts
+            if parts[: len(pub_parts)] == pub_parts:
+                return parts[len(pub_parts) :]
         prefix = self._library_parts
         if prefix and parts[: len(prefix)] == prefix:
             parts = parts[len(prefix) :]
@@ -367,6 +411,7 @@ class Parser:
         pattern: PatternHit | None,
         masked: str,
         config_match: TitleMatch | None,
+        allow_bare: bool,
         trace: Trace | None,
     ) -> tuple[int | None, str | None, tuple[int, int] | None]:
         if pattern is not None and pattern.groups.get("number"):
@@ -383,11 +428,25 @@ class Parser:
             if trace is not None:
                 trace.append(("number", "disabled by the profile"))
             return None, None, None
-        end = config_match.end if config_match is not None else 0
+        title_span = pattern.spans.get("title") if pattern is not None else None
+        if config_match is not None:
+            end = config_match.end
+            search_text = masked
+        elif title_span is not None:
+            # No configured title matched this pattern's `title` capture — a
+            # declared publication's title is never represented by
+            # `config_match` — so the span itself is masked out before N1/N2
+            # search the name: a title's own digits, or a token-shaped word
+            # inside it (`No 5 Weekly`), must never be read as an issue number.
+            end = title_span[1]
+            search_text = mask(masked, [title_span])
+        else:
+            end = 0
+            search_text = masked
         hit = find_number(
-            masked,
+            search_text,
             self._numbers,
-            allow_bare=self.allow_bare_number,
+            allow_bare=allow_bare,
             bare_from=end,
             year_range=self.profile.year_range,
             trace=trace,
@@ -395,6 +454,22 @@ class Parser:
         if hit is None:
             return None, None, None
         return hit.value, hit.rule, hit.span
+
+    def _resolve_volume_variant(self, pattern: PatternHit | None) -> tuple[int | None, str | None]:
+        """The canonical pattern's own ``volume`` and ``variant`` groups, if any.
+
+        ``number: false`` suppresses the volume along with the issue number —
+        a volume with no number to go with it is not something the canonical
+        grammar can even produce, since `volume` is only ever captured
+        alongside `number`.
+        """
+        if pattern is None:
+            return None, None
+        volume_text = pattern.groups.get("volume")
+        volume = int(volume_text) if volume_text and self.profile.number else None
+        variant_text = pattern.groups.get("variant")
+        variant = variant_text.strip() if variant_text else None
+        return volume, variant
 
     @staticmethod
     def _cut(date_spans: list[tuple[int, int]], number_span: tuple[int, int] | None) -> int | None:
@@ -604,7 +679,9 @@ def _parse_date_group(text: str) -> tuple[int, int | None, int | None] | None:
     return None
 
 
-def format_label(date: dt.date | None, precision: str, number: int | None) -> str:
+def format_label(
+    date: dt.date | None, precision: str, number: int | None, variant: str | None = None
+) -> str:
     """The human readable label of an issue, in English."""
     parts: list[str] = []
     if number is not None:
@@ -616,4 +693,6 @@ def format_label(date: dt.date | None, precision: str, number: int | None) -> st
             parts.append(f"{LABEL_MONTHS[date.month - 1]} {date.year}")
         elif precision == "year":
             parts.append(str(date.year))
+    if variant:
+        parts.append(variant)
     return " · ".join(parts)

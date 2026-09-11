@@ -14,7 +14,8 @@ from typing import TextIO
 
 from paperstand.config import PaperstandConfig, get_settings, load_config
 from paperstand.parsing import ParsedIssue, explain_path, parse_path
-from paperstand.scanner.walker import iter_library_files, top_level_folders
+from paperstand.publication import DeclaredPublication, PublicationIndex
+from paperstand.scanner.walker import Walk, iter_library_files, top_level_folders
 
 __all__ = [
     "iter_library_files",
@@ -60,13 +61,18 @@ def load_cli_config(config_path: Path | None, root: Path) -> PaperstandConfig:
     return load_config(config_path, folder_names=top_level_folders(root))
 
 
-def parse_file(rel_path: str, root: Path, config: PaperstandConfig) -> ParsedIssue | None:
+def parse_file(
+    rel_path: str,
+    root: Path,
+    config: PaperstandConfig,
+    publication: DeclaredPublication | None = None,
+) -> ParsedIssue | None:
     """Parse one file of a library root; ``None`` when it belongs to no library."""
     library = config.library_for(rel_path)
     if library is None:
         return None
     mtime = _mtime(root / rel_path)
-    return parse_path(rel_path, library, config.profile_for(library), mtime)
+    return parse_path(rel_path, library, config.profile_for(library), mtime, publication)
 
 
 def _mtime(path: Path) -> dt.datetime:
@@ -77,15 +83,29 @@ def _mtime(path: Path) -> dt.datetime:
 
 
 def report_rows(root: Path, config: PaperstandConfig) -> list[tuple[str, ...]]:
-    """The body of the ``parse-report`` table."""
+    """The body of the ``parse-report`` table.
+
+    Walked with :class:`~paperstand.scanner.walker.Walk`, the same class a scan
+    uses, so that every file beneath a declared ``publication.yml`` is parsed
+    against its declaration and ``rule`` says ``title:publication``.
+    """
+    walk = Walk(root, config)
+    buffered = list(walk)
+    index = PublicationIndex(root)
+    index.load_all(walk.publications)
     rows: list[tuple[str, ...]] = []
-    for rel_path in iter_library_files(root, config):
-        issue = parse_file(rel_path, root, config)
+    for found in buffered:
+        library = config.library_for(found.rel_path)
+        if library is None:
+            # Belongs to no configured library: no profile runs on it at all.
+            continue
+        publication = index.resolve(found.publication_dir, library, config)
+        issue = parse_file(found.rel_path, root, config, publication)
         if issue is None:
             continue
         rows.append(
             (
-                rel_path,
+                found.rel_path,
                 issue.title_name,
                 issue.issue_date.isoformat() if issue.issue_date else "-",
                 f"{issue.date_source}/{issue.date_precision}",
@@ -220,7 +240,8 @@ def parse_explain(
         return 2
     profile = config.profile_for(library)
     mtime = _mtime(target)
-    issue, trace = explain_path(rel_path, library, profile, mtime)
+    publication = PublicationIndex(root).nearest(rel_path)
+    issue, trace = explain_path(rel_path, library, profile, mtime, publication)
 
     print(f"file:          {target}", file=stream)
     print(f"configuration: {resolved_config or 'auto-discovered'}", file=stream)
@@ -228,6 +249,9 @@ def parse_explain(
     print(f"rel path:      {rel_path}", file=stream)
     print(
         f"library:       {library.name} (kind {library.kind}, parser {library.parser})", file=stream
+    )
+    print(
+        f"publication:   {publication.folder if publication is not None else 'none'}", file=stream
     )
     print(f"titles:        {len(library.titles)} configured", file=stream)
     print(f"mtime:         {mtime.isoformat(timespec='seconds')}", file=stream)

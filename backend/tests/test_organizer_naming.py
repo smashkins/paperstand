@@ -16,6 +16,7 @@ from tests.fixtures.filenames import (
     Expected,
     discovered_config,
     example_config,
+    publication_for,
 )
 
 
@@ -28,6 +29,8 @@ def issue(
     precision: str = "day",
     source: str = "filename",
     number: int | None = None,
+    volume: int | None = None,
+    variant: str | None = None,
 ) -> ParsedIssue:
     """A :class:`ParsedIssue`, with every field the naming code ignores stubbed out."""
     return ParsedIssue(
@@ -41,6 +44,8 @@ def issue(
         has_dedup_suffix=False,
         label="",
         matched_rule="",
+        volume=volume,
+        variant=variant,
     )
 
 
@@ -84,7 +89,9 @@ def test_a_numbered_magazine_gets_no_zero_padding() -> None:
 
 
 def test_volume_and_issue_the_number_is_the_issue_not_the_volume() -> None:
-    """Amendment 2: `ParsedIssue` carries no volume, so `v2024` is read as the year."""
+    """Amendment 2 (P1.1): the *old* volume-and-issue patterns capture `v2024`
+    as the year, not as `ParsedIssue.volume` — only the canonical grammar's own
+    `volume` group does that (see the tests below)."""
     plan = plan_issue(
         issue(
             title="Bright Meadows",
@@ -98,6 +105,53 @@ def test_volume_and_issue_the_number_is_the_issue_not_the_volume() -> None:
     assert plan == CanonicalPath(
         folder="Bright Meadows/2024",
         filename="Bright Meadows - 2024-02 - n2.pdf",
+    )
+
+
+def test_a_volume_is_written_alongside_its_number() -> None:
+    plan = plan_issue(
+        issue(
+            title="Bright Meadows",
+            title_source="pattern",
+            derived="Bright Meadows",
+            date=dt.date(2024, 3, 1),
+            precision="month",
+            number=3,
+            volume=2024,
+        )
+    )
+    assert plan == CanonicalPath(
+        folder="Bright Meadows/2024",
+        filename="Bright Meadows - 2024-03 - v2024 n3.pdf",
+    )
+
+
+def test_a_volume_with_no_number_is_dropped() -> None:
+    """`volume` alone cannot be read back: the canonical grammar only ever
+    captures it together with `number`, so writing one on its own would
+    produce a name the parser could not parse again."""
+    plan = plan_issue(issue(volume=2024))
+    assert plan == CanonicalPath(
+        folder="Corriere del Ponte/2026",
+        filename="Corriere del Ponte - 2026-03-17.pdf",
+    )
+
+
+def test_a_variant_is_appended_after_the_number() -> None:
+    plan = plan_issue(
+        issue(number=8, precision="year", date=dt.date(2026, 1, 1), variant="Weekend")
+    )
+    assert plan == CanonicalPath(
+        folder="Corriere del Ponte/2026",
+        filename="Corriere del Ponte - 2026 - n8 - Weekend.pdf",
+    )
+
+
+def test_a_variant_with_no_number_is_still_appended() -> None:
+    plan = plan_issue(issue(variant="Weekend"))
+    assert plan == CanonicalPath(
+        folder="Corriere del Ponte/2026",
+        filename="Corriere del Ponte - 2026-03-17 - Weekend.pdf",
     )
 
 
@@ -180,6 +234,23 @@ def test_an_mtime_date_wins_over_a_bad_title() -> None:
     assert plan == Unsorted(reason="date would come from the file's modification time")
 
 
+def test_unsorted_a_variant_that_cannot_round_trip() -> None:
+    """A variant containing ` - ` would read back as extra fields, not as itself."""
+    plan = plan_issue(issue(variant="Weekend - Extra"))
+    assert plan == Unsorted(
+        reason='variant "Weekend - Extra" contains " - ", which a canonical name '
+        "could not read back"
+    )
+
+
+def test_a_bad_title_wins_over_an_unreadable_variant() -> None:
+    """The title's shape is checked before the variant's: unchanged order."""
+    plan = plan_issue(
+        issue(title="Ponte / Lago", derived="Ponte / Lago", variant="Weekend - Extra")
+    )
+    assert plan == Unsorted(reason='title "Ponte / Lago" is not a valid folder name')
+
+
 # --------------------------------------------------------------- the fixture table
 
 
@@ -195,7 +266,12 @@ def _expected_rel_path(expected: Expected) -> str:
         raise AssertionError(f"a row of precision {expected.precision!r} has no canonical path")
     name = f"{expected.title} - {date}"
     if expected.number is not None:
-        name += f" - n{expected.number}"
+        if expected.volume is not None:
+            name += f" - v{expected.volume} n{expected.number}"
+        else:
+            name += f" - n{expected.number}"
+    if expected.variant is not None:
+        name += f" - {expected.variant}"
     year = expected.date[:4]  # type: ignore[index]
     return f"{expected.title}/{year}/{name}.pdf"
 
@@ -203,7 +279,13 @@ def _expected_rel_path(expected: Expected) -> str:
 def _parse(expected: Expected, config: PaperstandConfig) -> ParsedIssue:
     library = config.library_for(expected.rel_path)
     assert library is not None, f"no library for {expected.rel_path}"
-    return parse_path(expected.rel_path, library, config.profile_for(library), MTIME)
+    return parse_path(
+        expected.rel_path,
+        library,
+        config.profile_for(library),
+        MTIME,
+        publication_for(expected.rel_path),
+    )
 
 
 def _assert_plan_matches(expected: Expected, plan: object) -> None:

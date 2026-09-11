@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -88,7 +89,9 @@ def test_explain_prints_every_step(library: Path) -> None:
         "library root:",
         "rel path:      Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf",
         "library:       Newspapers (kind newspaper, parser default)",
+        "publication:   none",
         "steps:",
+        "publication",
         "replace",
         "spaced",
         "squashed",
@@ -106,6 +109,38 @@ def test_explain_finds_the_library_root_on_its_own(library: Path) -> None:
     target = library / "Magazines/Confini/Confini_n._8_2026.pdf"
     assert parse_explain(target, example_config_path(), None, out) == 0
     assert f"library root:  {library}" in out.getvalue()
+
+
+# ------------------------------------------------------- declared publications
+
+
+def test_report_marks_a_declared_folders_files_title_publication(
+    sample_library: SampleLibrary,
+) -> None:
+    """Every file beneath a declared folder — the three Corriere del Ponte
+    ones, the La Gazzetta del Lago (Valdora) one and the Bright Meadows one —
+    is walked with the index, so its rule says `title:publication`."""
+    out = io.StringIO()
+    assert parse_report(sample_library.root, example_config_path(), out) == 0
+    assert out.getvalue().count("title:publication") == 5
+
+
+def test_explain_prints_the_publication_header_and_step(sample_library: SampleLibrary) -> None:
+    target = next((sample_library.root / "Newspapers/Corriere del Ponte").rglob("*.pdf"))
+    out = io.StringIO()
+    assert parse_explain(target, example_config_path(), sample_library.root, out) == 0
+    text = out.getvalue()
+    assert "publication:   Newspapers/Corriere del Ponte" in text
+    assert "declared at 'Newspapers/Corriere del Ponte'" in text
+
+
+def test_explain_says_none_for_a_file_outside_any_declaration(library: Path) -> None:
+    out = io.StringIO()
+    target = library / "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
+    assert parse_explain(target, example_config_path(), library, out) == 0
+    text = out.getvalue()
+    assert "publication:   none" in text
+    assert re.search(r"^\s*publication\s+none\s*$", text, re.MULTILINE)
 
 
 def test_explain_rejects_a_file_outside_the_library(library: Path, tmp_path: Path) -> None:

@@ -121,6 +121,8 @@ class Entry:
     category: tuple[str, str] | None = None
     dc_date: str | None = None
     dc_identifier: str | None = None
+    dc_language: str | None = None
+    """The title's declared language tag, e.g. ``it``. ``None`` when unknown."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +167,8 @@ def _entry(parent: ET.Element, entry: Entry) -> ET.Element:
         _text(element, "dc:identifier", entry.dc_identifier)
     if entry.dc_date is not None:
         _text(element, "dc:date", entry.dc_date)
+    if entry.dc_language is not None:
+        _text(element, "dc:language", entry.dc_language)
     if entry.category is not None:
         term, label = entry.category
         ET.SubElement(element, "category", {"term": term, "label": label})

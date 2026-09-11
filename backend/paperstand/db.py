@@ -35,7 +35,7 @@ from paperstand.parsing.normalize import slugify
 log = get_logger(__name__)
 
 #: Version of the schema this build of Paperstand writes.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: How long a writer waits for a lock before giving up, in milliseconds.
 BUSY_TIMEOUT_MS = 10_000
@@ -129,8 +129,50 @@ CREATE TABLE meta (
 );
 """
 
+# `titles` is rebuilt rather than given a side column: `source` is the one
+# classification the API exposes, the storefront filters on and the frontend
+# branches on, and a declaration is where the *name* came from, in the same
+# sense as `config` or `folder` — a second column would let the two disagree.
+# SQLite cannot `ALTER` a `CHECK` constraint, so the table is copied instead.
+#
+# `_prepare` turns `PRAGMA foreign_keys` on for every connection, and
+# `DROP TABLE titles` would then cascade into `issues` (`ON DELETE CASCADE`):
+# the pragma is turned off for the duration of the script, which is only safe
+# outside a transaction, hence the `PRAGMA` calls sitting either side of the
+# script's own `BEGIN` / `COMMIT` rather than relying on `migrate`'s.
+SCHEMA_V2 = """
+PRAGMA foreign_keys = OFF;
+BEGIN;
+CREATE TABLE titles_v2 (
+    id          TEXT PRIMARY KEY,
+    library_id  TEXT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    sort_name   TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('newspaper', 'magazine')),
+    source      TEXT NOT NULL
+        CHECK (source IN ('config', 'folder', 'filename', 'pattern', 'unsorted', 'publication')),
+    slug        TEXT,
+    frequency   TEXT CHECK (frequency IN ('daily', 'weekly', 'monthly', 'irregular')),
+    language    TEXT,
+    issue_key   TEXT CHECK (issue_key IN ('date', 'number', 'date+number')),
+    parent_slug TEXT,
+    supplements TEXT,   -- JSON array; NULL when the title is not declared
+    created_at  TEXT NOT NULL,
+    UNIQUE (library_id, name)
+);
+INSERT INTO titles_v2 (id, library_id, name, sort_name, kind, source, created_at)
+    SELECT id, library_id, name, sort_name, kind, source, created_at FROM titles;
+DROP TABLE titles;
+ALTER TABLE titles_v2 RENAME TO titles;
+CREATE INDEX titles_library ON titles (library_id, sort_name);
+ALTER TABLE issues ADD COLUMN variant TEXT;
+ALTER TABLE issues ADD COLUMN volume INTEGER;
+COMMIT;
+PRAGMA foreign_keys = ON;
+"""
+
 #: One entry per schema version, in order. Append; never edit a released one.
-MIGRATIONS: tuple[str, ...] = (SCHEMA_V1,)
+MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2)
 
 
 class DatabaseError(RuntimeError):
