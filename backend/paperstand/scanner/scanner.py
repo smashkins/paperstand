@@ -870,21 +870,67 @@ class Scanner:
         )
 
     @staticmethod
-    def _mark_duplicates(connection: sqlite3.Connection) -> None:
-        """Resolve every group a title's own ``issue_key`` defines into one winner.
+    def _pick_winner(members: list[sqlite3.Row]) -> sqlite3.Row:
+        """The one member of a duplicate group that is not a duplicate.
 
-        The copy whose name carries no dedup suffix wins; when they all do — or
-        none does — the largest file wins, which is the one most likely to be
-        the complete edition. The variant is always part of the key: a
-        supplement never looks like a duplicate of the plain issue that shares
-        its date and number.
+        The copy whose name carries no dedup suffix wins; when they all do —
+        or none does — the largest file wins, which is the one most likely
+        to be the complete edition; a further tie is broken by the id, so
+        the choice is deterministic.
         """
-        groups: dict[tuple[str, str, str, str], list[sqlite3.Row]] = defaultdict(list)
-        for row in connection.execute(
+        return min(
+            members,
+            key=lambda row: (int(row["has_dedup_suffix"]), -int(row["size"]), str(row["id"])),
+        )
+
+    @staticmethod
+    def _mark_duplicates(connection: sqlite3.Connection) -> None:
+        """Resolve duplicates in two levels, then flatten every pointer.
+
+        First, rows sharing a non-``NULL`` content hash are the same issue
+        regardless of how their names parsed — the byte-identical copy in an
+        unrelated folder is exactly as much a duplicate as the dedup-suffixed
+        one beside the original. One is kept and the rest point at it,
+        taking no further part below. Second, whatever survives that — one
+        row per distinct set of bytes — is grouped the way it always was, by
+        the title's own ``issue_key``; the variant is always part of that
+        key, so a supplement never looks like a duplicate of the plain issue
+        it shares a date with.
+
+        A row that wins at the first level can still lose at the second, so
+        every stored pointer is flattened here onto the row that is not
+        itself a duplicate of anything — a reader, or an API response, is
+        never left to follow a chain.
+        """
+        rows = connection.execute(
             "SELECT i.id, i.title_id, i.issue_date, i.issue_number, i.variant, "
-            "i.has_dedup_suffix, i.size, i.duplicate_of, t.issue_key "
+            "i.has_dedup_suffix, i.size, i.duplicate_of, i.content_hash, t.issue_key "
             "FROM issues i JOIN titles t ON t.id = i.title_id ORDER BY i.id"
-        ):
+        ).fetchall()
+        by_id = {str(row["id"]): row for row in rows}
+
+        hash_groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in rows:
+            if row["content_hash"] is not None:
+                hash_groups[str(row["content_hash"])].append(row)
+
+        hash_pairs: list[tuple[str, str]] = []
+        losers: set[str] = set()
+        for members in hash_groups.values():
+            if len(members) < 2:
+                continue
+            winner_id = str(Scanner._pick_winner(members)["id"])
+            for row in members:
+                identifier = str(row["id"])
+                if identifier != winner_id:
+                    hash_pairs.append((winner_id, identifier))
+                    losers.add(identifier)
+
+        key_groups: dict[tuple[str, str, str, str], list[sqlite3.Row]] = defaultdict(list)
+        for row in rows:
+            identifier = str(row["id"])
+            if identifier in losers:
+                continue  # already resolved at the content level
             key = _duplicate_key(
                 str(row["title_id"]),
                 row["issue_date"],
@@ -892,32 +938,45 @@ class Scanner:
                 row["variant"],
                 row["issue_key"],
             )
-            groups[key].append(row)
+            key_groups[key].append(row)
 
-        updates: list[tuple[str | None, str]] = []
-        for members in groups.values():
-            if len(members) == 1:
-                winner_id = str(members[0]["id"])
-            else:
-                winner = min(
-                    members,
-                    key=lambda row: (
-                        int(row["has_dedup_suffix"]),
-                        -int(row["size"]),
-                        str(row["id"]),
-                    ),
-                )
-                winner_id = str(winner["id"])
+        key_pairs: list[tuple[str, str]] = []
+        for members in key_groups.values():
+            if len(members) < 2:
+                continue
+            winner_id = str(Scanner._pick_winner(members)["id"])
             for row in members:
                 identifier = str(row["id"])
-                duplicate_of = None if identifier == winner_id else winner_id
-                if row["duplicate_of"] != duplicate_of:
-                    updates.append((duplicate_of, identifier))
+                if identifier != winner_id:
+                    key_pairs.append((winner_id, identifier))
+
+        # `hash_pairs`/`key_pairs` are `(winner, loser)`, matching what
+        # `_migrate_progress` expects; the pointer a duplicate is looked up by
+        # runs the other way, from the loser to whatever it points at.
+        pointer: dict[str, str] = {loser: winner for winner, loser in hash_pairs}
+        pointer.update({loser: winner for winner, loser in key_pairs})
+
+        def root(identifier: str) -> str:
+            seen = {identifier}
+            while identifier in pointer:
+                identifier = pointer[identifier]
+                if identifier in seen:  # pragma: no cover - a cycle cannot arise here
+                    break
+                seen.add(identifier)
+            return identifier
+
+        updates: list[tuple[str | None, str]] = []
+        for identifier, row in by_id.items():
+            duplicate_of = root(identifier) if identifier in pointer else None
+            if row["duplicate_of"] != duplicate_of:
+                updates.append((duplicate_of, identifier))
         connection.executemany("UPDATE issues SET duplicate_of = ? WHERE id = ?", updates)
-        Scanner._migrate_progress(
-            connection,
-            [(winner, loser) for winner, loser in updates if winner is not None],
-        )
+
+        # Hash pairs first, then key pairs: a position moved onto a row that
+        # then turns out to be a duplicate itself is picked straight back up
+        # by the second call, walking the whole chain within one scan.
+        Scanner._migrate_progress(connection, hash_pairs)
+        Scanner._migrate_progress(connection, key_pairs)
 
     @staticmethod
     def _migrate_progress(connection: sqlite3.Connection, losers: list[tuple[str, str]]) -> None:

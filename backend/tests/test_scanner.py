@@ -620,6 +620,83 @@ def test_a_legacy_catalogue_is_backfilled_once_and_stays_quick_after(
     assert elapsed < 0.5
 
 
+# ------------------------------------------------------------ two-level duplicates
+
+
+def test_a_byte_identical_copy_elsewhere_is_duplicate_of_the_original(
+    scan_settings: Settings, sample_library: SampleLibrary
+) -> None:
+    """Identity is content: a plain-named copy dropped in an unrelated
+    folder is still resolved as a duplicate of the original — and needed a
+    `_unique`-suffixed id of its own in the first place, since the bytes are
+    identical."""
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+
+    result = scan_once(scan_settings)
+
+    assert result.status == "ok"
+    original_id = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_row = query(
+        scan_settings, "SELECT id, duplicate_of FROM issues WHERE rel_path = ?", (copy_rel,)
+    )[0]
+    assert copy_row["id"] == f"{original_id}-2"
+    assert copy_row["duplicate_of"] == original_id
+    winner_row = query(
+        scan_settings, "SELECT duplicate_of FROM issues WHERE id = ?", (original_id,)
+    )[0]
+    assert winner_row["duplicate_of"] is None
+
+
+def test_a_chain_of_duplicates_is_flattened_and_progress_walks_it(tmp_path: Path) -> None:
+    """A row that wins the content level can still lose the title level: the
+    stored pointer always skips straight to the final winner, and a reading
+    position set on the deepest loser walks the whole chain within one scan."""
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Chain"
+    folder.mkdir(parents=True)
+    (folder / "publication.yml").write_text("issue_key: number\n", encoding="utf-8")
+    payload = b"%PDF-1.7\n" + b"x" * 300
+    (folder / "Chain - 2026-01-01 - n1.pdf").write_bytes(payload)
+    (folder / "Chain - 2026-01-03 - n1.pdf").write_bytes(payload + b"a bigger, different file")
+
+    settings = quiet_settings(root, tmp_path / "data")
+    first_scan = scan_once(settings)
+    assert first_scan.status == "ok"
+    rows = {
+        str(row["rel_path"]): dict(row)
+        for row in query(settings, "SELECT rel_path, id, duplicate_of FROM issues")
+    }
+    first_id = str(rows["Zines/Chain/Chain - 2026-01-01 - n1.pdf"]["id"])
+    bigger_id = str(rows["Zines/Chain/Chain - 2026-01-03 - n1.pdf"]["id"])
+    # The number alone decides the group: the bigger file already wins it.
+    assert rows["Zines/Chain/Chain - 2026-01-01 - n1.pdf"]["duplicate_of"] == bigger_id
+    assert rows["Zines/Chain/Chain - 2026-01-03 - n1.pdf"]["duplicate_of"] is None
+
+    # A byte-identical copy of the level-one loser, at a path sorting after
+    # it: `_unique` gives it the next free suffix on `first`'s own id.
+    second_id = f"{first_id}-2"
+    set_progress(settings, second_id, 2)
+    (folder / "Chain - 2026-01-02 - n1.pdf").write_bytes(payload)
+
+    second_scan = scan_once(settings)
+
+    assert second_scan.status == "ok"
+    row = query(
+        settings,
+        "SELECT id, duplicate_of FROM issues WHERE rel_path = ?",
+        ("Zines/Chain/Chain - 2026-01-02 - n1.pdf",),
+    )[0]
+    assert row["id"] == second_id
+    # Flattened: the copy points straight at the title-level winner, never at
+    # `first`, which only ever won the content level.
+    assert row["duplicate_of"] == bigger_id
+    assert progress_of(settings, bigger_id) == 2
+    assert progress_of(settings, first_id) is None
+    assert progress_of(settings, second_id) is None
+
+
 # ------------------------------------------------------------------- resilience
 
 
