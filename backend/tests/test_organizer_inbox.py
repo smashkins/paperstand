@@ -35,6 +35,7 @@ from paperstand.organizer.inbox import (
     organize_once,
 )
 from paperstand.organizer.mover import sidecar_path
+from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 from tests.test_cli_organize import _fingerprint
 
@@ -269,6 +270,39 @@ def test_a_parked_file_moves_on_once_its_title_is_configured(
     assert (catalogue_settings.library / destination_rel).is_file()
 
 
+def test_a_parked_file_whose_move_fails_keeps_its_sidecar(
+    inbox: Path,
+    catalogue_settings: Settings,
+    config: PaperstandConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old sidecar is removed only once the move onto the library
+    actually succeeds: an unexpected error moving a now-resolvable parked
+    file leaves it, and its sidecar, exactly where they were."""
+    _write_pdf(inbox / ZONDA_HERALD, "zonda")
+    _run(inbox, catalogue_settings, config, apply=True)
+
+    parked = inbox / "unsorted" / ZONDA_HERALD
+    sidecar = sidecar_path(parked)
+    assert parked.is_file()
+    assert sidecar.is_file()
+
+    updated = config.model_copy(deep=True)
+    newspapers = next(library for library in updated.libraries if library.name == "Newspapers")
+    newspapers.titles.append(TitleConfig(name="Zonda Herald"))
+
+    def always_fail(source: Path, destination: Path) -> None:
+        raise PermissionError(errno.EACCES, "permission denied")
+
+    monkeypatch.setattr("paperstand.organizer.inbox.move_file", always_fail)
+
+    report, _text = _run(inbox, catalogue_settings, updated, apply=True)
+
+    assert report.outcomes == [Failed(f"unsorted/{ZONDA_HERALD}", "[Errno 13] permission denied")]
+    assert parked.is_file()
+    assert sidecar.is_file()
+
+
 def test_a_still_unsorted_file_is_left_untouched_on_a_second_run(
     inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
 ) -> None:
@@ -422,6 +456,45 @@ def test_no_catalogue_warns_in_the_header_and_still_moves(
     assert report.outcomes == [Moved("Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)]
 
 
+CORRIERE_16_CANONICAL = "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-16.pdf"
+
+
+def test_a_removed_catalogued_file_is_not_trusted_as_a_duplicate(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """A hash read from the catalogue is only trusted while the file it
+    names is still on disk: removed since the last scan, a fresh copy of the
+    same bytes resolves and moves instead of being parked as a duplicate of
+    something that is gone."""
+    catalogued = catalogue_settings.library / CORRIERE_16
+    content = catalogued.read_bytes()
+    catalogued.unlink()
+    (inbox / "Corriere_del_Ponte_-_16_Marzo_2026.pdf").write_bytes(content)
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Moved("Corriere_del_Ponte_-_16_Marzo_2026.pdf", CORRIERE_16_CANONICAL)
+    ]
+    assert (catalogue_settings.library / CORRIERE_16_CANONICAL).read_bytes() == content
+
+
+def test_a_catalogued_file_still_on_disk_is_still_a_duplicate(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """The existing behaviour, pinned down again next to the removed case
+    above: a catalogued file still there, unchanged, still makes a fresh
+    byte-identical copy a duplicate."""
+    _copy(
+        catalogue_settings.library / CORRIERE_16,
+        inbox / "Corriere_del_Ponte_-_16_Marzo_2026.pdf",
+    )
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [Duplicate("Corriere_del_Ponte_-_16_Marzo_2026.pdf", CORRIERE_16)]
+
+
 # ------------------------------------------------------------------ escaping
 
 
@@ -538,6 +611,65 @@ def test_an_unexpected_os_error_during_the_move_is_reported_failed(
     ]
     assert (inbox / "Il_Mattutino_2026-03-21.pdf").exists()
     assert "0 moved, 0 duplicate, 0 unsorted, 0 skipped, 1 failed" in text
+
+
+# ------------------------------------------------------------------ vanished
+
+
+def test_a_file_deleted_mid_processing_is_skipped_and_others_still_move(
+    inbox: Path,
+    catalogue_settings: Settings,
+    config: PaperstandConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A file that vanishes between the walk and its own hashing step must
+    not abort the run: it is reported ``Skipped``, and a later candidate —
+    walked afterwards, in name order — still moves."""
+    doomed = _write_pdf(inbox / "Corriere_del_Ponte_2026-03-01.pdf", "vanishing")
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    real_content_hash = content_hash
+
+    def vanish_then_hash(path: Path) -> str:
+        if path == doomed:
+            path.unlink()
+        return real_content_hash(path)
+
+    monkeypatch.setattr("paperstand.organizer.inbox.content_hash", vanish_then_hash)
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Skipped("Corriere_del_Ponte_2026-03-01.pdf", "vanished before it was processed"),
+        Moved("Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION),
+    ]
+    assert report.failed == 0
+    assert (catalogue_settings.library / IL_MATTUTINO_DESTINATION).is_file()
+
+
+def test_an_unexpected_os_error_while_parking_is_reported_failed_not_aborted(
+    inbox: Path,
+    catalogue_settings: Settings,
+    config: PaperstandConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unexpected error raised while parking — never while making the
+    primary move itself — is ``Failed``, not a crash that stops the run
+    before later candidates are even looked at."""
+    _write_pdf(inbox / ZONDA_HERALD, "unresolvable")
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    def always_fail(source: Path, folder: Path, reason: str) -> Path:
+        raise PermissionError(errno.EACCES, "permission denied")
+
+    monkeypatch.setattr("paperstand.organizer.inbox.park", always_fail)
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Moved("Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION),
+        Failed(ZONDA_HERALD, "[Errno 13] permission denied"),
+    ]
+    assert report.failed == 1
 
 
 # --------------------------------------------------------------------- scan

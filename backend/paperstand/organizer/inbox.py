@@ -292,20 +292,76 @@ def _process_one(
     settle: float,
     now: float,
 ) -> Outcome:
-    """The pipeline for one inbox file: settle, verify, hash, resolve, claim, move."""
-    source = inbox / found.rel_path
+    """The pipeline for one inbox file: settle, verify, hash, resolve, claim, move.
+
+    Settling needs no filesystem access at all — ``found`` already carries
+    the walk's own stat — but every step after it touches the file on disk,
+    and a file that vanishes from under the walk between it and this call
+    (deleted, or moved away by something else) is not an error the whole run
+    should stop for: it is :class:`Skipped`, and later candidates still run.
+    Likewise, an unexpected :class:`OSError` raised while parking a file —
+    never while making the primary move itself, which :func:`_apply_move`
+    already turns into :class:`Failed` on its own — is :class:`Failed` too,
+    rather than aborting the pass.
+    """
     mtime_seconds = found.mtime_ns / 1_000_000_000
     elapsed = now - mtime_seconds
     if elapsed < settle:
         return Skipped(found.rel_path, f"modified {int(elapsed)} s ago")
 
+    try:
+        return _process_settled(
+            found,
+            inbox=inbox,
+            library=library,
+            resolver=resolver,
+            known_hashes=known_hashes,
+            moved_hashes=moved_hashes,
+            claims=claims,
+            apply=apply,
+            mtime_seconds=mtime_seconds,
+        )
+    except FileNotFoundError:
+        return Skipped(found.rel_path, "vanished before it was processed")
+    except OSError as error:
+        log.warning("cannot process %s: %s", found.rel_path, error)
+        return Failed(found.rel_path, str(error))
+
+
+def _process_settled(
+    found: LibraryFile,
+    *,
+    inbox: Path,
+    library: Path,
+    resolver: Resolver,
+    known_hashes: dict[str, str],
+    moved_hashes: dict[str, str],
+    claims: dict[str, str],
+    apply: bool,
+    mtime_seconds: float,
+) -> Outcome:
+    """Verify, hash, resolve, claim and move a file already past the settle check."""
+    source = inbox / found.rel_path
     unreadable = _unreadable_reason(source)
     if unreadable is not None:
         reason = f"not a readable PDF ({unreadable})"
         return _park_unsorted(found, inbox, reason, apply=apply)
 
     digest = content_hash(source)
-    known = known_hashes.get(digest) or moved_hashes.get(digest)
+    known = known_hashes.get(digest)
+    if known is not None and not _catalogued_file_matches(library, known, digest):
+        # The catalogue can be stale: the row's file may have been removed,
+        # or replaced with different content, since the last scan. Trusting
+        # it anyway would park a genuinely new file as a duplicate of
+        # something that no longer exists.
+        log.info(
+            "catalogued duplicate %s of %s no longer matches on disk; resolving instead",
+            known,
+            found.rel_path,
+        )
+        known = None
+    if known is None:
+        known = moved_hashes.get(digest)
     if known is not None:
         return _park_duplicate(found, inbox, known, apply=apply)
 
@@ -338,12 +394,22 @@ def _process_one(
     return outcome
 
 
+def _catalogued_file_matches(library: Path, rel_path: str, digest: str) -> bool:
+    """Whether the catalogue's ``rel_path`` is still on disk with ``digest``."""
+    path = library / rel_path
+    return path.is_file() and content_hash(path) == digest
+
+
 def _unreadable_reason(path: Path) -> str | None:
     """Why ``path`` is not a readable PDF, or ``None`` when it is.
 
     A password-protected file and a broken one are told apart the same way
     the cover renderer already does: opening it never raises just for being
-    encrypted, only ``needs_pass`` says so afterwards.
+    encrypted, only ``needs_pass`` says so afterwards. When ``path`` is no
+    longer there at all — vanished between the walk and this call — a plain
+    :class:`FileNotFoundError` is raised instead of a reason, regardless of
+    what PyMuPDF itself raised for the missing file, so the caller can tell
+    "gone" apart from "genuinely broken".
     """
     try:
         with pymupdf.open(path) as document:
@@ -352,6 +418,8 @@ def _unreadable_reason(path: Path) -> str | None:
             if document.page_count == 0:
                 return "the document has no pages"
     except Exception as error:  # a broken PDF must not stop the run
+        if not path.exists():
+            raise FileNotFoundError(f"{path} vanished before it could be read") from error
         return f"{type(error).__name__}: {error}"
     return None
 
@@ -371,15 +439,28 @@ def _park_unsorted(found: LibraryFile, inbox: Path, reason: str, *, apply: bool)
 def _park_duplicate(found: LibraryFile, inbox: Path, of: str, *, apply: bool) -> Duplicate:
     """Report ``found`` as a duplicate of ``of``, parking it in apply mode.
 
-    A copy that was itself sitting in ``unsorted/`` loses its sidecar first,
-    so nothing dangles once it moves on to ``duplicates/``.
+    The old sidecar, if any, is removed only once ``park`` has actually
+    placed the file in ``duplicates/`` — never before, so a file that fails
+    to park keeps the sidecar it already had.
     """
     if apply:
         source = inbox / found.rel_path
-        if found.rel_path.startswith(f"{UNSORTED_FOLDER}/"):
-            remove_sidecar(source)
         park(source, inbox / DUPLICATES_FOLDER, f"duplicate of {of}")
+        _forget_old_sidecar(found, source)
     return Duplicate(found.rel_path, of)
+
+
+def _forget_old_sidecar(found: LibraryFile, source: Path) -> None:
+    """Remove ``source``'s sidecar, now that its file has moved on from ``unsorted/``.
+
+    ``source`` is the file's OLD inbox location, captured before the move —
+    the only place its sidecar could ever have been, since a park writes a
+    *fresh* one wherever the file lands. A file that never sat in
+    ``unsorted/`` never had one, so this is harmless to call unconditionally
+    once an outcome has actually been reached.
+    """
+    if found.rel_path.startswith(f"{UNSORTED_FOLDER}/"):
+        remove_sidecar(source)
 
 
 def _dry_run_move(
@@ -403,19 +484,22 @@ def _apply_move(
 ) -> Outcome:
     """Actually move ``found`` to ``destination``, handling every way it can fail.
 
-    A file arriving from ``unsorted/`` loses its sidecar before the attempt,
-    whatever the attempt turns into: moved, a duplicate found at move time,
-    or still unsorted for a new reason — :func:`park` writes a fresh sidecar
-    in the last two cases, so nothing is ever left without one.
+    A file arriving from ``unsorted/`` keeps its sidecar until the move (or
+    the re-park it turns into) actually succeeds — never removed up front,
+    so a file left in place by an unexpected error keeps the reason it
+    already carried. A :class:`FileNotFoundError` is never turned into
+    :class:`Failed` here: it propagates, so the pipeline can report the file
+    as vanished instead.
     """
     source = inbox / found.rel_path
-    if found.rel_path.startswith(f"{UNSORTED_FOLDER}/"):
-        remove_sidecar(source)
     try:
         move_file(source, destination)
+    except FileNotFoundError:
+        raise
     except DestinationOccupied:
         if content_hash(destination) == digest:
             park(source, inbox / DUPLICATES_FOLDER, f"duplicate of {destination_rel}")
+            _forget_old_sidecar(found, source)
             return Duplicate(found.rel_path, destination_rel)
         reason = f"destination {destination_rel} exists with different content"
         park(source, inbox / UNSORTED_FOLDER, reason)
@@ -423,6 +507,7 @@ def _apply_move(
     except OSError as error:
         log.warning("cannot move %s to %s: %s", source, destination, error)
         return Failed(found.rel_path, str(error))
+    _forget_old_sidecar(found, source)
     log.info("moved %s -> %s", found.rel_path, destination_rel)
     return Moved(found.rel_path, destination_rel)
 

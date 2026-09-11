@@ -35,7 +35,10 @@ Reads every PDF in the inbox, in this order, per file:
 2. **Verify** — the file is opened; one that fails to open, needs a password, or has no pages
    is unsorted, with the reason.
 3. **Hash** — the SHA-256 of the whole file. One the catalogue already knows, or one already
-   moved earlier in this same run, makes it a duplicate — whatever it is called.
+   moved earlier in this same run, makes it a duplicate — whatever it is called. A catalogued
+   hash is trusted only while the row's own file is still on disk with exactly that content:
+   removed or replaced since the last scan, it is ignored and the file is resolved fresh
+   instead of being parked as a duplicate of something that is gone.
 4. **Resolve** — the file's own name, never a folder of the inbox, is parsed against every
    configured library exactly as if it sat at that library's root, augmented with every title
    a `publication.yml` declares somewhere beneath it. It resolves when exactly one library
