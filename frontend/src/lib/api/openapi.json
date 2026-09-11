@@ -254,6 +254,28 @@
 					"title_name": {
 						"title": "Title Name",
 						"type": "string"
+					},
+					"variant": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Variant"
+					},
+					"volume": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Volume"
 					}
 				},
 				"required": [
@@ -447,6 +469,28 @@
 					"title_name": {
 						"title": "Title Name",
 						"type": "string"
+					},
+					"variant": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Variant"
+					},
+					"volume": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Volume"
 					}
 				},
 				"required": [
@@ -1016,6 +1060,23 @@
 						],
 						"title": "First Date"
 					},
+					"frequency": {
+						"anyOf": [
+							{
+								"enum": [
+									"daily",
+									"weekly",
+									"monthly",
+									"irregular"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Frequency"
+					},
 					"id": {
 						"title": "Id",
 						"type": "string"
@@ -1024,6 +1085,22 @@
 						"title": "Issue Count",
 						"type": "integer"
 					},
+					"issue_key": {
+						"anyOf": [
+							{
+								"enum": [
+									"date",
+									"number",
+									"date+number"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Key"
+					},
 					"kind": {
 						"enum": [
 							"newspaper",
@@ -1031,6 +1108,17 @@
 						],
 						"title": "Kind",
 						"type": "string"
+					},
+					"language": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Language"
 					},
 					"last_date": {
 						"anyOf": [
@@ -1061,6 +1149,28 @@
 						"title": "Name",
 						"type": "string"
 					},
+					"parent_slug": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Parent Slug"
+					},
+					"slug": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Slug"
+					},
 					"source": {
 						"enum": [
 							"config",
@@ -1072,6 +1182,20 @@
 						],
 						"title": "Source",
 						"type": "string"
+					},
+					"supplements": {
+						"anyOf": [
+							{
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Supplements"
 					},
 					"thumb_url": {
 						"anyOf": [
@@ -1121,6 +1245,23 @@
 						],
 						"title": "First Date"
 					},
+					"frequency": {
+						"anyOf": [
+							{
+								"enum": [
+									"daily",
+									"weekly",
+									"monthly",
+									"irregular"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Frequency"
+					},
 					"id": {
 						"title": "Id",
 						"type": "string"
@@ -1129,6 +1270,22 @@
 						"title": "Issue Count",
 						"type": "integer"
 					},
+					"issue_key": {
+						"anyOf": [
+							{
+								"enum": [
+									"date",
+									"number",
+									"date+number"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Key"
+					},
 					"kind": {
 						"enum": [
 							"newspaper",
@@ -1136,6 +1293,17 @@
 						],
 						"title": "Kind",
 						"type": "string"
+					},
+					"language": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Language"
 					},
 					"last_date": {
 						"anyOf": [
@@ -1166,6 +1334,28 @@
 						"title": "Name",
 						"type": "string"
 					},
+					"parent_slug": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Parent Slug"
+					},
+					"slug": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Slug"
+					},
 					"source": {
 						"enum": [
 							"config",
@@ -1177,6 +1367,20 @@
 						],
 						"title": "Source",
 						"type": "string"
+					},
+					"supplements": {
+						"anyOf": [
+							{
+								"items": {
+									"type": "string"
+								},
+								"type": "array"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Supplements"
 					},
 					"thumb_url": {
 						"anyOf": [

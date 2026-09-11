@@ -148,6 +148,71 @@ def test_an_unknown_title_is_a_404(catalogue_client: TestClient) -> None:
     assert catalogue_client.get("/api/titles/nope/calendar").status_code == 404
 
 
+# ------------------------------------------------------- declared publications
+
+
+def test_a_declared_titles_metadata_reaches_the_api(catalogue_client: TestClient) -> None:
+    title = title_named(catalogue_client, "Corriere del Ponte")
+
+    assert title["source"] == "publication"
+    assert title["slug"] == "corriere-del-ponte"
+    assert title["frequency"] == "daily"
+    assert title["language"] == "it"
+    assert title["issue_key"] == "date"
+    assert title["supplements"] == ["Weekend"]
+    assert title["parent_slug"] is None
+
+
+def test_a_declared_supplement_carries_its_variant(catalogue_client: TestClient) -> None:
+    title = title_named(catalogue_client, "Corriere del Ponte")
+    issues = catalogue_client.get(
+        "/api/issues", params={"title": title["id"], "limit": 200}
+    ).json()["items"]
+    weekend = next(issue for issue in issues if issue["variant"] == "Weekend")
+    speciale = next(issue for issue in issues if issue["variant"] == "Speciale")
+
+    assert weekend["is_duplicate"] is False
+    assert speciale["is_duplicate"] is False
+    weekend_detail = catalogue_client.get(f"/api/issues/{weekend['id']}").json()
+    speciale_detail = catalogue_client.get(f"/api/issues/{speciale['id']}").json()
+    assert weekend_detail["matched_rule"].endswith("variant:declared")
+    assert speciale_detail["matched_rule"].endswith("variant:undeclared")
+
+
+def test_a_declared_magazine_with_no_configured_title_is_real(
+    catalogue_client: TestClient,
+) -> None:
+    title = next(
+        title
+        for title in titles(catalogue_client, library="magazines")
+        if title["name"] == "Bright Meadows"
+    )
+
+    assert title["source"] == "publication"
+    assert title["kind"] == "magazine"
+    assert title["language"] == "en"
+    assert title["frequency"] == "monthly"
+
+    issues = catalogue_client.get("/api/issues", params={"title": title["id"], "limit": 10}).json()[
+        "items"
+    ]
+    assert len(issues) == 1
+    assert issues[0]["volume"] == 2024
+    assert issues[0]["issue_number"] == "3"
+
+
+def test_an_undeclared_title_has_no_publication_metadata(catalogue_client: TestClient) -> None:
+    title = title_named(catalogue_client, "Orizzonte")
+
+    assert title["source"] != "publication"
+    assert title["slug"] is None
+    assert title["frequency"] is None
+    assert title["language"] is None
+    assert title["issue_key"] is None
+    assert title["parent_slug"] is None
+    assert title["supplements"] is None
+
+
 # ----------------------------------------------------------------- calendar
 
 
@@ -172,6 +237,34 @@ def test_the_calendar_maps_every_day_to_its_issue(catalogue_client: TestClient) 
         assert issue["issue_date"] == day
         assert issue["title_id"] == title["id"]
         assert issue["is_duplicate"] is False
+
+
+def test_a_same_day_supplement_never_hides_the_daily(catalogue_client: TestClient) -> None:
+    title = title_named(catalogue_client, "Corriere del Ponte")
+    d1 = SAMPLE_TODAY - dt.timedelta(days=30)
+    issues = catalogue_client.get(
+        "/api/issues", params={"title": title["id"], "limit": 200}
+    ).json()["items"]
+    plain = next(
+        issue
+        for issue in issues
+        if issue["issue_date"] == d1.isoformat() and issue["variant"] is None
+    )
+    weekend = next(
+        issue
+        for issue in issues
+        if issue["issue_date"] == d1.isoformat() and issue["variant"] == "Weekend"
+    )
+    assert plain["id"] != weekend["id"]
+
+    calendar = catalogue_client.get(
+        f"/api/titles/{title['id']}/calendar", params={"year": d1.year}
+    ).json()
+    assert calendar["days"][d1.isoformat()] == plain["id"]
+
+    today_payload = catalogue_client.get("/api/today", params={"date": d1.isoformat()}).json()
+    winners = {issue["title_id"]: issue["id"] for issue in today_payload["newspapers"]}
+    assert winners[title["id"]] == plain["id"]
 
 
 def test_a_year_with_no_issues_has_an_empty_map(catalogue_client: TestClient) -> None:

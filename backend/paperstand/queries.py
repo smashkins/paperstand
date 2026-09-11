@@ -5,7 +5,7 @@ objects back. That is deliberate — the OPDS feed answers the same
 questions the REST API does, and both have to answer them the same way, down to
 which issues a duplicate hides and how ties are broken.
 
-Three rules are applied consistently, and are the reason most of these functions
+Four rules are applied consistently, and are the reason most of these functions
 take a flag rather than being written twice:
 
 * **Duplicates are hidden by default.** A row with ``duplicate_of`` set is the
@@ -14,14 +14,18 @@ take a flag rather than being written twice:
 * **Issues sort by date, then by file name.** The date can be null and the file
   name never is, so the pair is a total order and ``prev``/``next`` can be
   resolved with one comparison.
-* **A tie is broken by what arrived last.** Where exactly one row may represent
-  a title on a day — the calendar, the newspapers of ``/api/today`` — the most
-  recently added non-duplicate wins.
+* **The plain issue wins over a same-day supplement.** Where exactly one row may
+  represent a title on a day — the calendar, the newspapers of ``/api/today``,
+  each title's latest issue — a row with no ``variant`` is preferred first, so a
+  Weekend edition never hides the daily it shares its date with.
+* **A further tie is broken by what arrived last.** Once the plain-issue
+  preference is applied, the most recently added non-duplicate wins.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 from collections.abc import Sequence
 from typing import Any, NamedTuple
@@ -58,6 +62,8 @@ ISSUE_COLUMNS = """
     i.date_precision AS date_precision,
     i.date_source AS date_source,
     i.issue_number AS issue_number,
+    i.volume AS volume,
+    i.variant AS variant,
     i.derived_title AS derived_title,
     i.label AS label,
     i.matched_rule AS matched_rule,
@@ -86,8 +92,10 @@ ISSUE_ORDER: dict[IssueSort, str] = {
     "added_desc": "i.added_at DESC, i.id DESC",
 }
 
-#: Newest first, for the windowed "one row per title" queries.
-LATEST_FIRST = "i.issue_date DESC, i.filename DESC"
+#: Newest first, for the windowed "one row per title" queries. A supplement
+#: sharing its date with the plain issue never wins the tie: `i.variant IS
+#: NULL` sorts true (the plain issue) before false, so it is picked first.
+LATEST_FIRST = "i.issue_date DESC, i.variant IS NULL DESC, i.filename DESC"
 
 #: A title somebody would call a periodical, as opposed to the ``Unsorted``
 #: bucket the parser uses for the files it could not place.
@@ -152,6 +160,8 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         date_precision=row["date_precision"],
         date_source=row["date_source"],
         issue_number=row["issue_number"],
+        volume=int(row["volume"]) if row["volume"] is not None else None,
+        variant=row["variant"],
         label=str(row["label"]),
         filename=str(row["filename"]),
         rel_path=str(row["rel_path"]),
@@ -216,6 +226,7 @@ def catalogue_totals(connection: sqlite3.Connection) -> tuple[int, int, int]:
 
 TITLE_SELECT = """
 SELECT t.id, t.library_id, t.name, t.sort_name, t.kind, t.source,
+       t.slug, t.frequency, t.language, t.issue_key, t.parent_slug, t.supplements,
        count(i.id) AS issue_count,
        min(i.issue_date) AS first_date,
        max(i.issue_date) AS last_date
@@ -231,6 +242,12 @@ def _title_from_row(row: sqlite3.Row, latest: Issue | None) -> Title:
         library_id=str(row["library_id"]),
         kind=row["kind"],
         source=row["source"],
+        slug=row["slug"],
+        frequency=row["frequency"],
+        language=row["language"],
+        issue_key=row["issue_key"],
+        parent_slug=row["parent_slug"],
+        supplements=(json.loads(row["supplements"]) if row["supplements"] is not None else None),
         issue_count=int(row["issue_count"]),
         latest_issue=latest,
         first_date=row["first_date"],
@@ -303,8 +320,11 @@ def title_calendar(
     """One year of a title as a ``YYYY-MM-DD`` → issue id map.
 
     With no year, the most recent one that has issues; with no issues at all, the
-    current year and an empty map. Where two non-duplicate issues share a day the
-    most recently added one wins, which is the same rule ``/api/today`` uses.
+    current year and an empty map. Where two non-duplicate issues share a day, the
+    plain issue always wins over a same-day supplement, and failing that the most
+    recently added one wins, which is the same rule ``/api/today`` uses. The rows
+    are read in the order the winner should be written in, last write wins, so
+    the ``variant IS NULL`` rows come last.
     """
     years = title_years(connection, title_id)
     chosen = year if year is not None else (years[0].year if years else dt.date.today().year)
@@ -314,7 +334,7 @@ def title_calendar(
         FROM issues
         WHERE title_id = :id AND duplicate_of IS NULL AND issue_date IS NOT NULL
           AND substr(issue_date, 1, 4) = :year
-        ORDER BY added_at ASC, id ASC
+        ORDER BY variant IS NULL ASC, added_at ASC, id ASC
         """,
         {"id": title_id, "year": f"{chosen:04d}"},
     ).fetchall()
@@ -496,11 +516,16 @@ def latest_per_kind(connection: sqlite3.Connection, kind: str) -> list[Issue]:
 
 
 def issues_on_date(connection: sqlite3.Connection, kind: str, date: str) -> list[Issue]:
-    """One issue per real title of ``kind`` carrying exactly ``date``."""
+    """One issue per real title of ``kind`` carrying exactly ``date``.
+
+    A supplement filed on the same day as the plain issue never wins this
+    window: ``i.variant IS NULL`` is the first tiebreaker, so a Weekend edition
+    never hides the daily on its own day.
+    """
     sql = _windowed(
         f"WHERE i.duplicate_of IS NULL AND t.kind = :kind AND i.issue_date = :date "
         f"AND {REAL_TITLE}",
-        "i.added_at DESC, i.filename ASC",
+        "i.variant IS NULL DESC, i.added_at DESC, i.filename ASC",
         "ORDER BY sort_name ASC",
     )
     rows = connection.execute(sql, {"kind": kind, "date": date}).fetchall()

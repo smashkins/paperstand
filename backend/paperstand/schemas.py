@@ -26,6 +26,8 @@ Kind = Literal["newspaper", "magazine"]
 DatePrecision = Literal["day", "month", "year", "none"]
 DateSource = Literal["filename", "mixed", "folder", "mtime", "none"]
 TitleSource = Literal["config", "folder", "filename", "pattern", "unsorted", "publication"]
+Frequency = Literal["daily", "weekly", "monthly", "irregular"]
+IssueKey = Literal["date", "number", "date+number"]
 IssueSort = Literal["date_desc", "date_asc", "added_desc"]
 TitleSort = Literal["name", "latest"]
 ScanPhase = Literal["catalogue", "covers"]
@@ -78,6 +80,8 @@ class Issue(BaseModel):
     date_precision: DatePrecision
     date_source: DateSource
     issue_number: str | None = None
+    volume: int | None = None
+    variant: str | None = None
     label: str
     filename: str
     rel_path: str
@@ -117,6 +121,12 @@ class Title(BaseModel):
     library_id: str
     kind: Kind
     source: TitleSource
+    slug: str | None = None
+    frequency: Frequency | None = None
+    language: str | None = None
+    issue_key: IssueKey | None = None
+    parent_slug: str | None = None
+    supplements: list[str] | None = None
     issue_count: int
     latest_issue: Issue | None = None
     first_date: str | None = None
