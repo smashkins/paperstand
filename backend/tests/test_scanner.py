@@ -505,6 +505,57 @@ def test_a_touch_reports_updated_and_renders_nothing(
     assert row["mtime_ns"] == target.stat().st_mtime_ns
 
 
+def test_two_files_swapping_paths_keep_their_identities(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path swap (or a rotation) looks, to pass one, like two independent
+    replacements: each old row is deleted the moment its path is found to
+    hold different bytes. Pass two must still tell that apart from an actual
+    replacement — the bytes it lost are exactly the bytes another queued file
+    gained — and reunite each with its old id, cache and reading position
+    rather than adding two fresh rows and removing two old ones."""
+    scan_once(scan_settings)
+    rows = query(
+        scan_settings,
+        "SELECT i.id, i.rel_path FROM issues i JOIN titles t ON t.id = i.title_id "
+        "WHERE t.name = 'Corriere del Ponte' ORDER BY i.rel_path LIMIT 2",
+    )
+    assert len(rows) == 2
+    id_a, rel_a = str(rows[0]["id"]), str(rows[0]["rel_path"])
+    id_b, rel_b = str(rows[1]["id"]), str(rows[1]["rel_path"])
+    set_progress(scan_settings, id_a, 3)
+    set_progress(scan_settings, id_b, 7)
+    cover_a, _ = cover_paths(scan_settings.cache_path, id_a)
+    cover_b, _ = cover_paths(scan_settings.cache_path, id_b)
+    mtime_a = cover_a.stat().st_mtime_ns
+    mtime_b = cover_b.stat().st_mtime_ns
+
+    path_a = sample_library.path(rel_a)
+    path_b = sample_library.path(rel_b)
+    temp = path_a.with_name("swap-temp.pdf")
+    path_a.rename(temp)
+    path_b.rename(path_a)
+    temp.rename(path_b)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a path swap must never render a cover")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert (result.added, result.removed) == (0, 0)
+    now_at_a = query(scan_settings, "SELECT id FROM issues WHERE rel_path = ?", (rel_a,))[0]
+    now_at_b = query(scan_settings, "SELECT id FROM issues WHERE rel_path = ?", (rel_b,))[0]
+    assert now_at_a["id"] == id_b
+    assert now_at_b["id"] == id_a
+    assert progress_of(scan_settings, id_a) == 3
+    assert progress_of(scan_settings, id_b) == 7
+    assert cover_a.stat().st_mtime_ns == mtime_a
+    assert cover_b.stat().st_mtime_ns == mtime_b
+    assert has_cover(scan_settings.cache_path, id_a)
+    assert has_cover(scan_settings.cache_path, id_b)
+
+
 def _make_legacy(settings: Settings) -> dict[str, str]:
     """Rewrite every catalogued issue's id to a ``legacy-<n>`` placeholder
     with no content hash, renaming its cache files to match — a stand-in for

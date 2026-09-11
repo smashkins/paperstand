@@ -174,6 +174,17 @@ class _Existing:
     content_hash: str | None
     """``None`` marks a legacy row, written before schema 3, still waiting to
     be hashed once — the fast phase's own backfill, not a migration script."""
+    cover_status: str = "pending"
+    cover_error: str | None = None
+    page_count: int | None = None
+    page_w: float | None = None
+    page_h: float | None = None
+    first_page_text: str | None = None
+    """Everything the slow phase wrote from this row's bytes. Carried along
+    so that a displaced row resurrected in pass two — deleted and reinserted
+    within the same transaction, at the same id — can have these restored
+    rather than reset to ``pending``: the cache files on disk never moved,
+    only the database briefly forgot them."""
 
 
 class Scanner:
@@ -315,9 +326,16 @@ class Scanner:
                 size=int(row["size"]),
                 mtime_ns=int(row["mtime_ns"]),
                 content_hash=row["content_hash"],
+                cover_status=str(row["cover_status"]),
+                cover_error=row["cover_error"],
+                page_count=row["page_count"],
+                page_w=row["page_w"],
+                page_h=row["page_h"],
+                first_page_text=row["first_page_text"],
             )
             for row in connection.execute(
-                "SELECT id, rel_path, size, mtime_ns, content_hash FROM issues"
+                "SELECT id, rel_path, size, mtime_ns, content_hash, cover_status, "
+                "cover_error, page_count, page_w, page_h, first_page_text FROM issues"
             )
         }
         # Every id already spoken for, kept apart from `existing` so that
@@ -339,6 +357,12 @@ class Scanner:
         # from an unrelated arrival. Every queued file already has its digest
         # from the hashing pre-pass below, so pass two never reads a file.
         queue: list[tuple[LibraryFile, LibraryConfig, DeclaredPublication | None, str]] = []
+        # Rows pass one deleted because their path now holds different bytes,
+        # kept in case those bytes turn up elsewhere in the same scan — two
+        # files exchanging paths, say — in which case pass two resurrects the
+        # row at its old id instead of leaving both sides to be added fresh
+        # and the originals removed. Keyed by the *old* rel_path.
+        displaced: dict[str, _Existing] = {}
 
         def snapshot() -> None:
             self._publish(
@@ -494,9 +518,16 @@ class Scanner:
                             )
                             updated += 1
                         else:
-                            # A replacement is a new issue; the old one leaves
-                            # nothing for it to inherit.
-                            removed += self._remove(connection, {found.rel_path: stored})
+                            # A replacement is a new issue at this path — but
+                            # not necessarily gone for good: delete the row
+                            # without clearing its cache, and remember it in
+                            # case its exact bytes turn up elsewhere in this
+                            # same scan (two files trading paths, say). Pass
+                            # two resurrects it there if so; otherwise it is
+                            # truly removed once pass two is done.
+                            connection.execute("DELETE FROM issues WHERE id = ?", (stored.id,))
+                            taken.discard(stored.id)
+                            displaced[found.rel_path] = stored
                             queue.append((found, library, publication, found_hash))
                 except (sqlite3.Error, ValueError, OSError) as error:
                     errors += 1
@@ -517,11 +548,14 @@ class Scanner:
             }
             kept = len(existing) - len(gone)
 
-            # Pass two: files no row was matched to in pass one. A gone row
-            # sharing a queued file's content hash is that same issue, moved —
-            # never a deletion plus an unrelated arrival.
+            # Pass two: files no row was matched to in pass one. A gone or a
+            # displaced row sharing a queued file's content hash is that same
+            # issue, moved — never a deletion plus an unrelated arrival.
             by_hash: dict[str, list[str]] = defaultdict(list)
             for rel_path, stored in gone.items():
+                if stored.content_hash is not None:
+                    by_hash[stored.content_hash].append(rel_path)
+            for rel_path, stored in displaced.items():
                 if stored.content_hash is not None:
                     by_hash[stored.content_hash].append(rel_path)
             for paths in by_hash.values():
@@ -532,19 +566,49 @@ class Scanner:
                     matches = by_hash.get(found_hash)
                     if matches:
                         old_rel_path = matches.pop(0)
-                        moved = gone.pop(old_rel_path)
-                        self._upsert(
-                            connection,
-                            scan_id,
-                            found,
-                            library,
-                            config,
-                            titles,
-                            moved,
-                            found_hash,
-                            publication,
-                            taken,
-                        )
+                        resurrected = displaced.pop(old_rel_path, None)
+                        if resurrected is not None:
+                            self._upsert(
+                                connection,
+                                scan_id,
+                                found,
+                                library,
+                                config,
+                                titles,
+                                None,
+                                found_hash,
+                                publication,
+                                taken,
+                                identifier=resurrected.id,
+                            )
+                            connection.execute(
+                                "UPDATE issues SET cover_status = ?, cover_error = ?, "
+                                "page_count = ?, page_w = ?, page_h = ?, "
+                                "first_page_text = ? WHERE id = ?",
+                                (
+                                    resurrected.cover_status,
+                                    resurrected.cover_error,
+                                    resurrected.page_count,
+                                    resurrected.page_w,
+                                    resurrected.page_h,
+                                    resurrected.first_page_text,
+                                    resurrected.id,
+                                ),
+                            )
+                        else:
+                            moved = gone.pop(old_rel_path)
+                            self._upsert(
+                                connection,
+                                scan_id,
+                                found,
+                                library,
+                                config,
+                                titles,
+                                moved,
+                                found_hash,
+                                publication,
+                                taken,
+                            )
                         updated += 1
                         log.info("scan %d: %s moved to %s", scan_id, old_rel_path, found.rel_path)
                     else:
@@ -565,6 +629,14 @@ class Scanner:
                     errors += 1
                     log.warning("scan %d: cannot catalogue %s: %s", scan_id, found.rel_path, error)
                 snapshot()
+
+            # A displaced row nothing in this scan turned out to match really
+            # is gone: its path holds different bytes for good, so its cache
+            # is forgotten like any other removed row's.
+            for rel_path, stored in sorted(displaced.items()):
+                log.debug("removing %s", rel_path)
+                clear_cache(self.settings.cache_path, stored.id)
+            removed += len(displaced)
 
             # A row about to be removed hands its reading position to a row
             # that shares its content hash, if one is still live: the copy
@@ -794,6 +866,7 @@ class Scanner:
         digest: str,
         publication: DeclaredPublication | None,
         taken: set[str],
+        identifier: str | None = None,
     ) -> None:
         """Parse one file and write its row, keeping an existing id or minting one.
 
@@ -803,6 +876,14 @@ class Scanner:
         `_upsert` itself never opens a file, and never clears a cache — a row
         it writes either keeps the bytes its cache was rendered from, or is a
         brand new row whose cover starts out pending like any other.
+
+        ``identifier``, given only alongside ``stored=None``, forces the id of
+        the freshly inserted row instead of deriving one from ``digest`` — how
+        pass two resurrects a row it displaced earlier in the same scan, at
+        the id its content already had. Its ``added_at`` restarts at ``now``
+        rather than carrying the displaced row's forward: the row really was
+        deleted and reinserted within this one transaction, and threading the
+        original ``added_at`` through `_Existing` is not worth it for a swap.
         """
         mtime = dt.datetime.fromtimestamp(found.mtime_ns / 1_000_000_000)
         issue = parse_path(found.rel_path, library, config.profile_for(library), mtime, publication)
@@ -815,8 +896,10 @@ class Scanner:
         else:
             # Two different paths sharing the same bytes derive the same id;
             # the second one found falls back to `_unique`, exactly like a
-            # colliding title name does.
-            identifier = _unique(issue_id(digest), taken)
+            # colliding title name does — unless the caller already knows
+            # which id this row belongs at.
+            if identifier is None:
+                identifier = _unique(issue_id(digest), taken)
             taken.add(identifier)
         values = (
             identifier,
