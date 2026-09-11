@@ -59,6 +59,7 @@ from paperstand.parsing.titles import (
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle only matters to type checkers
     from paperstand.config import LibraryConfig
+    from paperstand.publication import DeclaredPublication
 
 #: Title a file is filed under when titles are configured and none of them match.
 UNSORTED_TITLE = "Unsorted"
@@ -159,11 +160,18 @@ class Parser:
         rel_path: str,
         mtime: dt.datetime | dt.date,
         *,
+        publication: DeclaredPublication | None = None,
         trace: Trace | None = None,
     ) -> ParsedIssue:
-        """Parse one path, relative to the **library root**, into an issue."""
+        """Parse one path, relative to the **library root**, into an issue.
+
+        ``publication`` is a per-call argument, not part of the parser's own
+        state: a library can hold hundreds of declared folders, and the
+        compiled-parser cache (:func:`paperstand.parsing.parse.get_parser`)
+        would thrash if each one needed a parser of its own.
+        """
         path = PurePosixPath(rel_path)
-        folders = self._folder_components(path)
+        folders = self._folder_components(path, publication)
         clean = clean_stem(path.stem, self._strip, self._replace, trace)
         spaced = clean.spaced
         if trace is not None:
@@ -231,14 +239,24 @@ class Parser:
                 )
             )
 
+        allow_bare = (
+            self.profile.number and publication.kind_for(self.library.kind) != "newspaper"
+            if publication is not None
+            else self.allow_bare_number
+        )
         number, number_rule, number_span = self._resolve_number(
-            pattern, masked, config_match, trace
+            pattern, masked, config_match, allow_bare, trace
         )
         volume, variant = self._resolve_volume_variant(pattern)
         cut = self._cut(date_spans, number_span)
         candidates = self._candidates(pattern, folders, spaced, cut)
         derived = self._derived_title(candidates, spaced)
         title_name, title_source = self._resolve_title(pattern, config_match, candidates, derived)
+        if publication is not None:
+            # A declared publication always wins: every file beneath it is
+            # filed under the title it declares, never sent to Unsorted.
+            # `derived` stays what the name itself suggests, unaffected.
+            title_name, title_source = publication.title, "publication"
 
         date_hit, date_source, fallback_rule = self._apply_fallbacks(
             date_hit, folders, mtime, trace
@@ -256,10 +274,7 @@ class Parser:
         ]
         rules.append(f"title:{title_source}")
         if variant is not None:
-            # No publication reaches `parse` yet (that is added once the
-            # scanner learns `publication.yml`), so a captured variant is
-            # always undeclared for now.
-            declared = False
+            declared = publication is not None and publication.declares(variant)
             rules.append(f"variant:{'declared' if declared else 'undeclared'}")
         issue = ParsedIssue(
             title_name=title_name,
@@ -282,8 +297,22 @@ class Parser:
 
     # ----------------------------------------------------------------- private
 
-    def _folder_components(self, path: PurePosixPath) -> tuple[str, ...]:
+    def _folder_components(
+        self, path: PurePosixPath, publication: DeclaredPublication | None
+    ) -> tuple[str, ...]:
+        """Folders under the library root, minus the library's own path.
+
+        Under a declaration, the publication's own folder is stripped too —
+        it already implies the library prefix, being nested inside it — so a
+        ``2026/`` sub-folder beneath it still reaches the folder-date
+        fallback (F1) on its own, undisturbed by whatever the declaring
+        folder happens to be named.
+        """
         parts = path.parts[:-1]
+        if publication is not None:
+            pub_parts = PurePosixPath(publication.folder).parts
+            if parts[: len(pub_parts)] == pub_parts:
+                return parts[len(pub_parts) :]
         prefix = self._library_parts
         if prefix and parts[: len(prefix)] == prefix:
             parts = parts[len(prefix) :]
@@ -378,6 +407,7 @@ class Parser:
         pattern: PatternHit | None,
         masked: str,
         config_match: TitleMatch | None,
+        allow_bare: bool,
         trace: Trace | None,
     ) -> tuple[int | None, str | None, tuple[int, int] | None]:
         if pattern is not None and pattern.groups.get("number"):
@@ -398,7 +428,7 @@ class Parser:
         hit = find_number(
             masked,
             self._numbers,
-            allow_bare=self.allow_bare_number,
+            allow_bare=allow_bare,
             bare_from=end,
             year_range=self.profile.year_range,
             trace=trace,

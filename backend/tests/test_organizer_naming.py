@@ -16,6 +16,7 @@ from tests.fixtures.filenames import (
     Expected,
     discovered_config,
     example_config,
+    publication_for,
 )
 
 
@@ -278,7 +279,13 @@ def _expected_rel_path(expected: Expected) -> str:
 def _parse(expected: Expected, config: PaperstandConfig) -> ParsedIssue:
     library = config.library_for(expected.rel_path)
     assert library is not None, f"no library for {expected.rel_path}"
-    return parse_path(expected.rel_path, library, config.profile_for(library), MTIME)
+    return parse_path(
+        expected.rel_path,
+        library,
+        config.profile_for(library),
+        MTIME,
+        publication_for(expected.rel_path),
+    )
 
 
 def _assert_plan_matches(expected: Expected, plan: object) -> None:

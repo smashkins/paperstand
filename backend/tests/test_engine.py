@@ -11,6 +11,7 @@ import yaml
 from paperstand.config import PaperstandConfig
 from paperstand.parsing import ParsedIssue, parse_path
 from paperstand.parsing.profile import canonical_pattern, load_profiles
+from paperstand.publication import DeclaredPublication, PublicationConfig
 from tests.fixtures.filenames import (
     CONFIGURED,
     DISCOVERED,
@@ -19,6 +20,7 @@ from tests.fixtures.filenames import (
     discovered_config,
     example_config,
     example_config_path,
+    publication_for,
 )
 
 
@@ -26,7 +28,13 @@ def parse(expected: Expected, config: PaperstandConfig) -> ParsedIssue:
     """Parse one fixture row with the library it belongs to."""
     library = config.library_for(expected.rel_path)
     assert library is not None, f"no library for {expected.rel_path}"
-    return parse_path(expected.rel_path, library, config.profile_for(library), MTIME)
+    return parse_path(
+        expected.rel_path,
+        library,
+        config.profile_for(library),
+        MTIME,
+        publication_for(expected.rel_path),
+    )
 
 
 def assert_matches(issue: ParsedIssue, expected: Expected) -> None:
@@ -411,3 +419,77 @@ def test_dedup_strip_never_eats_a_canonical_tail(
     assert issue.issue_number == number
     assert issue.variant == variant
     assert issue.matched_rule.startswith("pattern[0]")
+
+
+# ----------------------------------------------------------------- publication=
+
+
+def test_a_declared_publication_is_never_unsorted() -> None:
+    """The title is filed under the declaration even where a library's own
+    `titles:` would otherwise have sent it to Unsorted."""
+    config = PaperstandConfig.model_validate(
+        {"libraries": [{"name": "M", "path": "M", "titles": ["Something Else"]}]}
+    )
+    library = config.library_for("M/x.pdf")
+    assert library is not None
+    publication = DeclaredPublication(folder="M/Corriere del Ponte", config=PublicationConfig())
+
+    issue = parse_path(
+        "M/Corriere del Ponte/Corriere del Ponte - 2026-09-06.pdf",
+        library,
+        config.profile_for(library),
+        MTIME,
+        publication,
+    )
+
+    assert issue.title_name == "Corriere del Ponte"
+    assert issue.title_source == "publication"
+
+
+def test_n2_follows_the_publications_kind_not_the_librarys() -> None:
+    """A magazine-kind publication inside a newspaper library gets its bare
+    numbers back; the reverse suppresses them, just as the kind itself would."""
+    newspaper = config_with({"extends": "default"}, kind="newspaper")
+    library = newspaper.library_for("M/x.pdf")
+    assert library is not None
+    profile = newspaper.profile_for(library)
+
+    without_publication = parse_path("M/Weekly 42.pdf", library, profile, MTIME)
+    assert without_publication.issue_number is None
+
+    magazine_publication = DeclaredPublication(
+        folder="M", config=PublicationConfig.model_validate({"kind": "magazine"})
+    )
+    with_publication = parse_path("M/Weekly 42.pdf", library, profile, MTIME, magazine_publication)
+    assert with_publication.issue_number == 42
+
+    magazine = config_with({"extends": "default"}, kind="magazine")
+    magazine_library = magazine.library_for("M/x.pdf")
+    assert magazine_library is not None
+    magazine_profile = magazine.profile_for(magazine_library)
+    newspaper_publication = DeclaredPublication(
+        folder="M", config=PublicationConfig.model_validate({"kind": "newspaper"})
+    )
+    suppressed = parse_path(
+        "M/Weekly 42.pdf", magazine_library, magazine_profile, MTIME, newspaper_publication
+    )
+    assert suppressed.issue_number is None
+
+
+def test_folder_components_exclude_the_publication_folder_itself() -> None:
+    """Without the exclusion, a publication folder that happens to look like a
+    year would shadow the real date folder underneath it (F1)."""
+    config = config_with({"extends": "default"})
+    library = config.library_for("M/x.pdf")
+    assert library is not None
+    profile = config.profile_for(library)
+    publication = DeclaredPublication(folder="M/2020", config=PublicationConfig())
+
+    without_exclusion = parse_path("M/2020/2026/Something.pdf", library, profile, MTIME)
+    assert without_exclusion.issue_date is not None
+    assert without_exclusion.issue_date.year == 2020  # the folder itself misread as a year
+
+    issue = parse_path("M/2020/2026/Something.pdf", library, profile, MTIME, publication)
+    assert issue.issue_date is not None
+    assert issue.issue_date.year == 2026
+    assert issue.date_source == "folder"
