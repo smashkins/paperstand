@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     nothing does not belong in the container contract.
     ``docs/configuration.md`` is the reference.
 
-    The settings, in the order they are declared: ``library``, ``data``, ``config``,
-    ``static``, ``scan_on_start``, ``scan_interval``, ``cover_workers``,
+    The settings, in the order they are declared: ``library``, ``inbox``, ``data``,
+    ``config``, ``static``, ``scan_on_start``, ``scan_interval``, ``cover_workers``,
     ``render_workers``, ``page_cache_max_mb``, ``base_url``, ``log_level``,
     ``trusted_proxies``, ``port``, ``host``, ``tz``.
     """
@@ -62,6 +62,9 @@ class Settings(BaseSettings):
 
     library: Path = Path("/library")
     """Read-only root of the PDF collection."""
+
+    inbox: Path = Path("/inbox")
+    """Writable folder ``paperstand organize`` imports PDFs from, into the library."""
 
     data: Path = Path("/data")
     """Writable directory for the database and the caches."""

@@ -75,6 +75,12 @@ A few things worth knowing:
   are different libraries, and a declaration never crosses that boundary, however the folders
   happen to nest on disk.
 
+None of this arranges the files by hand. [`paperstand organize`](organizer.md) is what moves a
+PDF from a writable inbox into a declared folder — or into `<Title>/<YYYY>` when the title has
+none — reading the exact same declarations the scanner does; declaring a title, or dropping a
+`publication.yml` next to it, is what makes an otherwise unsorted file move there on the next
+run.
+
 ## Libraries
 
 With a `paperstand.yml`, each library is declared explicitly:

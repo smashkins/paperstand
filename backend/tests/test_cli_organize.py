@@ -26,7 +26,7 @@ LIBRARY_FILES: tuple[str, ...] = (
 #: must collide with `LIBRARY_FILES[0]` rather than one silently winning.
 COLLIDING_FILE = "Newspapers/2026/03/17/Corriere_del_Ponte_2026-03-17.pdf"
 
-CANONICAL_CORRIERE = "Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf"
+CANONICAL_CORRIERE = "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf"
 
 
 @pytest.fixture
@@ -62,7 +62,9 @@ def test_a_canonical_line_per_planned_file(library: Path) -> None:
     assert organize_plan(library, example_config_path(), out) == 0
     text = out.getvalue()
     assert f"{LIBRARY_FILES[0]} -> {CANONICAL_CORRIERE}" in text
-    assert "Magazines/Confini/Confini_n._8_2026.pdf -> Confini/2026/Confini - 2026 - n8.pdf" in text
+    assert (
+        "Magazines/Confini/Confini_n._8_2026.pdf -> Magazines/Confini/2026/Confini - 2026 - n8.pdf"
+    ) in text
 
 
 def test_an_unsorted_line_carries_its_reason(library: Path) -> None:
@@ -164,6 +166,24 @@ def test_a_configured_title_elsewhere_plans_into_its_declared_folder(
         f"{rel_path} -> Newspapers/La Gazzetta del Lago (Valdora)/2026/"
         "La Gazzetta del Lago (Valdora) - 2026-03-17.pdf"
     ) in text
+
+
+def test_a_configured_undeclared_title_plans_inside_its_library_folder(
+    sample_library: SampleLibrary,
+) -> None:
+    """Orizzonte is a configured title with no `publication.yml` of its own:
+    it must plan inside its library, `Magazines/`, never at the library
+    root — the correction `plan_issue`'s `library_path` makes."""
+    orizzonte_file = next((sample_library.root / "Magazines/Orizzonte").glob("*.pdf"))
+    rel_path = orizzonte_file.relative_to(sample_library.root).as_posix()
+
+    out = io.StringIO()
+    assert organize_plan(sample_library.root, example_config_path(), out) == 0
+    text = out.getvalue()
+
+    line = next(line for line in text.splitlines() if line.startswith(f"{rel_path} -> "))
+    destination = line.split(" -> ", 1)[1]
+    assert destination.startswith("Magazines/Orizzonte/")
 
 
 def test_the_summary_separates_in_place_from_planned(sample_library: SampleLibrary) -> None:

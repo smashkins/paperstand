@@ -113,7 +113,12 @@ def _is_safe_component(name: str) -> bool:
     return bool(name.strip()) and "/" not in name and name not in (".", "..")
 
 
-def plan_issue(issue: ParsedIssue, *, publication_folder: str | None = None) -> OrganizePlan:
+def plan_issue(
+    issue: ParsedIssue,
+    *,
+    publication_folder: str | None = None,
+    library_path: str | None = None,
+) -> OrganizePlan:
     """Where ``issue`` would live under the canonical layout, or why it would not.
 
     ``publication_folder``, when given, is the folder — relative to the library
@@ -122,6 +127,14 @@ def plan_issue(issue: ParsedIssue, *, publication_folder: str | None = None) -> 
     basename, not ``issue.title_name`` (which may be the yml's display title),
     goes into the file name: a file already inside its declared folder, named
     after the folder the way the grammar requires, plans onto itself.
+
+    ``library_path``, when given and there is no ``publication_folder``, is the
+    path — relative to the library root — of the library ``issue``'s title is
+    configured in: an *undeclared* configured title then plans into
+    ``<library_path>/<Title>/<YYYY>/`` rather than at the library root, which a
+    configured title is never inside. Ignored once ``publication_folder`` is
+    given, since a declared folder already says exactly where the issue goes.
+    ``None`` (the default for both) keeps today's plain ``<Title>/<YYYY>/``.
 
     Checked in this order, the first that applies wins:
 
@@ -154,10 +167,11 @@ def plan_issue(issue: ParsedIssue, *, publication_folder: str | None = None) -> 
             "could not read back"
         )
     date = iso_date(issue.issue_date, issue.date_precision)
-    folder = (
-        f"{publication_folder}/{issue.issue_date.year:04d}"
-        if publication_folder is not None
-        else canonical_folder(title, issue.issue_date.year)
-    )
+    if publication_folder is not None:
+        folder = f"{publication_folder}/{issue.issue_date.year:04d}"
+    else:
+        folder = canonical_folder(title, issue.issue_date.year)
+        if library_path:
+            folder = f"{library_path.strip('/')}/{folder}"
     filename = canonical_filename(title, date, issue.issue_number, issue.volume, issue.variant)
     return CanonicalPath(folder=folder, filename=filename)

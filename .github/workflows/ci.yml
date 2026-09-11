@@ -152,3 +152,24 @@ jobs:
           # And /data has to be writable as that identity, not as root.
           docker exec -u 1234:1000 paperstand-ci sh -c 'touch /data/.probe'
           test -e "$data/.probe"
+
+      # Proves the entrypoint passes a command other than `serve` through, and
+      # drops privileges on that path too: an empty inbox, a dry run, and the
+      # header line the command always prints.
+      - name: Smoke test the organize command
+        run: |
+          set -euo pipefail
+          inbox="$(mktemp -d)"
+          library="$(mktemp -d)"
+          data="$(mktemp -d)"
+          chmod 777 "$inbox" "$library" "$data"
+
+          output="$(docker run --rm \
+            -e PUID=1234 -e PGID=1000 \
+            --mount "type=bind,src=$inbox,dst=/inbox" \
+            --mount "type=bind,src=$library,dst=/library" \
+            --mount "type=bind,src=$data,dst=/data" \
+            paperstand:ci organize)"
+
+          echo "$output"
+          echo "$output" | grep -q "inbox root:"

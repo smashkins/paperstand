@@ -80,6 +80,52 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="paperstand.yml to use (default: <data>/paperstand.yml)",
     )
+
+    organize_command = subparsers.add_parser(
+        "organize",
+        help="import PDFs from the inbox into the library, atomically",
+    )
+    organize_command.add_argument(
+        "--inbox",
+        type=Path,
+        default=None,
+        help="inbox to import from (default: PAPERSTAND_INBOX)",
+    )
+    organize_command.add_argument(
+        "--library",
+        type=Path,
+        default=None,
+        help="library root to import into (default: PAPERSTAND_LIBRARY)",
+    )
+    organize_command.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="directory holding the database and the caches (default: PAPERSTAND_DATA)",
+    )
+    organize_command.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="paperstand.yml to use (default: <data>/paperstand.yml)",
+    )
+    organize_command.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually move files (default: print the report and touch nothing)",
+    )
+    organize_command.add_argument(
+        "--settle",
+        type=float,
+        default=60.0,
+        help="seconds a file must sit untouched before it is considered (default: 60)",
+    )
+    organize_command.add_argument(
+        "--every",
+        type=float,
+        default=None,
+        help="repeat every N seconds until SIGTERM/SIGINT (default: run once)",
+    )
     return parser
 
 
@@ -152,6 +198,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         return parse_explain(args.file, args.config, args.library_root)
     if args.command == "scan":
         return scan(args.library, args.data, args.config)
+    if args.command == "organize":
+        from paperstand.cli.organize import organize
+
+        overrides = {
+            key: value
+            for key, value in (
+                ("inbox", args.inbox),
+                ("library", args.library),
+                ("data", args.data),
+            )
+            if value is not None
+        }
+        settings = get_settings()
+        if overrides:
+            settings = Settings(**{**settings.model_dump(), **overrides})
+        return organize(
+            settings.inbox,
+            settings.library,
+            settings.data,
+            args.config,
+            apply=args.apply,
+            settle=args.settle,
+            every=args.every,
+        )
     parser.print_help()
     return 1
 

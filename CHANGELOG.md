@@ -33,9 +33,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hashed`, how many files the running scan has read in full to compute a
   content hash — new, touched or genuinely changed, and a legacy row
   backfilled once.
+- `paperstand organize` and the writable inbox it reads: imports PDFs into the
+  canonical layout, atomically and never overwriting a file already in the
+  library; a file it cannot place is parked under `unsorted/` and re-read on
+  every run, a byte-identical copy of a catalogued file under `duplicates/`.
+  `--every` repeats the run on an interval until stopped. See
+  [`organizer.md`](docs/organizer.md).
+- `PAPERSTAND_INBOX` (default `/inbox`), the folder `paperstand organize` reads.
+- An optional `organizer` compose service, off by default, mounting the
+  library read-write and running `organize --apply --every
+  PAPERSTAND_ORGANIZE_INTERVAL` on a loop — the only container that ever
+  writes into the library.
+- The image now accepts a command after the entrypoint, so `docker run` (or
+  the new compose service) can run `organize` instead of the default `serve`.
 
 ### Changed
 
+- `organize-plan` now plans an undeclared configured title inside its own
+  library, at `<library path>/<Title>/<YYYY>`, rather than at the library
+  root — a spot the scanner would never have catalogued.
 - The bundled profile now tries the canonical declared-publication grammar
   before its other patterns, so a name shaped `<Title> - <ISO date>` is read
   by it first even outside a declared folder. A file whose name disagrees
