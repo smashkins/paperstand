@@ -322,7 +322,7 @@ finds the lock already held prints one line and exits `0`, having moved nothing.
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Every file has an outcome — moved, in place, unsorted, duplicate and collision all count as success — including a run that found the lock already held, and a dry run whose catalogue warning was only a warning. |
-| `1` | The library's root marker is remembered but not on disk, or a move failed on an unexpected error; the file(s) involved were left exactly where they were. |
+| `1` | The library's root marker is remembered but not on disk, `--apply` refused because the library could not be walked completely, or a move failed on an unexpected error; the file(s) involved were left exactly where they were. |
 | `2` | A usage error — the library is not a directory, or an explicit `--config` does not exist — or, in `--apply` only, the catalogue guard refused: it could not be read, or a movable file has no content hash yet. |
 
 ### The compose profile

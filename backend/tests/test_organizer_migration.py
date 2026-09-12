@@ -46,6 +46,7 @@ from paperstand.organizer.migration import (
 from paperstand.organizer.mover import move_file as real_move_file
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
+from paperstand.scanner.walker import Walk
 from paperstand.schemas import MigrationRun
 from tests.conftest import SampleLibrary
 from tests.test_cli_organize import _fingerprint
@@ -519,6 +520,53 @@ def test_an_occupied_destination_with_different_bytes_is_a_collision_and_both_su
     assert (library / "B.pdf").is_file()
 
 
+def test_an_in_place_member_of_a_collision_group_is_reported_as_a_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ``InPlace`` entry whose path is also a collision's destination is unsafe to leave
+
+    reported as settled: it becomes ``Collided``, with the same reason a
+    ``Move`` member of the same group gets, counted as a collision rather
+    than as in place, and — like every collision member — never touched.
+    """
+    library = tmp_path / "library"
+    in_place_rel = "Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf"
+    move_source_rel = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
+    _write_pdf(library / in_place_rel, "already at its canonical place")
+    _write_pdf(library / move_source_rel, "a different issue planning to the same path")
+    collision = Collision(
+        destination=in_place_rel, sources=tuple(sorted((in_place_rel, move_source_rel)))
+    )
+    monkeypatch.setattr(
+        "paperstand.organizer.migration.plan_library",
+        lambda root, cfg: _plan_of(
+            InPlace(in_place_rel), Move(move_source_rel, in_place_rel), collisions=[collision]
+        ),
+    )
+
+    report, text = _run(
+        library, _empty_config(), db_path=tmp_path / "absent.db", apply=True, prune_empty=False
+    )
+
+    from paperstand.organizer.migration import _collision_reason, _left_in_place
+
+    reason = _collision_reason(collision)
+    assert f"{in_place_rel} -> collision: {reason}" in text
+    assert f"{move_source_rel} -> collision: {reason}" in text
+    assert report.in_place == 0
+    assert report.collision == 2
+    assert {outcome.rel_path for outcome in report.outcomes if isinstance(outcome, Collided)} == {
+        in_place_rel,
+        move_source_rel,
+    }
+    assert {entry.rel_path for entry in _left_in_place(report.outcomes)} == {
+        in_place_rel,
+        move_source_rel,
+    }
+    assert (library / in_place_rel).is_file()
+    assert (library / move_source_rel).is_file()
+
+
 def test_a_chain_resolves_in_one_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     library = tmp_path / "library"
     library.mkdir()
@@ -677,6 +725,88 @@ def test_migrate_cli_exits_1_when_the_marker_is_remembered_but_gone(tmp_path: Pa
     code = migrate(settings.library, settings.data, None, apply=True, out=io.StringIO())
 
     assert code == 1
+
+
+# --------------------------------------------------------------------- the walk
+
+
+class _AlwaysIncompleteWalk(Walk):
+    """A ``Walk`` stand-in whose ``complete`` is ``False`` whatever it actually saw.
+
+    ``complete`` is a property computed from ``root_ok`` and ``unreadable``,
+    not a plain attribute set once in ``_walk`` — overriding it here is the
+    least invasive way to simulate a directory that could not be listed, or
+    the depth limit being reached, without touching permissions on disk.
+    """
+
+    @property
+    def complete(self) -> bool:
+        return False
+
+
+def test_migrate_once_refuses_apply_when_the_walk_is_incomplete(
+    catalogue_settings: Settings, config: PaperstandConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("paperstand.organizer.migration.Walk", _AlwaysIncompleteWalk)
+    reports_dir = catalogue_settings.data / "organizer" / "migrations"
+    trigger_path = catalogue_settings.data / "scan.request"
+    before = _fingerprint(catalogue_settings.library)
+
+    report, text = _run(
+        catalogue_settings.library,
+        config,
+        db_path=catalogue_settings.db_path,
+        apply=True,
+        reports_dir=reports_dir,
+        trigger_path=trigger_path,
+    )
+
+    assert report.refused == "walk"
+    assert report.outcomes == []
+    assert "migrate: the library could not be walked completely; nothing moved" in text
+    assert _fingerprint(catalogue_settings.library) == before
+    assert not reports_dir.exists()
+    assert not trigger_path.exists()
+
+
+def test_migrate_cli_exits_1_when_the_walk_is_incomplete(
+    catalogue_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("paperstand.organizer.migration.Walk", _AlwaysIncompleteWalk)
+
+    code = migrate(
+        catalogue_settings.library,
+        catalogue_settings.data,
+        catalogue_settings.config_path if catalogue_settings.config_path.is_file() else None,
+        apply=True,
+        out=io.StringIO(),
+    )
+
+    assert code == 1
+
+
+def test_a_dry_run_only_warns_and_still_exits_clean_when_the_walk_is_incomplete(
+    catalogue_settings: Settings, config: PaperstandConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("paperstand.organizer.migration.Walk", _AlwaysIncompleteWalk)
+
+    report, text = _run(
+        catalogue_settings.library, config, db_path=catalogue_settings.db_path, apply=False
+    )
+
+    assert report.refused is None
+    lines = text.splitlines()
+    assert lines[-1] == "migrate: the library could not be walked completely; nothing moved"
+    assert "to move" in lines[-2]
+
+    code = migrate(
+        catalogue_settings.library,
+        catalogue_settings.data,
+        catalogue_settings.config_path if catalogue_settings.config_path.is_file() else None,
+        apply=False,
+        out=io.StringIO(),
+    )
+    assert code == 0
 
 
 # ------------------------------------------------------------------------ lock

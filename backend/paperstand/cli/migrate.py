@@ -40,7 +40,8 @@ def migrate(
     an explicit ``--config`` does not exist); ``2`` when ``apply`` refused
     because the catalogue could not be read or a movable file's row carries
     no content hash yet; ``1`` when the library's root marker is remembered
-    but not on disk, or a move failed on an unexpected error; ``0``
+    but not on disk, when ``apply`` refused because the library could not be
+    walked completely, or when a move failed on an unexpected error; ``0``
     otherwise, including when unsorted files or collisions were found, and
     when another run already held the lock.
     """
@@ -68,7 +69,7 @@ def migrate(
         reports_dir=data_root / MIGRATION_REPORTS,
         trigger_path=data_root / SCAN_TRIGGER,
     )
-    if report.refused == "marker":
+    if report.refused in ("marker", "walk"):
         return 1
     if report.refused == "catalogue":
         return 2

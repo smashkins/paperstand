@@ -117,9 +117,10 @@ class LibraryPlan:
     ``entries`` is exactly one per file the walk found in a configured
     library, in walk order; a file outside every configured library is
     skipped silently, the same as ``parse-report``. ``walk_complete`` is
-    always ``True`` in this build — the walk is always fully buffered before
-    anything else runs — kept as its own field for a future caller that
-    might plan against a partial listing.
+    the buffered walk's own :attr:`~paperstand.scanner.walker.Walk.complete`
+    — ``False`` when a directory could not be listed or the depth limit was
+    reached, meaning a declared ``publication.yml`` may sit unseen behind
+    it, or a collision source may be hidden.
     """
 
     entries: list[InPlace | Move | Unplaced]
@@ -183,7 +184,7 @@ def plan_library(root: Path, config: PaperstandConfig) -> LibraryPlan:
         if len(sources) > 1
     ]
 
-    return LibraryPlan(entries=entries, collisions=collisions, walk_complete=True)
+    return LibraryPlan(entries=entries, collisions=collisions, walk_complete=walk.complete)
 
 
 # --------------------------------------------------------------- the outcomes
@@ -241,8 +242,9 @@ class MigrationReport:
 
     outcomes: list[Outcome] = field(default_factory=list)
     refused: str | None = None
-    """``"marker"`` or ``"catalogue"`` when the run refused before touching
-    anything; ``None`` otherwise, including when another run held the lock."""
+    """``"marker"``, ``"walk"`` or ``"catalogue"`` when the run refused before
+    touching anything; ``None`` otherwise, including when another run held
+    the lock."""
     removed_folders: list[str] = field(default_factory=list)
 
     @property
@@ -310,12 +312,15 @@ def _resolve_move(library: Path, move: Move, *, apply: bool) -> Outcome:
 def _resolve_outcomes(library: Path, plan: LibraryPlan, *, apply: bool) -> dict[str, Outcome]:
     """Every entry's final outcome, keyed by its own ``rel_path``.
 
-    ``InPlace`` and ``Unplaced`` entries carry their own outcome unchanged. A
-    ``Move`` whose destination is contested by a :class:`Collision` becomes
-    :class:`Collided` immediately, never attempted. Every other ``Move`` is
-    deferred until its destination is not another pending move's current
-    path: passes repeat while something resolves, and whatever is left once
-    a whole pass makes no progress is a cycle, reported the same way.
+    ``Unplaced`` entries carry their own outcome unchanged. A ``Move`` whose
+    destination is contested by a :class:`Collision` becomes :class:`Collided`
+    immediately, never attempted; an ``InPlace`` entry is exactly as unsafe to
+    treat as settled when its own ``rel_path`` is that same contested
+    destination, so it becomes :class:`Collided` too, with the same reason.
+    Every other ``Move`` is deferred until its destination is not another
+    pending move's current path: passes repeat while something resolves, and
+    whatever is left once a whole pass makes no progress is a cycle, reported
+    the same way.
     """
     contested = {group.destination: group for group in plan.collisions}
     outcomes: dict[str, Outcome] = {}
@@ -328,6 +333,12 @@ def _resolve_outcomes(library: Path, plan: LibraryPlan, *, apply: bool) -> dict[
                 outcomes[entry.rel_path] = Collided(entry.rel_path, _collision_reason(group))
             else:
                 pending[entry.rel_path] = entry
+        elif isinstance(entry, InPlace):
+            group = contested.get(entry.rel_path)
+            if group is not None:
+                outcomes[entry.rel_path] = Collided(entry.rel_path, _collision_reason(group))
+            else:
+                outcomes[entry.rel_path] = entry
         else:
             outcomes[entry.rel_path] = entry
 
@@ -571,12 +582,17 @@ def migrate_once(
 
     Refuses before touching anything when the library's root marker is
     remembered but not on disk (``refused == "marker"``), or, in ``apply``
-    mode only, when the catalogue cannot be read or a movable file's row
-    carries no content hash yet (``refused == "catalogue"``): either would
-    lose track of a file's cover and reading progress across the rename.
-    Takes an exclusive, non-blocking lock on ``<data>/organizer/.migrate.lock``
-    for the whole run; another run already holding it prints one line and
-    this call returns immediately, having moved nothing.
+    mode only, when the library could not be walked completely
+    (``refused == "walk"``) or when the catalogue cannot be read or a
+    movable file's row carries no content hash yet (``refused ==
+    "catalogue"``): a partial walk may hide a declared ``publication.yml``
+    or a collision source, and the other two would lose track of a file's
+    cover and reading progress across the rename. A dry run never refuses
+    on an incomplete walk — it prints the same sentence as a warning after
+    the summary and carries on. Takes an exclusive, non-blocking lock on
+    ``<data>/organizer/.migrate.lock`` for the whole run; another run
+    already holding it prints one line and this call returns immediately,
+    having moved nothing.
 
     A report is written under ``reports_dir``, and the scan trigger touched
     at ``trigger_path``, only for an ``apply`` run that actually moved at
@@ -622,6 +638,14 @@ def migrate_once(
         plan = plan_library(library, config)
         movable = plan.movable()
 
+        if apply and not plan.walk_complete:
+            print(
+                "migrate: the library could not be walked completely; nothing moved",
+                file=stream,
+            )
+            report.refused = "walk"
+            return report
+
         if _catalogue_guard(stream, hashes, movable, apply=apply):
             report.refused = "catalogue"
             return report
@@ -653,6 +677,12 @@ def migrate_once(
 
         print(file=stream)
         print(_summary_line(report, apply=apply, removed=len(removed_folders)), file=stream)
+
+        if not plan.walk_complete:
+            print(
+                "migrate: the library could not be walked completely; nothing moved",
+                file=stream,
+            )
 
         if apply and report.moved >= 1:
             scan_requested = False
