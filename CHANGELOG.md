@@ -46,8 +46,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes into the library.
 - The image now accepts a command after the entrypoint, so `docker run` (or
   the new compose service) can run `organize` instead of the default `serve`.
+- A file that vanishes from the library is no longer removed on the spot: a
+  scan marks it missing instead, hidden from the storefront, the calendar,
+  *Today*, search, OPDS and every count — its row, cover, pages and reading
+  position stay — and only actually forgets it once
+  `PAPERSTAND_MISSING_GRACE_DAYS` (default 7, `0` restores the previous
+  immediate removal) has passed since the scan that first noticed. The same
+  bytes turning up again, at the same path or anywhere else, clears the mark
+  without any re-render. `Issue.missing_since`, `GET /api/issues?missing=true`
+  and `Stats.missing_count` expose the state; `missing` on the scan progress,
+  the scan summary and the `scans` table counts it. See
+  [`folder-layout.md`](docs/folder-layout.md#identity).
+- A `.paperstand-library` marker at the library root, created by hand and
+  remembered for good by the first scan that sees it: once remembered, a
+  scan whose root can be listed but has lost the file is refused outright —
+  nothing is touched, the `scans` row closes as an error naming the marker —
+  telling an unmounted share apart from a library emptied on purpose.
+  `HealthResponse.library_marker` reports the same three states (never set
+  up, present, lost); `paperstand organize --apply` makes the same check
+  before it moves a single file. See
+  [The root marker](docs/folder-layout.md#the-root-marker).
 
 ### Changed
+
+- Every cover, thumbnail and rendered page now lives under a version
+  directory — `<data>/cache/covers/v1/…`, `<data>/cache/pages/v1/…` — and
+  every image URL carries `?v=<version>` instead of the file's own
+  modification time, so a touch of a PDF changes neither the URL nor the
+  ETag. Bumping the version, the whole of a cache invalidation, deletes the
+  previous version's directory and lets the next scan or request re-render;
+  a cache in the pre-P1.5, unversioned layout is moved into `v1/` in place at
+  start-up, file by file, without re-rendering anything.
 
 - `organize-plan` now plans an undeclared configured title inside its own
   library, at `<library path>/<Title>/<YYYY>`, rather than at the library

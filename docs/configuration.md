@@ -41,12 +41,16 @@ keeping them together is what makes "delete `/data` and rescan" a complete reset
 | --- | --- | --- |
 | `PAPERSTAND_SCAN_ON_START` | `true` | Scan once at start-up. Set it to `false` on a very large library if you would rather trigger the first scan yourself. |
 | `PAPERSTAND_SCAN_INTERVAL` | `900` | Seconds between automatic scans. `0` switches the schedule off; *Rescan now* in Settings and `POST /api/scan` still work. |
+| `PAPERSTAND_MISSING_GRACE_DAYS` | `7` | How long a catalogued issue whose file has vanished is kept, hidden, before its row is forgotten. `0` restores the pre-P1.5 behaviour: gone on the very first scan that does not find it. A negative value is clamped to `0`. |
 | `PAPERSTAND_COVER_WORKERS` | `2` | Threads rendering covers during the slow phase of a scan. |
 
 A scan has two phases. The fast one walks the library, parses the names and writes the
 catalogue — it is what makes a new issue appear, and on a few thousand files it takes
 fractions of a second. The slow one rasterises the covers of everything new, and it is the
-one worth giving more workers on a machine that has cores to spare.
+one worth giving more workers on a machine that has cores to spare. Before either phase, a
+root that can be listed but has lost the `.paperstand-library` marker an earlier scan
+remembered is refused outright — see [The root marker](folder-layout.md#the-root-marker) —
+and neither phase runs.
 
 An issue's id is the hash of its content, not its path (see [Identity](folder-layout.md#identity)).
 Computing a hash means reading the whole file, and `hashed` in `GET /api/scan/status` counts
@@ -55,6 +59,11 @@ once — before the catalogue is written. The first scan after upgrading to a bu
 content-hash identity reads nearly every file in the library this way, and `hashed` is the only
 feedback while that one-time backfill works through it. A second scan hashes only what actually
 changed: an untouched file costs the fast phase nothing.
+
+A file that disappears is not necessarily removed on the spot either: `missing` in
+`GET /api/scan/status` and in the `scans` table counts rows a scan could not find but kept,
+hidden, within `PAPERSTAND_MISSING_GRACE_DAYS` of the scan that first noticed — see
+[Identity](folder-layout.md#identity) for what "hidden" means and how a row comes back.
 
 ### Organizer
 
@@ -100,6 +109,17 @@ conclude the limit is broken:
   falls back to the limit once it stops.
 - The limit is floored at the size of the largest cached page. A limit smaller than one
   image would otherwise mean an empty cache and a fresh render for every request.
+
+Both caches carry a version in their path — `<data>/cache/covers/v1/<id[:2]>/…` and
+`<data>/cache/pages/v1/<id>/…` — because the parameters an image is rendered with (its width,
+its quality, PyMuPDF itself) can change between builds even though the PDF behind it did not.
+The version, not the file's modification time, is what an image's URL carries as `?v=`, so a
+touch of a PDF changes neither the URL nor the `immutable` response a browser already cached.
+Bumping the version is the whole of a cache invalidation: at the next start-up, the previous
+version's directory is deleted outright, covers are rendered again by the next scan's slow
+phase and pages as they are next asked for. The one-time move from a Paperstand older than
+P1.5, which had no version directory at all, is a plain rename of every existing file into
+`v1/` — nothing is re-rendered for that alone.
 
 Deleting `<data>/cache` by hand is safe at any time, running or not. Covers come back on
 demand and pages come back as they are asked for.

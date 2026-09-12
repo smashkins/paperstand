@@ -102,6 +102,17 @@ cross-filesystem copy above still finishes with a hard link into place, never a 
 A library filesystem that does not support hard links fails every move into it; each one is
 reported `Failed` (exit code `1`) rather than being written non-atomically.
 
+### The root marker
+
+Before reading anything, `organize` checks the same thing a scan does — see
+[The root marker](folder-layout.md#the-root-marker): if an earlier scan has remembered a
+`.paperstand-library` marker at the library root and that file is not there now, the run
+touches nothing. It prints one line naming the marker, moves nothing, and exits `1` — in both
+modes, since a dry run's destinations would be exactly as wrong as `--apply`'s moves would be
+real: a file landed on the host directory behind a failed mount is invisible to the share.
+Under `--every` this skips just that iteration, with one warning, and the loop waits for the
+next.
+
 ### `--every`, and exit codes
 
 `--every SECONDS` repeats the run on that interval — re-reading `paperstand.yml` and every
@@ -112,7 +123,7 @@ sends.
 | Exit code | Meaning |
 | --- | --- |
 | `0` | Every file has an outcome — moved, duplicate and unsorted all count as success — including a run that found the lock held. |
-| `1` | A move failed on an unexpected error; the file involved was left exactly where it was. |
+| `1` | A move failed on an unexpected error, or the library's root marker is remembered but not on disk; either way, the file(s) involved were left exactly where they were. |
 | `2` | A usage error: the inbox or the library is not a directory, one is inside the other, or an explicit `--config` does not exist. |
 
 The inbox and the library must be two entirely separate trees — neither inside the other, and

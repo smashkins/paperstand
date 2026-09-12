@@ -15,7 +15,9 @@ make sample-library OUT=./library
 That writes about 120 PDFs, all generated: a coloured cover with the masthead and the date,
 a few pages of filler text, and `SAMPLE LIBRARY · GENERATED CONTENT` printed at the foot of
 every page. It also writes a `.paperstand-sample-library` marker, which is the only thing
-`--clean` will delete a directory for.
+`--clean` will delete a directory for, and an empty `.paperstand-library` — Paperstand's own
+root marker, [`folder-layout.md`](folder-layout.md#the-root-marker) — so that `make dev`
+against the generated library exercises the protected path from the start.
 
 ## Newspapers
 

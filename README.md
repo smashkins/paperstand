@@ -77,6 +77,10 @@ paperstand/
 └── data/             ← the database, the covers, the page cache
 ```
 
+Create an empty `.paperstand-library` in the library root — `touch library/.paperstand-library`
+— so Paperstand can tell an unmounted share from an empty library. See
+[The root marker](docs/folder-layout.md#the-root-marker).
+
 **2. Write a `.env`.** Copy [`.env.example`](.env.example) and set four things:
 
 ```dotenv
