@@ -712,11 +712,9 @@ class Scanner:
                     expired[rel_path] = stored
                 elif stored.missing_since is None:
                     newly_missing[rel_path] = stored
-                    missing += 1
                 elif stored.missing_since <= cutoff:
                     expired[rel_path] = stored
-                else:
-                    missing += 1  # still missing, within grace: untouched
+                # else: still missing, within grace — left untouched
 
             # Cache, progress and `last_seen_scan` are untouched for a row
             # newly marked missing: it may come back, and its cover is still
@@ -745,6 +743,19 @@ class Scanner:
                     self._migrate_progress(connection, [(str(survivor["id"]), stored.id)])
 
             removed += self._remove(connection, expired)
+            # `missing` is read back from the catalogue rather than kept as a
+            # running total from the split above: a row an earlier scan
+            # marked missing, now behind a folder this walk could not even
+            # list, never reaches `gone` — `walk.covers` excludes it — so the
+            # loop above never sees it, though it still carries
+            # `missing_since`. The documented meaning is "rows hidden by the
+            # grace at the end of this scan", and that is a fact about the
+            # table, not about what this scan's own split touched.
+            missing = int(
+                connection.execute(
+                    "SELECT count(*) AS n FROM issues WHERE missing_since IS NOT NULL"
+                ).fetchone()["n"]
+            )
             titles.drop_empty(connection)
             if walk.complete:
                 # A library row is only forgotten when the scan saw the whole
@@ -1132,11 +1143,25 @@ class Scanner:
 
     @staticmethod
     def _drop_empty_libraries(connection: sqlite3.Connection, config: PaperstandConfig) -> None:
-        """Forget libraries that the configuration no longer describes."""
+        """Forget libraries the configuration no longer describes, once they are empty.
+
+        A library missing from ``config.libraries`` — a ``paperstand.yml``
+        entry removed, or, with no configuration file, its whole top-level
+        folder gone — is dropped only once it has no issue rows left of its
+        own. Its rows were marked missing by this same scan, or an earlier
+        one, and must be left to expire through the grace like any other
+        missing row; dropping the library any sooner would cascade
+        (``ON DELETE CASCADE``) its titles and issues away immediately,
+        bypassing the grace and orphaning their cache files. The library
+        goes, in its turn, on the scan whose removals leave it with nothing.
+        """
         keep = {library_id(library.name) for library in config.libraries}
         stale = [
             str(row["id"])
-            for row in connection.execute("SELECT id FROM libraries")
+            for row in connection.execute(
+                "SELECT id FROM libraries "
+                "WHERE NOT EXISTS (SELECT 1 FROM issues WHERE library_id = libraries.id)"
+            )
             if str(row["id"]) not in keep
         ]
         connection.executemany(

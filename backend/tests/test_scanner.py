@@ -396,13 +396,32 @@ def test_changing_the_configuration_reassigns_titles_without_rendering(
     assert unsorted > 1
 
 
-def test_dropping_a_library_from_the_configuration_forgets_its_issues(
+def test_dropping_a_library_from_the_configuration_leaves_it_missing_until_the_grace_expires(
     scan_settings: Settings,
 ) -> None:
-    scan_once(scan_settings)
+    scan_once(scan_settings)  # the default 7-day grace
     config = yaml.safe_load(scan_settings.config_path.read_text("utf-8"))
     config["libraries"] = [lib for lib in config["libraries"] if lib["name"] != "Zines"]
     scan_settings.config_path.write_text(yaml.safe_dump(config, sort_keys=False), "utf-8")
+
+    scan_once(scan_settings)
+
+    assert issues_in(scan_settings, "zines") > 0
+    assert title_names(scan_settings, "zines") != set()
+    assert query(scan_settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    rows = query(scan_settings, "SELECT missing_since FROM issues WHERE library_id = 'zines'")
+    assert rows
+    assert all(row["missing_since"] is not None for row in rows)
+
+    connection = sqlite3.connect(scan_settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' "
+                "WHERE library_id = 'zines'"
+            )
+    finally:
+        connection.close()
 
     scan_once(scan_settings)
 
@@ -987,6 +1006,33 @@ def test_a_second_scan_within_the_grace_leaves_a_missing_row_untouched(
     assert has_cover(settings.cache_path, identifier)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="an unreadable directory needs POSIX permissions and a non-root user",
+)
+def test_missing_still_counts_a_row_whose_folder_the_walk_cannot_list(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """A row an earlier scan marked missing, now behind a folder this walk
+    cannot even list, never reaches `gone` this time — `walk.covers` excludes
+    it — but it still carries `missing_since`, and `missing` must count it."""
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    sample_library.path(A_NEWSPAPER).unlink()
+    first = scan_once(settings)
+    assert first.missing == 1
+
+    locked = sample_library.path(A_NEWSPAPER).parent
+    locked.chmod(0o000)
+    try:
+        result = scan_once(settings)
+    finally:
+        locked.chmod(0o755)
+
+    assert result.status == "ok"
+    assert result.missing == 1
+
+
 def test_a_missing_row_past_its_grace_is_removed_and_progress_migrates_to_a_survivor(
     sample_library: SampleLibrary, data_dir: Path
 ) -> None:
@@ -1088,6 +1134,52 @@ def test_a_title_whose_issues_are_all_missing_survives_drop_empty(tmp_path: Path
     assert result.missing == 1
     assert query(settings, "SELECT id FROM titles WHERE id = ?", (title["id"],))
     assert query(settings, "SELECT id FROM issues WHERE title_id = ?", (title["id"],))
+
+
+def test_an_auto_discovered_library_survives_the_grace_when_its_folder_vanishes(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """With no `paperstand.yml`, ``Zines`` is discovered from the top-level
+    folder alone. When that whole folder is moved away, ``Zines`` is no
+    longer part of the discovered configuration — but its rows are still
+    only newly missing, and the library must go on existing until the grace
+    that hides them has actually run out."""
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=3)
+    scan_once(settings)
+    zine_rows = query(settings, "SELECT id FROM issues WHERE library_id = 'zines'")
+    zine_ids = [str(row["id"]) for row in zine_rows]
+    assert zine_ids
+    covers = [cover_paths(settings.cache_path, identifier)[0] for identifier in zine_ids]
+    assert all(cover.is_file() for cover in covers)
+
+    shutil.rmtree(sample_library.path("Zines"))
+    result = scan_once(settings)
+
+    assert result.missing == len(zine_ids)
+    assert query(settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    assert title_names(settings, "zines")
+    rows = query(settings, "SELECT missing_since FROM issues WHERE library_id = 'zines'")
+    assert len(rows) == len(zine_ids)
+    assert all(row["missing_since"] is not None for row in rows)
+    assert all(cover.is_file() for cover in covers)
+
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' "
+                "WHERE library_id = 'zines'"
+            )
+    finally:
+        connection.close()
+
+    result = scan_once(settings)
+
+    assert result.removed == len(zine_ids)
+    assert not query(settings, "SELECT id FROM issues WHERE library_id = 'zines'")
+    assert not title_names(settings, "zines")
+    assert not query(settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    assert not any(cover.is_file() for cover in covers)
 
 
 # --------------------------------------------------------------- the root marker
