@@ -66,6 +66,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   up, present, lost); `paperstand organize --apply` makes the same check
   before it moves a single file. See
   [The root marker](docs/folder-layout.md#the-root-marker).
+- A maintenance page, `/maintenance`, linked from Settings and from an icon
+  in the top bar with a badge for how many items need attention: issues gone
+  missing, files the renderer could not open, what the organizer parked
+  under `unsorted/` and `duplicates/`, and every title with a hole in its
+  numbering or its declared cadence. See [`maintenance.md`](docs/maintenance.md).
+- `GET /api/maintenance` (missing, unreadable and unsorted counts, the
+  organizer's last run, the attention total) and
+  `GET /api/maintenance/gaps` (holes in a title's numbering, and in a
+  declared daily, weekly or monthly cadence, with an overdue flag).
+- `GET /api/issues?unreadable=true` and `Issue.cover_error`, the renderer's
+  own message for a file it could not open at all.
+- The organizer writes a report of every run to
+  `<data>/organizer/last-run.json` — mode, counts, this run's moves, and an
+  inventory of `unsorted/` and `duplicates/` with each file's sidecar
+  reason — read back by the server on every `GET /api/maintenance`. See
+  [The run report and the scan trigger](docs/organizer.md#the-run-report-and-the-scan-trigger).
+- `<data>/scan.request`, a trigger file the scheduler polls for and consumes:
+  a third way to ask for a scan, next to *Rescan now* and `POST /api/scan`,
+  that needs no server URL. `paperstand organize --apply` touches it after a
+  run that moved at least one file.
 
 ### Changed
 
@@ -97,6 +117,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sits in the library, whatever it is called; touching a file without
   changing its bytes no longer re-renders anything; a file replaced with
   different bytes is a new issue.
+- The scheduler's background loop now always runs, even with automatic
+  scanning off entirely (`PAPERSTAND_SCAN_INTERVAL=0` and
+  `PAPERSTAND_SCAN_ON_START=false`), so that the scan trigger file keeps
+  working in that deployment too.
 
 ## [0.2.1] - 2026-09-08
 

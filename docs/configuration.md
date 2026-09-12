@@ -33,14 +33,21 @@ proxies already know what those mean.
 
 The database is always `<data>/paperstand.db` and the caches are always `<data>/cache`.
 Neither has a variable of its own: splitting them across filesystems helps nobody, and
-keeping them together is what makes "delete `/data` and rescan" a complete reset.
+keeping them together is what makes "delete `/data` and rescan" a complete reset. What
+`<data>` holds, today:
+
+- `paperstand.db` — the catalogue.
+- `cache/` — covers, thumbnails and rendered pages.
+- `organizer/last-run.json` — the organizer's own report of its last run, absent until the
+  first one.
+- `scan.request` — the scan trigger, touched by the organizer or by hand.
 
 ### Scanning
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `PAPERSTAND_SCAN_ON_START` | `true` | Scan once at start-up. Set it to `false` on a very large library if you would rather trigger the first scan yourself. |
-| `PAPERSTAND_SCAN_INTERVAL` | `900` | Seconds between automatic scans. `0` switches the schedule off; *Rescan now* in Settings and `POST /api/scan` still work. |
+| `PAPERSTAND_SCAN_INTERVAL` | `900` | Seconds between automatic scans. `0` switches the schedule off; *Rescan now* in Settings, `POST /api/scan` and touching `<data>/scan.request` still work. |
 | `PAPERSTAND_MISSING_GRACE_DAYS` | `7` | How long a catalogued issue whose file has vanished is kept, hidden, before its row is forgotten. `0` restores the earlier behaviour: gone on the very first scan that does not find it. A negative value is clamped to `0`. |
 | `PAPERSTAND_COVER_WORKERS` | `2` | Threads rendering covers during the slow phase of a scan. |
 
@@ -65,6 +72,19 @@ A file that disappears is not necessarily removed on the spot either: `missing` 
 hidden, within `PAPERSTAND_MISSING_GRACE_DAYS` of the scan that first noticed — see
 [Identity](folder-layout.md#identity) for what "hidden" means and how a row comes back.
 
+A background loop polls for `<data>/scan.request` every few seconds and runs a scan as soon
+as it sees the file there, deleting it first — a third way to ask for one, alongside *Rescan
+now* and `POST /api/scan`, that needs no server URL:
+
+```bash
+touch /data/scan.request
+```
+
+The loop runs even with `PAPERSTAND_SCAN_INTERVAL=0`, since the trigger has to keep working
+in a deployment that has switched the timer off entirely. `paperstand organize` touches it
+itself after an apply run that moved at least one file — see
+[The run report and the scan trigger](organizer.md#the-run-report-and-the-scan-trigger).
+
 ### Organizer
 
 `paperstand organize` — [`organizer.md`](organizer.md) — is a second, optional service in the
@@ -85,6 +105,10 @@ there for the length of each run, and that lock is as unreliable over NFS or SMB
 own locking is. `LIBRARY_PATH`'s own filesystem, wherever it is mounted from, must support hard
 links: a move that cannot link a file into place fails, and is reported, rather than falling
 back to a plain, non-atomic copy.
+
+Every run — apply or dry run — writes what it did to `<data>/organizer/last-run.json`, which
+the main service reads back on `GET /api/maintenance`; see
+[The run report and the scan trigger](organizer.md#the-run-report-and-the-scan-trigger).
 
 ### Rendering and the page cache
 
