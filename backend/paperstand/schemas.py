@@ -381,6 +381,59 @@ class OrganizerRun(BaseModel):
     """Whether the trigger file was touched at the end of this run."""
 
 
+class MigrationCollision(BaseModel):
+    """Two or more files that would migrate onto the same canonical path.
+
+    A group is never moved, not even its first member: half-migrated groups
+    would hide the very conflict this block reports. ``sources`` is sorted,
+    at least two entries, and includes a source already in place at
+    ``destination`` when one is a member of the group.
+    """
+
+    destination: str
+    sources: list[str]
+
+
+class MigrationLeftInPlace(BaseModel):
+    """One file ``migrate`` left exactly where it was, and why.
+
+    Covers every outcome but ``moved`` and ``in place``: unsorted, duplicate,
+    collided and failed each contribute one entry here, in the reason's own
+    words.
+    """
+
+    rel_path: str
+    reason: str
+
+
+class MigrationRun(BaseModel):
+    """What one ``migrate`` run did, written under ``<data>/organizer/migrations/``.
+
+    One file per applied run that moved at least a file — never overwritten,
+    unlike :class:`OrganizerRun`. ``version`` guards the shape the same way.
+    """
+
+    version: Literal[1] = 1
+    started_at: str
+    finished_at: str
+    library: str
+    """The library root's absolute path, as printed in the run's own header."""
+    moved: int
+    in_place: int
+    unsorted: int
+    collision: int
+    duplicate: int
+    failed: int
+    moves: list[OrganizerMove]
+    """This run's ``Moved`` outcomes, both paths library-relative."""
+    collisions: list[MigrationCollision]
+    left_in_place: list[MigrationLeftInPlace]
+    removed_folders: list[str]
+    """Folders a move left empty, and this run removed, deepest first."""
+    scan_requested: bool
+    """Whether the trigger file was touched at the end of this run."""
+
+
 class NumberGap(BaseModel):
     """A hole between two consecutive catalogued issue numbers of one title."""
 

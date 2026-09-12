@@ -9,8 +9,14 @@ package that touches the filesystem for anything but reading — one atomic,
 never-overwriting move, reused for the library, for `<inbox>/unsorted/` and
 for `<inbox>/duplicates/` alike. :mod:`paperstand.organizer.inbox` is the
 pipeline that ties all three together into ``paperstand organize``.
-:mod:`paperstand.organizer.migration` plans the same kind of move for files
-already inside the library — the computation ``organize-plan`` prints.
+:mod:`paperstand.organizer.migration` plans and performs the same kind of
+move for files already inside the library, into ``paperstand migrate``.
+
+:mod:`~paperstand.organizer.migration` has its own ``Moved``, ``Duplicate``
+and ``Failed`` outcomes — same idea as this package's, but keyed by a
+library-relative ``rel_path`` rather than an inbox-relative ``source`` — so
+they are not re-exported here under the same bare names; import them from
+that module directly.
 """
 
 from paperstand.organizer.inbox import (
@@ -25,11 +31,14 @@ from paperstand.organizer.inbox import (
     organize_once,
 )
 from paperstand.organizer.migration import (
+    Collided,
     Collision,
     InPlace,
     LibraryPlan,
+    MigrationReport,
     Move,
     Unplaced,
+    migrate_once,
     plan_library,
 )
 from paperstand.organizer.mover import (
@@ -53,12 +62,14 @@ from paperstand.organizer.resolve import Resolved, Resolver
 
 __all__ = [
     "CanonicalPath",
+    "Collided",
     "Collision",
     "DestinationOccupied",
     "Duplicate",
     "Failed",
     "InPlace",
     "LibraryPlan",
+    "MigrationReport",
     "Move",
     "Moved",
     "OrganizePlan",
@@ -74,6 +85,7 @@ __all__ = [
     "canonical_folder",
     "inventory",
     "iso_date",
+    "migrate_once",
     "move_file",
     "organize_forever",
     "organize_once",

@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from paperstand.logging import get_logger
 from paperstand.organizer.mover import sidecar_path
@@ -72,8 +72,14 @@ def inventory(inbox: Path) -> list[OrganizerParked]:
     return _park_folder(inbox, "unsorted") + _park_folder(inbox, "duplicates")
 
 
-def write_run(path: Path, run: OrganizerRun) -> None:
+def write_run(path: Path, run: BaseModel) -> None:
     """Write ``run`` to ``path``, atomically.
+
+    Generic over any Pydantic model — :class:`~paperstand.schemas.OrganizerRun`
+    for ``organize``'s single, overwritten report, and
+    :class:`~paperstand.schemas.MigrationRun` for one of ``migrate``'s, each
+    under its own timestamped name — since all this function does is call
+    ``model_dump_json`` and place the bytes safely.
 
     The JSON is written to a dot-prefixed sibling in the same directory and
     ``os.replace``d over ``path``, so a reader never sees a partial file. Any
