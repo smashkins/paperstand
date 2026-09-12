@@ -45,12 +45,14 @@ def create_router(database: Database | None) -> APIRouter:
         offset: Annotated[int, Query(ge=0)] = 0,
         include_duplicates: bool = False,
         missing: bool = False,
+        unreadable: bool = False,
     ) -> IssuePage:
         """A filtered, sorted page of issues, with the total behind it.
 
-        ``missing`` shows only what every other filter hides for having gone
-        missing — a maintenance view will use it; it is ``false``
-        everywhere else, including the default list.
+        ``missing`` and ``unreadable`` each show only what every other filter
+        hides — for having gone missing, or for a cover the renderer could
+        not render at all — and are ``false`` everywhere but the maintenance
+        view.
         """
         items, total = queries.list_issues(
             catalogue(database),
@@ -65,6 +67,7 @@ def create_router(database: Database | None) -> APIRouter:
             offset=offset,
             include_duplicates=include_duplicates,
             missing=missing,
+            unreadable=unreadable,
         )
         return IssuePage(items=items, total=total)
 

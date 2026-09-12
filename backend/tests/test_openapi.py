@@ -91,6 +91,8 @@ def test_the_document_covers_every_endpoint(exported: str) -> None:
         "/api/issues/{issue_id}/progress",
         "/api/progress",
         "/api/today",
+        "/api/maintenance",
+        "/api/maintenance/gaps",
     }
     file_operations = paths["/api/issues/{issue_id}/file"]
     assert set(file_operations) == {"get", "head"}

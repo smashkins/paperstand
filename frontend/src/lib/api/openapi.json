@@ -158,6 +158,17 @@
 						],
 						"title": "Content Hash"
 					},
+					"cover_error": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Cover Error"
+					},
 					"cover_url": {
 						"title": "Cover Url",
 						"type": "string"
@@ -360,6 +371,17 @@
 							}
 						],
 						"title": "Content Hash"
+					},
+					"cover_error": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Cover Error"
 					},
 					"cover_url": {
 						"title": "Cover Url",
@@ -641,6 +663,243 @@
 					"unsorted_count"
 				],
 				"title": "Library",
+				"type": "object"
+			},
+			"MaintenanceSummary": {
+				"description": "What ``GET /api/maintenance`` answers with: the top-bar badge and the\npage's own header.",
+				"properties": {
+					"attention": {
+						"title": "Attention",
+						"type": "integer"
+					},
+					"missing_count": {
+						"title": "Missing Count",
+						"type": "integer"
+					},
+					"missing_grace_days": {
+						"title": "Missing Grace Days",
+						"type": "integer"
+					},
+					"organizer": {
+						"anyOf": [
+							{
+								"$ref": "#/components/schemas/OrganizerRun"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"unreadable_count": {
+						"title": "Unreadable Count",
+						"type": "integer"
+					},
+					"unsorted": {
+						"items": {
+							"$ref": "#/components/schemas/UnsortedBucket"
+						},
+						"title": "Unsorted",
+						"type": "array"
+					},
+					"unsorted_count": {
+						"title": "Unsorted Count",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"missing_count",
+					"missing_grace_days",
+					"unreadable_count",
+					"unsorted",
+					"unsorted_count",
+					"organizer",
+					"attention"
+				],
+				"title": "MaintenanceSummary",
+				"type": "object"
+			},
+			"NumberGap": {
+				"description": "A hole between two consecutive catalogued issue numbers of one title.",
+				"properties": {
+					"first": {
+						"title": "First",
+						"type": "integer"
+					},
+					"last": {
+						"title": "Last",
+						"type": "integer"
+					},
+					"volume": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Volume"
+					}
+				},
+				"required": [
+					"volume",
+					"first",
+					"last"
+				],
+				"title": "NumberGap",
+				"type": "object"
+			},
+			"OrganizerMove": {
+				"description": "One file the organizer moved, or would move, in one run.",
+				"properties": {
+					"destination": {
+						"title": "Destination",
+						"type": "string"
+					},
+					"source": {
+						"title": "Source",
+						"type": "string"
+					}
+				},
+				"required": [
+					"source",
+					"destination"
+				],
+				"title": "OrganizerMove",
+				"type": "object"
+			},
+			"OrganizerParked": {
+				"description": "One file sitting under ``unsorted/`` or ``duplicates/`` at the end of a run.\n\nA listing, not a diff: every ``*.pdf`` under either folder, recursively,\nwhether this run put it there or an earlier one did.",
+				"properties": {
+					"folder": {
+						"enum": [
+							"unsorted",
+							"duplicates"
+						],
+						"title": "Folder",
+						"type": "string"
+					},
+					"modified": {
+						"title": "Modified",
+						"type": "string"
+					},
+					"name": {
+						"title": "Name",
+						"type": "string"
+					},
+					"reason": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Reason"
+					},
+					"size": {
+						"title": "Size",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"folder",
+					"name",
+					"size",
+					"modified"
+				],
+				"title": "OrganizerParked",
+				"type": "object"
+			},
+			"OrganizerRun": {
+				"description": "What one organizer run did, or would do, written to ``<data>/organizer/last-run.json``.\n\nRead back by the server on every ``GET /api/maintenance`` — a few\nkilobytes, no caching, no watching. ``version`` guards the shape: a file\nfrom a future Paperstand is ignored rather than misread.",
+				"properties": {
+					"duplicate": {
+						"title": "Duplicate",
+						"type": "integer"
+					},
+					"failed": {
+						"title": "Failed",
+						"type": "integer"
+					},
+					"finished_at": {
+						"title": "Finished At",
+						"type": "string"
+					},
+					"inbox": {
+						"title": "Inbox",
+						"type": "string"
+					},
+					"mode": {
+						"enum": [
+							"apply",
+							"dry-run"
+						],
+						"title": "Mode",
+						"type": "string"
+					},
+					"moved": {
+						"title": "Moved",
+						"type": "integer"
+					},
+					"moves": {
+						"items": {
+							"$ref": "#/components/schemas/OrganizerMove"
+						},
+						"title": "Moves",
+						"type": "array"
+					},
+					"parked": {
+						"items": {
+							"$ref": "#/components/schemas/OrganizerParked"
+						},
+						"title": "Parked",
+						"type": "array"
+					},
+					"refused": {
+						"title": "Refused",
+						"type": "boolean"
+					},
+					"scan_requested": {
+						"title": "Scan Requested",
+						"type": "boolean"
+					},
+					"skipped": {
+						"title": "Skipped",
+						"type": "integer"
+					},
+					"started_at": {
+						"title": "Started At",
+						"type": "string"
+					},
+					"unsorted": {
+						"title": "Unsorted",
+						"type": "integer"
+					},
+					"version": {
+						"const": 1,
+						"default": 1,
+						"title": "Version",
+						"type": "integer"
+					}
+				},
+				"required": [
+					"started_at",
+					"finished_at",
+					"mode",
+					"inbox",
+					"refused",
+					"moved",
+					"duplicate",
+					"unsorted",
+					"skipped",
+					"failed",
+					"moves",
+					"parked",
+					"scan_requested"
+				],
+				"title": "OrganizerRun",
 				"type": "object"
 			},
 			"Progress": {
@@ -1500,6 +1759,136 @@
 				"title": "TitleDetail",
 				"type": "object"
 			},
+			"TitleGaps": {
+				"description": "One title's holes: in its numbering, in its declared cadence, or both.",
+				"properties": {
+					"date_gap_count": {
+						"title": "Date Gap Count",
+						"type": "integer"
+					},
+					"date_gaps": {
+						"items": {
+							"type": "string"
+						},
+						"title": "Date Gaps",
+						"type": "array"
+					},
+					"first_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "First Date"
+					},
+					"frequency": {
+						"anyOf": [
+							{
+								"enum": [
+									"daily",
+									"weekly",
+									"monthly",
+									"irregular"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Frequency"
+					},
+					"issue_count": {
+						"title": "Issue Count",
+						"type": "integer"
+					},
+					"issue_key": {
+						"anyOf": [
+							{
+								"enum": [
+									"date",
+									"number",
+									"date+number"
+								],
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Issue Key"
+					},
+					"kind": {
+						"enum": [
+							"newspaper",
+							"magazine"
+						],
+						"title": "Kind",
+						"type": "string"
+					},
+					"last_date": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Last Date"
+					},
+					"number_gap_count": {
+						"title": "Number Gap Count",
+						"type": "integer"
+					},
+					"number_gaps": {
+						"items": {
+							"$ref": "#/components/schemas/NumberGap"
+						},
+						"title": "Number Gaps",
+						"type": "array"
+					},
+					"overdue_days": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Overdue Days"
+					},
+					"title_id": {
+						"title": "Title Id",
+						"type": "string"
+					},
+					"title_name": {
+						"title": "Title Name",
+						"type": "string"
+					}
+				},
+				"required": [
+					"title_id",
+					"title_name",
+					"kind",
+					"frequency",
+					"issue_key",
+					"first_date",
+					"last_date",
+					"issue_count",
+					"overdue_days",
+					"date_gaps",
+					"date_gap_count",
+					"number_gaps",
+					"number_gap_count"
+				],
+				"title": "TitleGaps",
+				"type": "object"
+			},
 			"Today": {
 				"description": "The storefront: one day of newspapers, and what to read next.",
 				"properties": {
@@ -1560,6 +1949,35 @@
 					"recently_added"
 				],
 				"title": "Today",
+				"type": "object"
+			},
+			"UnsortedBucket": {
+				"description": "How many files the parser could not place, in one library.\n\nA different thing from the organizer's own ``unsorted/`` folder: this is\nthe catalogue's own ``Unsorted`` title, per library.",
+				"properties": {
+					"count": {
+						"title": "Count",
+						"type": "integer"
+					},
+					"library_id": {
+						"title": "Library Id",
+						"type": "string"
+					},
+					"library_name": {
+						"title": "Library Name",
+						"type": "string"
+					},
+					"title_id": {
+						"title": "Title Id",
+						"type": "string"
+					}
+				},
+				"required": [
+					"title_id",
+					"library_id",
+					"library_name",
+					"count"
+				],
+				"title": "UnsortedBucket",
 				"type": "object"
 			},
 			"ValidationError": {
@@ -1654,7 +2072,7 @@
 		},
 		"/api/issues": {
 			"get": {
-				"description": "A filtered, sorted page of issues, with the total behind it.\n\n``missing`` shows only what every other filter hides for having gone\nmissing — a maintenance view will use it; it is ``false``\neverywhere else, including the default list.",
+				"description": "A filtered, sorted page of issues, with the total behind it.\n\n``missing`` and ``unreadable`` each show only what every other filter\nhides — for having gone missing, or for a cover the renderer could\nnot render at all — and are ``false`` everywhere but the maintenance\nview.",
 				"operationId": "list_issues_api_issues_get",
 				"parameters": [
 					{
@@ -1816,6 +2234,16 @@
 						"schema": {
 							"default": false,
 							"title": "Missing",
+							"type": "boolean"
+						}
+					},
+					{
+						"in": "query",
+						"name": "unreadable",
+						"required": false,
+						"schema": {
+							"default": false,
+							"title": "Unreadable",
 							"type": "boolean"
 						}
 					}
@@ -2560,6 +2988,85 @@
 				"summary": "List Libraries",
 				"tags": [
 					"catalogue"
+				]
+			}
+		},
+		"/api/maintenance": {
+			"get": {
+				"description": "What needs attention right now: the badge, and the page's own header.",
+				"operationId": "maintenance_api_maintenance_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/MaintenanceSummary"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Maintenance",
+				"tags": [
+					"maintenance"
+				]
+			}
+		},
+		"/api/maintenance/gaps": {
+			"get": {
+				"description": "Every title with a hole in its numbering, or in its declared cadence.",
+				"operationId": "maintenance_gaps_api_maintenance_gaps_get",
+				"parameters": [
+					{
+						"description": "Defaults to today in TZ",
+						"in": "query",
+						"name": "today",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"format": "date",
+									"type": "string"
+								},
+								{
+									"type": "null"
+								}
+							],
+							"description": "Defaults to today in TZ",
+							"title": "Today"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/TitleGaps"
+									},
+									"title": "Response Maintenance Gaps Api Maintenance Gaps Get",
+									"type": "array"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Maintenance Gaps",
+				"tags": [
+					"maintenance"
 				]
 			}
 		},

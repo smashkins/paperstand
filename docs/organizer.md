@@ -153,6 +153,45 @@ or creating its own `publication.yml` folder, is enough to make it move on the v
 itself is ignored: the organizer never reads a folder of the inbox, only a file's own name,
 so one at the inbox root only logs the usual warning about a declaration at a root.
 
+### The run report and the scan trigger
+
+Every `organize` run — apply or dry run, including a refused one — writes what it did to
+`<data>/organizer/last-run.json`, overwriting the previous run's file. The server reads it
+back on every `GET /api/maintenance`, which is how the maintenance page shows the organizer's
+last run without mounting the inbox at all.
+
+| Field | What it holds |
+| --- | --- |
+| `started_at`, `finished_at` | ISO 8601, UTC. |
+| `mode` | `apply` or `dry-run`. |
+| `inbox` | The inbox's absolute path, as printed in the run's own header. |
+| `refused` | The root marker check said no; nothing was walked. |
+| `moved`, `duplicate`, `unsorted`, `skipped`, `failed` | This run's counts — the same numbers the summary line prints. |
+| `moves` | This run's `Moved` outcomes: `source` (inbox-relative) and `destination` (library-relative). |
+| `parked` | Every `*.pdf` under `<inbox>/unsorted/` and `<inbox>/duplicates/` at the end of the run, with its sidecar's reason, size and modification time — a listing, not a diff, since `duplicates/` is never read back otherwise. |
+| `scan_requested` | Whether the trigger below was touched. |
+
+The file does not exist until the first run; the maintenance page reads that as "the
+organizer has not run here yet", not an error. Writing it is best-effort: an unwritable
+`<data>` directory is logged as a warning, never a reason to fail a run that otherwise
+succeeded.
+
+When an apply run actually moves at least one file, it also touches `<data>/scan.request` —
+content does not matter, only that the file exists. The scheduler's background loop polls
+for it every few seconds and runs a scan as soon as it sees it, so an imported file reaches
+the catalogue within seconds rather than waiting out the next `PAPERSTAND_SCAN_INTERVAL`.
+This is a third way to ask for a scan, next to the *Rescan now* button and `POST /api/scan`,
+and the only one that needs no server URL:
+
+```bash
+touch /data/scan.request
+```
+
+works by hand too, and even with `PAPERSTAND_SCAN_INTERVAL=0` — the loop that serves the
+trigger runs regardless of whether the periodic timer is on. A dry run writes the report but
+never the trigger: nothing in the library changed, so there is nothing for a scan to catch up
+on.
+
 ## `organize-plan`
 
 `organize-plan` prints where every PDF under a directory *would* live under the canonical

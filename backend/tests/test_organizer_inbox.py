@@ -36,9 +36,11 @@ from paperstand.organizer.inbox import (
     organize_once,
 )
 from paperstand.organizer.mover import sidecar_path
+from paperstand.organizer.report import read_run
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 from paperstand.scanner.walker import MARKER_FILE
+from paperstand.schemas import OrganizerMove
 from tests.test_cli_organize import _fingerprint
 
 #: An existing, catalogued library file: copying it verbatim into the inbox
@@ -114,6 +116,8 @@ def _run(
     settle: float = 0,
     now: float | None = None,
     out: io.StringIO | None = None,
+    report_path: Path | None = None,
+    trigger_path: Path | None = None,
 ) -> tuple[OrganizeReport, str]:
     stream = out if out is not None else io.StringIO()
     report = organize_once(
@@ -125,6 +129,8 @@ def _run(
         settle=settle,
         now=now,
         out=stream,
+        report_path=report_path,
+        trigger_path=trigger_path,
     )
     return report, stream.getvalue()
 
@@ -697,6 +703,147 @@ def test_a_scan_after_apply_catalogues_the_moved_file_under_its_title(
         database.close()
     assert row is not None
     assert row["name"] == "Il Mattutino"
+
+
+# ----------------------------------------------------- the report and trigger
+
+
+def test_an_apply_run_that_moves_a_file_writes_a_report_and_the_trigger(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig, tmp_path: Path
+) -> None:
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    (inbox / "duplicates").mkdir()
+    _copy(
+        catalogue_settings.library / CORRIERE_16,
+        inbox / "duplicates" / "already-there.pdf",
+    )
+    (inbox / "duplicates" / "already-there.pdf.txt").write_text(
+        f"duplicate of {CORRIERE_16}\n", encoding="utf-8"
+    )
+    report_path = tmp_path / "data" / "organizer" / "last-run.json"
+    trigger_path = tmp_path / "data" / "scan.request"
+
+    report, text = _run(
+        inbox,
+        catalogue_settings,
+        config,
+        apply=True,
+        report_path=report_path,
+        trigger_path=trigger_path,
+    )
+
+    run = read_run(report_path)
+    assert run is not None
+    assert run.mode == "apply"
+    assert run.refused is False
+    assert run.moved == 1
+    assert run.duplicate == 0
+    assert run.unsorted == 0
+    assert run.moves == [
+        OrganizerMove(source="Il_Mattutino_2026-03-21.pdf", destination=IL_MATTUTINO_DESTINATION)
+    ]
+    # The inventory lists what sits under duplicates/ now, sidecar included —
+    # a file this run never touched, since it was already parked there.
+    assert [(parked.folder, parked.name, parked.reason) for parked in run.parked] == [
+        ("duplicates", "already-there.pdf", f"duplicate of {CORRIERE_16}")
+    ]
+    assert run.scan_requested is True
+    assert trigger_path.is_file()
+    assert f"scan requested: {trigger_path}" in text
+    assert report.outcomes == [Moved("Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)]
+
+
+def test_a_dry_run_writes_the_report_but_never_the_trigger(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig, tmp_path: Path
+) -> None:
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    report_path = tmp_path / "data" / "organizer" / "last-run.json"
+    trigger_path = tmp_path / "data" / "scan.request"
+
+    _run(
+        inbox,
+        catalogue_settings,
+        config,
+        apply=False,
+        report_path=report_path,
+        trigger_path=trigger_path,
+    )
+
+    run = read_run(report_path)
+    assert run is not None
+    assert run.mode == "dry-run"
+    assert run.moved == 1
+    # The outcome is the same either way — nothing was actually moved on disk.
+    assert run.moves == [
+        OrganizerMove(source="Il_Mattutino_2026-03-21.pdf", destination=IL_MATTUTINO_DESTINATION)
+    ]
+    assert run.scan_requested is False
+    assert not trigger_path.exists()
+    assert (inbox / "Il_Mattutino_2026-03-21.pdf").exists()  # never actually moved
+
+
+def test_a_run_that_moves_nothing_leaves_no_trigger(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig, tmp_path: Path
+) -> None:
+    _write_pdf(inbox / ZONDA_HERALD, "unresolvable")
+    report_path = tmp_path / "data" / "organizer" / "last-run.json"
+    trigger_path = tmp_path / "data" / "scan.request"
+
+    _run(
+        inbox,
+        catalogue_settings,
+        config,
+        apply=True,
+        report_path=report_path,
+        trigger_path=trigger_path,
+    )
+
+    run = read_run(report_path)
+    assert run is not None
+    assert run.moved == 0
+    assert run.scan_requested is False
+    assert not trigger_path.exists()
+
+
+def test_a_refused_run_writes_refused_true_with_zero_counts(inbox: Path, tmp_path: Path) -> None:
+    settings = _remembered_marker_settings(tmp_path)
+    (settings.library / MARKER_FILE).unlink()
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    report_path = tmp_path / "data" / "organizer" / "last-run.json"
+
+    _run(
+        inbox,
+        settings,
+        PaperstandConfig.model_validate({"libraries": []}),
+        apply=True,
+        report_path=report_path,
+    )
+
+    run = read_run(report_path)
+    assert run is not None
+    assert run.refused is True
+    assert (run.moved, run.duplicate, run.unsorted, run.skipped, run.failed) == (0, 0, 0, 0, 0)
+    assert run.moves == []
+    assert run.scan_requested is False
+
+
+def test_a_lock_held_run_leaves_the_previous_report_untouched(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "data" / "organizer" / "last-run.json"
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "first run")
+    _run(inbox, catalogue_settings, config, apply=True, report_path=report_path)
+    before = report_path.read_text("utf-8")
+
+    _write_pdf(inbox / "Confini_n._2_2026.pdf", "second run, blocked")
+    lock_path = inbox / ".organizer.lock"
+    with lock_path.open("a+") as held:
+        fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        report, text = _run(inbox, catalogue_settings, config, apply=True, report_path=report_path)
+
+    assert report.outcomes == []
+    assert "nothing done" in text
+    assert report_path.read_text("utf-8") == before
 
 
 # --------------------------------------------------------------- the root marker

@@ -29,7 +29,7 @@ from paperstand.cli.parse import (
     missing_explicit_config,
     parse_file,
 )
-from paperstand.config import Settings, get_settings
+from paperstand.config import ORGANIZER_REPORT, SCAN_TRIGGER, Settings, get_settings
 from paperstand.logging import get_logger
 from paperstand.organizer import (
     OrganizeReport,
@@ -234,6 +234,8 @@ def organize(
             apply=apply,
             settle=settle,
             out=stream,
+            report_path=data_root / ORGANIZER_REPORT,
+            trigger_path=data_root / SCAN_TRIGGER,
         )
 
     if every is None:

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from paperstand.config import Settings
 from paperstand.db import open_database
+from paperstand.scanner.scanner import ScanResult
 from paperstand.scanner.scheduler import ScanInProgress, ScanScheduler
 from paperstand.scanner.walker import LibraryFile, Walk
 from tests.conftest import SampleLibrary, quiet_settings, write_sample_config
@@ -28,6 +29,16 @@ def wait_until(predicate: Callable[[], bool], timeout: float = WAIT) -> bool:
             return True
         time.sleep(0.01)
     return False
+
+
+def _last(scheduler: ScanScheduler) -> ScanResult | None:
+    """``scheduler.last``, behind a call so mypy never narrows it to a stale type.
+
+    A background thread mutates it at any moment, and asserting it ``None``
+    once, then not ``None`` a few statements later in the same test, would
+    otherwise have mypy treat the second assertion as always false.
+    """
+    return scheduler.last
 
 
 @pytest.fixture
@@ -283,3 +294,176 @@ def test_stop_waits_for_a_running_scan(sample_settings: Settings) -> None:
 def test_stop_waits_for_as_long_as_the_scan_takes() -> None:
     """No arbitrary deadline: an unbounded join is the default."""
     assert inspect.signature(ScanScheduler.stop).parameters["timeout"].default is None
+
+
+# ---------------------------------------------------------------- the trigger
+
+
+def test_a_touched_trigger_starts_a_scan_with_scanning_off_and_consumes_the_file(
+    sample_settings: Settings,
+) -> None:
+    """``scan_on_start=false``, ``scan_interval=0``: only the trigger scans."""
+    database = open_database(sample_settings.db_path)
+    scheduler = ScanScheduler(sample_settings, database)
+    scheduler.poll = 0.05
+    trigger = sample_settings.scan_trigger_path
+    try:
+        scheduler.start()
+        time.sleep(0.2)
+        assert _last(scheduler) is None  # nothing without the trigger
+
+        trigger.touch()
+        assert wait_until(lambda: scheduler.last is not None)
+        result = _last(scheduler)
+        scheduler.stop()
+    finally:
+        database.close()
+
+    assert result is not None
+    assert result.added > 0
+    assert not trigger.exists()
+
+
+def test_a_trigger_during_a_running_scan_waits_then_runs_a_second_scan(
+    sample_settings: Settings, gate: threading.Event
+) -> None:
+    database = open_database(sample_settings.db_path)
+    scheduler = ScanScheduler(sample_settings, database)
+    scheduler.poll = 0.05
+    trigger = sample_settings.scan_trigger_path
+    try:
+        first_id = scheduler.request_scan()  # held open by the gate
+        scheduler.start()
+        trigger.touch()
+        time.sleep(0.3)  # several poll cycles while the first scan is gated
+
+        assert scheduler.last is None  # still running
+        assert trigger.exists()  # not consumed: `_busy` could not be acquired
+
+        gate.set()
+        assert wait_until(lambda: scheduler.last is not None and scheduler.last.scan_id == first_id)
+        assert wait_until(lambda: not trigger.exists())
+        assert wait_until(lambda: scheduler.last is not None and scheduler.last.scan_id != first_id)
+        scheduler.stop()
+    finally:
+        database.close()
+
+
+def test_a_stale_trigger_at_start_is_consumed_once(sample_settings: Settings) -> None:
+    trigger = sample_settings.scan_trigger_path
+    trigger.parent.mkdir(parents=True, exist_ok=True)
+    trigger.touch()
+    database = open_database(sample_settings.db_path)
+    scheduler = ScanScheduler(sample_settings, database)
+    scheduler.poll = 0.05
+    try:
+        scheduler.start()
+        assert wait_until(lambda: scheduler.last is not None)
+        first = scheduler.last
+        assert first is not None
+        assert not trigger.exists()
+
+        time.sleep(0.3)  # several more poll cycles: no second scan follows
+        scheduler.stop()
+    finally:
+        database.close()
+
+    last = scheduler.last
+    assert last is not None
+    assert last.scan_id == first.scan_id
+
+
+def test_a_failed_start_leaves_the_trigger_for_the_next_poll(
+    sample_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``scanner.begin`` raising must not drop the requested scan.
+
+    The trigger stays put across every failed attempt; once ``begin`` is
+    allowed to succeed, the very next poll — still serving the same
+    trigger file — starts and completes the scan.
+    """
+    database = open_database(sample_settings.db_path)
+    scheduler = ScanScheduler(sample_settings, database)
+    scheduler.poll = 0.05
+    trigger = sample_settings.scan_trigger_path
+    trigger.parent.mkdir(parents=True, exist_ok=True)
+    trigger.touch()
+
+    real_begin = scheduler.scanner.begin
+    allow = threading.Event()
+    attempts = {"count": 0}
+
+    def failing_begin() -> int:
+        attempts["count"] += 1
+        if not allow.is_set():
+            raise RuntimeError("the database is unusable")
+        return real_begin()
+
+    monkeypatch.setattr(scheduler.scanner, "begin", failing_begin)
+
+    try:
+        scheduler.start()
+        # Several poll cycles, each failing to start a scan.
+        assert wait_until(lambda: attempts["count"] >= 3)
+        assert scheduler.last is None
+        assert trigger.exists()  # never unlinked by a failed begin()
+
+        allow.set()
+        assert wait_until(lambda: scheduler.last is not None)
+        scheduler.stop()
+    finally:
+        database.close()
+
+    assert not trigger.exists()  # the eventual successful start consumes it
+
+
+def test_a_requested_scan_resets_the_periodic_clock(sample_settings: Settings) -> None:
+    """A requested scan pushes the periodic one back a full interval from when
+    it finished — never fires against the interval's original mark, which a
+    scan busy rendering covers can easily outlive."""
+    settings = quiet_settings(sample_settings.library, sample_settings.data, scan_interval=1)
+    database = open_database(settings.db_path)
+    scheduler = ScanScheduler(settings, database)
+    scheduler.poll = 0.05
+    trigger = settings.scan_trigger_path
+    try:
+        scheduler.start()
+        trigger.touch()  # requested almost at once, long before the 1s mark
+
+        assert wait_until(lambda: scheduler.last is not None)
+        requested = scheduler.last
+        assert requested is not None
+        finished_at = time.monotonic()
+
+        # No second scan right on its heels: the clock was reset from here.
+        time.sleep(0.5)
+        still = scheduler.last
+        assert still is not None
+        assert still.scan_id == requested.scan_id
+
+        assert wait_until(
+            lambda: scheduler.last is not None and scheduler.last.scan_id != requested.scan_id,
+            timeout=5.0,
+        )
+        second_at = time.monotonic()
+        scheduler.stop()
+    finally:
+        database.close()
+
+    assert second_at - finished_at >= 0.9
+
+
+def test_stop_returns_promptly_from_the_poll_wait(settings: Settings) -> None:
+    database = open_database(settings.db_path)
+    scheduler = ScanScheduler(settings, database)
+    scheduler.poll = 30.0
+    try:
+        scheduler.start()
+        time.sleep(0.05)
+        started = time.monotonic()
+        scheduler.stop()
+        waited = time.monotonic() - started
+    finally:
+        database.close()
+
+    assert waited < 2.0

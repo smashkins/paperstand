@@ -234,7 +234,8 @@ first if one exists. Setting the grace to `0` restores the earlier behaviour of 
 vanished file on the very first scan that does not find it. This is the one exception a
 **replacement** does not get: a path that now holds *different* bytes is a new issue from the
 moment it is seen, immediately, whatever the grace is set to — grace is for a file that
-disappeared, not one that was overwritten.
+disappeared, not one that was overwritten. A missing issue, and how long it has left, is
+where [the maintenance page](maintenance.md) sends a person to do something about it.
 
 ## What is skipped
 

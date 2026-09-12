@@ -15,6 +15,7 @@ from paperstand.api import health as health_api
 from paperstand.api import images as images_api
 from paperstand.api import issues as issues_api
 from paperstand.api import libraries as libraries_api
+from paperstand.api import maintenance as maintenance_api
 from paperstand.api import progress as progress_api
 from paperstand.api import scan as scan_api
 from paperstand.api import titles as titles_api
@@ -110,6 +111,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(progress_api.create_router(database))
     app.include_router(files_api.create_router(settings, database))
     app.include_router(images_api.create_router(settings, database, renderer))
+    app.include_router(maintenance_api.create_router(settings, database))
     # Last of the catalogue routers: `/api/issues/{issue_id}` would otherwise
     # shadow `/api/issues/{issue_id}/progress` and the image routes for a client
     # that sent a trailing slash.

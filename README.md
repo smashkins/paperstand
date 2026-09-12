@@ -57,6 +57,9 @@ by declarative profiles you can extend.
   the most recent day that has some, saying which day that is.
 - **Covers first.** A shelf per title, a calendar of issues for a daily, year sections for a
   magazine, "continue reading" for what you left half-finished.
+- **Tells you what needs attention.** One page for a missing file, one the renderer could not
+  open, what the organizer parked in the inbox, and a hole in a title's numbering or its
+  declared schedule — see [`docs/maintenance.md`](docs/maintenance.md).
 - **Reads in the browser.** pdf.js over HTTP range requests, one page or two, swipe, pinch,
   double-tap, keyboard shortcuts, a thumbnail strip, and your position remembered per issue.
   A 65 MB broadsheet opens having fetched about a tenth of the file. Needs Chrome 125,

@@ -30,6 +30,13 @@ export type ScanSummary = components['schemas']['ScanSummary'];
 export type ScanStatus = components['schemas']['ScanStatus'];
 export type ScanRecord = components['schemas']['ScanRecord'];
 export type Health = components['schemas']['HealthResponse'];
+export type MaintenanceSummary = components['schemas']['MaintenanceSummary'];
+export type TitleGaps = components['schemas']['TitleGaps'];
+export type NumberGap = components['schemas']['NumberGap'];
+export type UnsortedBucket = components['schemas']['UnsortedBucket'];
+export type OrganizerRun = components['schemas']['OrganizerRun'];
+export type OrganizerMove = components['schemas']['OrganizerMove'];
+export type OrganizerParked = components['schemas']['OrganizerParked'];
 export type Kind = Issue['kind'];
 export type DatePrecision = Issue['date_precision'];
 export type DateSource = Issue['date_source'];
@@ -178,6 +185,15 @@ export interface IssueParams {
 	limit?: number;
 	offset?: number;
 	include_duplicates?: boolean;
+	/** The maintenance filter: issues whose file has gone missing. */
+	missing?: boolean;
+	/** The maintenance filter: issues the renderer could not open at all. */
+	unreadable?: boolean;
+}
+
+export interface MaintenanceGapsParams {
+	/** `YYYY-MM-DD`; defaults to today in `TZ`, exactly like `/api/today`. */
+	today?: string;
 }
 
 export const api = {
@@ -223,5 +239,10 @@ export const api = {
 
 	stats: (options?: CallOptions) => request<Stats>('/api/stats', options),
 
-	health: (options?: CallOptions) => request<Health>('/api/health', options)
+	health: (options?: CallOptions) => request<Health>('/api/health', options),
+
+	maintenance: (options?: CallOptions) => request<MaintenanceSummary>('/api/maintenance', options),
+
+	maintenanceGaps: (params: MaintenanceGapsParams = {}, options?: CallOptions) =>
+		request<TitleGaps[]>(`/api/maintenance/gaps${buildQuery({ ...params })}`, options)
 };

@@ -35,9 +35,10 @@ export interface paths {
 		 * List Issues
 		 * @description A filtered, sorted page of issues, with the total behind it.
 		 *
-		 *     ``missing`` shows only what every other filter hides for having gone
-		 *     missing — a maintenance view will use it; it is ``false``
-		 *     everywhere else, including the default list.
+		 *     ``missing`` and ``unreadable`` each show only what every other filter
+		 *     hides — for having gone missing, or for a cover the renderer could
+		 *     not render at all — and are ``false`` everywhere but the maintenance
+		 *     view.
 		 */
 		get: operations['list_issues_api_issues_get'];
 		put?: never;
@@ -204,6 +205,46 @@ export interface paths {
 		 * @description Every configured library, with its title and issue counts.
 		 */
 		get: operations['list_libraries_api_libraries_get'];
+		put?: never;
+		post?: never;
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/maintenance': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		/**
+		 * Maintenance
+		 * @description What needs attention right now: the badge, and the page's own header.
+		 */
+		get: operations['maintenance_api_maintenance_get'];
+		put?: never;
+		post?: never;
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/maintenance/gaps': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		/**
+		 * Maintenance Gaps
+		 * @description Every title with a hole in its numbering, or in its declared cadence.
+		 */
+		get: operations['maintenance_gaps_api_maintenance_gaps_get'];
 		put?: never;
 		post?: never;
 		delete?: never;
@@ -450,6 +491,8 @@ export interface components {
 			aspect?: components['schemas']['Aspect'] | null;
 			/** Content Hash */
 			content_hash?: string | null;
+			/** Cover Error */
+			cover_error?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -513,6 +556,8 @@ export interface components {
 			aspect?: components['schemas']['Aspect'] | null;
 			/** Content Hash */
 			content_hash?: string | null;
+			/** Cover Error */
+			cover_error?: string | null;
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -608,6 +653,115 @@ export interface components {
 			title_count: number;
 			/** Unsorted Count */
 			unsorted_count: number;
+		};
+		/**
+		 * MaintenanceSummary
+		 * @description What ``GET /api/maintenance`` answers with: the top-bar badge and the
+		 *     page's own header.
+		 */
+		MaintenanceSummary: {
+			/** Attention */
+			attention: number;
+			/** Missing Count */
+			missing_count: number;
+			/** Missing Grace Days */
+			missing_grace_days: number;
+			organizer: components['schemas']['OrganizerRun'] | null;
+			/** Unreadable Count */
+			unreadable_count: number;
+			/** Unsorted */
+			unsorted: components['schemas']['UnsortedBucket'][];
+			/** Unsorted Count */
+			unsorted_count: number;
+		};
+		/**
+		 * NumberGap
+		 * @description A hole between two consecutive catalogued issue numbers of one title.
+		 */
+		NumberGap: {
+			/** First */
+			first: number;
+			/** Last */
+			last: number;
+			/** Volume */
+			volume: number | null;
+		};
+		/**
+		 * OrganizerMove
+		 * @description One file the organizer moved, or would move, in one run.
+		 */
+		OrganizerMove: {
+			/** Destination */
+			destination: string;
+			/** Source */
+			source: string;
+		};
+		/**
+		 * OrganizerParked
+		 * @description One file sitting under ``unsorted/`` or ``duplicates/`` at the end of a run.
+		 *
+		 *     A listing, not a diff: every ``*.pdf`` under either folder, recursively,
+		 *     whether this run put it there or an earlier one did.
+		 */
+		OrganizerParked: {
+			/**
+			 * Folder
+			 * @enum {string}
+			 */
+			folder: 'unsorted' | 'duplicates';
+			/** Modified */
+			modified: string;
+			/** Name */
+			name: string;
+			/** Reason */
+			reason?: string | null;
+			/** Size */
+			size: number;
+		};
+		/**
+		 * OrganizerRun
+		 * @description What one organizer run did, or would do, written to ``<data>/organizer/last-run.json``.
+		 *
+		 *     Read back by the server on every ``GET /api/maintenance`` — a few
+		 *     kilobytes, no caching, no watching. ``version`` guards the shape: a file
+		 *     from a future Paperstand is ignored rather than misread.
+		 */
+		OrganizerRun: {
+			/** Duplicate */
+			duplicate: number;
+			/** Failed */
+			failed: number;
+			/** Finished At */
+			finished_at: string;
+			/** Inbox */
+			inbox: string;
+			/**
+			 * Mode
+			 * @enum {string}
+			 */
+			mode: 'apply' | 'dry-run';
+			/** Moved */
+			moved: number;
+			/** Moves */
+			moves: components['schemas']['OrganizerMove'][];
+			/** Parked */
+			parked: components['schemas']['OrganizerParked'][];
+			/** Refused */
+			refused: boolean;
+			/** Scan Requested */
+			scan_requested: boolean;
+			/** Skipped */
+			skipped: number;
+			/** Started At */
+			started_at: string;
+			/** Unsorted */
+			unsorted: number;
+			/**
+			 * Version
+			 * @default 1
+			 * @constant
+			 */
+			version: 1;
 		};
 		/**
 		 * Progress
@@ -905,6 +1059,41 @@ export interface components {
 			years: components['schemas']['YearCount'][];
 		};
 		/**
+		 * TitleGaps
+		 * @description One title's holes: in its numbering, in its declared cadence, or both.
+		 */
+		TitleGaps: {
+			/** Date Gap Count */
+			date_gap_count: number;
+			/** Date Gaps */
+			date_gaps: string[];
+			/** First Date */
+			first_date: string | null;
+			/** Frequency */
+			frequency: ('daily' | 'weekly' | 'monthly' | 'irregular') | null;
+			/** Issue Count */
+			issue_count: number;
+			/** Issue Key */
+			issue_key: ('date' | 'number' | 'date+number') | null;
+			/**
+			 * Kind
+			 * @enum {string}
+			 */
+			kind: 'newspaper' | 'magazine';
+			/** Last Date */
+			last_date: string | null;
+			/** Number Gap Count */
+			number_gap_count: number;
+			/** Number Gaps */
+			number_gaps: components['schemas']['NumberGap'][];
+			/** Overdue Days */
+			overdue_days: number | null;
+			/** Title Id */
+			title_id: string;
+			/** Title Name */
+			title_name: string;
+		};
+		/**
 		 * Today
 		 * @description The storefront: one day of newspapers, and what to read next.
 		 */
@@ -923,6 +1112,23 @@ export interface components {
 			newspapers_date?: string | null;
 			/** Recently Added */
 			recently_added: components['schemas']['Issue'][];
+		};
+		/**
+		 * UnsortedBucket
+		 * @description How many files the parser could not place, in one library.
+		 *
+		 *     A different thing from the organizer's own ``unsorted/`` folder: this is
+		 *     the catalogue's own ``Unsorted`` title, per library.
+		 */
+		UnsortedBucket: {
+			/** Count */
+			count: number;
+			/** Library Id */
+			library_id: string;
+			/** Library Name */
+			library_name: string;
+			/** Title Id */
+			title_id: string;
 		};
 		/** ValidationError */
 		ValidationError: {
@@ -990,6 +1196,7 @@ export interface operations {
 				offset?: number;
 				include_duplicates?: boolean;
 				missing?: boolean;
+				unreadable?: boolean;
 			};
 			header?: never;
 			path?: never;
@@ -1533,6 +1740,58 @@ export interface operations {
 				};
 				content: {
 					'application/json': components['schemas']['Library'][];
+				};
+			};
+		};
+	};
+	maintenance_api_maintenance_get: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['MaintenanceSummary'];
+				};
+			};
+		};
+	};
+	maintenance_gaps_api_maintenance_gaps_get: {
+		parameters: {
+			query?: {
+				/** @description Defaults to today in TZ */
+				today?: string | null;
+			};
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['TitleGaps'][];
+				};
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
 				};
 			};
 		};
