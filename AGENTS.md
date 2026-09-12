@@ -24,13 +24,17 @@ cover-first web interface, an in-browser reader and an OPDS 1.2 feed.
 ```
 backend/paperstand/
   api/         REST routers, one module per resource
-  cli/         parse-report and parse-explain
+  cli/         parse-report, parse-explain, organize-plan and organize
   opds/        Atom feed builder and the OPDS router
+  organizer/   canonical naming, inbox pipeline, never-overwrite mover, run report
   parsing/     the parser: engine, primitives, and profiles/*.yml
   render/      page rasterisation and the page-cache eviction
-  scanner/     walker, two-phase scanner, covers, scheduler
+  scanner/     walker, hashing, two-phase scanner, covers, scheduler
   config.py    Settings (environment) and PaperstandConfig (paperstand.yml)
-  db.py  queries.py  schemas.py  main.py  static.py  proxy.py
+  cache.py     the versioned layout of <data>/cache
+  publication.py  publication.yml, the declaration that turns a folder into a title
+  gaps.py      holes in a title's series, by number and by declared cadence
+  db.py  queries.py  schemas.py  main.py  static.py  proxy.py  logging.py
 backend/tests/            pytest, with the naming fixture table in fixtures/filenames.py
 frontend/src/lib/         api client, components, stores, reader, format helpers
 frontend/src/routes/      the pages
@@ -74,12 +78,23 @@ uv run --project backend python -m paperstand parse-report ./library
 uv run --project backend python -m paperstand parse-explain ./library/<file>.pdf
 ```
 
+To preview the canonical layout, or to import files into it — `organize-plan` writes
+nothing; `organize` moves files from a writable inbox into the library, and is a dry run
+without `--apply`:
+
+```bash
+uv run --project backend python -m paperstand organize-plan ./library
+uv run --project backend python -m paperstand organize --inbox ./inbox --library ./library --data ./data
+```
+
 ## Rules
 
 These are not style preferences; a change that breaks one of them is wrong.
 
-1. **`/library` is read-only.** Nothing may ever write inside it. Everything Paperstand
-   writes goes under `/data`.
+1. **The server never writes inside `/library`**; it is mounted read-only. The organizer is
+   the only writer, and only to add: it moves files in from its inbox, never overwrites,
+   never modifies or deletes a file already there, and never changes a PDF's bytes.
+   Everything Paperstand produces goes under `/data`.
 2. **No naming rule lives in Python.** File name parsing is driven by the declarative
    profiles in `backend/paperstand/parsing/profiles/`. A shape the parser cannot read is a
    change to a profile, or a new profile — never an `if` in the engine.
@@ -105,9 +120,7 @@ These are not style preferences; a change that breaks one of them is wrong.
 ## Commit messages
 
 [Conventional Commits 1.0](https://www.conventionalcommits.org/): `type(scope): summary`,
-imperative, lower case, no full stop. A commit written with the help of a coding agent ends
-with the trailer `Co-Authored-By: Claude <noreply@anthropic.com>` (or the equivalent for the
-agent used), after a blank line. No other trailers.
+imperative, lower case, no full stop. No trailers of any kind.
 
 ```
 feat(opds): answer HEAD on every feed
@@ -116,6 +129,7 @@ docs(readme): add cover banner and badge row
 ```
 
 Types: `feat`, `fix`, `docs`, `build`, `ci`, `chore`, `refactor`, `test`, `perf`, `style`.
-Scopes are parts of the system: `api`, `scanner`, `parser`, `reader`, `storefront`, `opds`,
-`docker`. Add a body when the *why* is not obvious, and a `BREAKING CHANGE:` footer when an
-upgrade needs a hand.
+Scopes are parts of the system: `api`, `scanner`, `parser`, `organizer`, `render`,
+`reader`, `storefront`, `maintenance`, `opds`, `docker`; a `docs`, `ci` or `chore` commit
+may name the thing it touches instead (`readme`, `dependabot`, `release`). Add a body when
+the *why* is not obvious, and a `BREAKING CHANGE:` footer when an upgrade needs a hand.
