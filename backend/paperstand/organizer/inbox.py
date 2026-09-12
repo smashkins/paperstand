@@ -304,13 +304,15 @@ def marker_missing(library: Path, db_path: Path) -> bool:
     return read_meta(db_path, "library_marker") == "1" and not (library / MARKER_FILE).is_file()
 
 
-def _catalogue(db_path: Path) -> tuple[str, dict[str, str]]:
+def _catalogue(db_path: Path) -> tuple[str, dict[str, list[str]]]:
     """The header's ``catalogue:`` value, and the hashes it carries.
 
     ``read_content_hashes`` already returns ``{}`` both for "no hashes yet"
     and for "cannot be read at all", logging its own warning either way; this
     tells the two apart for the header, without opening the database twice
-    for anything but a read-only ``PRAGMA``.
+    for anything but a read-only ``PRAGMA``. The header counts hashes, not
+    paths: a hash shared by several catalogued rows is still one duplicate
+    to watch for.
     """
     hashes = read_content_hashes(db_path)
     if hashes or _catalogue_readable(db_path):
@@ -340,7 +342,7 @@ def _process_one(
     inbox: Path,
     library: Path,
     resolver: Resolver,
-    known_hashes: dict[str, str],
+    known_hashes: dict[str, list[str]],
     moved_hashes: dict[str, str],
     claims: dict[str, str],
     apply: bool,
@@ -389,7 +391,7 @@ def _process_settled(
     inbox: Path,
     library: Path,
     resolver: Resolver,
-    known_hashes: dict[str, str],
+    known_hashes: dict[str, list[str]],
     moved_hashes: dict[str, str],
     claims: dict[str, str],
     apply: bool,
@@ -403,18 +405,25 @@ def _process_settled(
         return _park_unsorted(found, inbox, reason, apply=apply)
 
     digest = content_hash(source)
-    known = known_hashes.get(digest)
-    if known is not None and not _catalogued_file_matches(library, known, digest):
-        # The catalogue can be stale: the row's file may have been removed,
-        # or replaced with different content, since the last scan. Trusting
-        # it anyway would park a genuinely new file as a duplicate of
-        # something that no longer exists.
+    candidates = known_hashes.get(digest, [])
+    known = next(
+        (
+            candidate
+            for candidate in candidates
+            if _catalogued_file_matches(library, candidate, digest)
+        ),
+        None,
+    )
+    if known is None and candidates:
+        # The catalogue can be stale: every row's file that shared this hash
+        # may have been removed, or replaced with different content, since
+        # the last scan. Trusting one anyway would park a genuinely new file
+        # as a duplicate of something that no longer exists.
         log.info(
-            "catalogued duplicate %s of %s no longer matches on disk; resolving instead",
-            known,
+            "no catalogued duplicate of %s (%s) still matches on disk; resolving instead",
             found.rel_path,
+            ", ".join(candidates),
         )
-        known = None
     if known is None:
         known = moved_hashes.get(digest)
     if known is not None:

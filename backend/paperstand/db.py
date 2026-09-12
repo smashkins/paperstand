@@ -365,8 +365,8 @@ def get_meta(connection: sqlite3.Connection, key: str) -> str | None:
     return str(row["value"]) if row is not None else None
 
 
-def read_content_hashes(path: Path) -> dict[str, str]:
-    """Every catalogued content hash, mapped to the relative path that carries it.
+def read_content_hashes(path: Path) -> dict[str, list[str]]:
+    """Every catalogued content hash, mapped to every relative path that carries it.
 
     Opened read-only, through ``file:...?mode=ro`` so a catalogue that does not
     exist raises rather than being created; the schema is checked with
@@ -378,9 +378,13 @@ def read_content_hashes(path: Path) -> dict[str, str]:
     caught by the destination check at move time. The connection is closed
     before this function returns, well before anything moves.
 
-    Two rows sharing a hash — a duplicate the scanner has not caught up with
-    yet — resolve to the row with the earliest ``rel_path``, so the mapping is
-    deterministic however the table's own row order happens to fall.
+    Two or more rows can share a hash — a duplicate the scanner has not
+    caught up with yet — so each hash maps to every path that carries it,
+    ordered by ``rel_path`` (the SQL query's own order) so the mapping is
+    deterministic however the table's own row order happens to fall. A
+    caller deciding whether an incoming file duplicates a catalogued one
+    must check every path in the list — trusting only the first would let a
+    genuine duplicate through if that one path happened to be stale.
     """
     try:
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -405,9 +409,9 @@ def read_content_hashes(path: Path) -> dict[str, str]:
         return {}
     finally:
         connection.close()
-    hashes: dict[str, str] = {}
+    hashes: dict[str, list[str]] = {}
     for row_hash, rel_path in rows:
-        hashes.setdefault(str(row_hash), str(rel_path))
+        hashes.setdefault(str(row_hash), []).append(str(rel_path))
     return hashes
 
 
