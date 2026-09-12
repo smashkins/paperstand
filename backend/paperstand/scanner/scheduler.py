@@ -2,18 +2,28 @@
 
 The scheduler owns the single rule that makes the rest of the scanner safe: at
 most one scan runs at a time. Everything asking for one — the periodic timer,
-``POST /api/scan``, the start-up scan — goes through :meth:`ScanScheduler.request_scan`,
-which either starts a scan on a thread of its own and returns its id, or raises
-:class:`ScanInProgress` carrying the id of the scan already running.
+``POST /api/scan``, the start-up scan, the scan trigger file — goes through
+:meth:`ScanScheduler.request_scan` or the background loop's own
+:meth:`ScanScheduler._try_scan`, which either starts a scan on a thread of its
+own or, for the loop, runs it and waits.
 
-Nothing here blocks a request: the API only ever creates the ``scans`` row and
-hands back its id.
+Nothing a request does here blocks it: the API only ever creates the ``scans``
+row and hands back its id.
+
+The background loop is a single poll, every :data:`TRIGGER_POLL_SECONDS`: it
+runs the periodic scan when the interval has elapsed, and a scan on request
+when ``<data>/scan.request`` exists — touched by ``paperstand organize``
+after an apply run that moved a file, or by hand. It always runs, even with
+automatic scanning turned off entirely, because the trigger has to work in
+that deployment too.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import threading
+import time
+from pathlib import Path
 from typing import Any
 
 from paperstand.cache import ensure_layout
@@ -24,6 +34,11 @@ from paperstand.render.pages import evict as evict_pages
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult
 
 log = get_logger(__name__)
+
+#: How often the background loop checks the scan trigger file. An instance
+#: attribute (``ScanScheduler.poll``) rather than only this constant, so a
+#: test can set it low without waiting out the real interval.
+TRIGGER_POLL_SECONDS = 5.0
 
 
 class ScanInProgress(RuntimeError):
@@ -40,6 +55,7 @@ class ScanScheduler:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
         self.scanner = Scanner(settings, database, on_progress=self._on_progress)
+        self.poll = TRIGGER_POLL_SECONDS
         self._busy = threading.Lock()
         self._stop = threading.Event()
         self._loop: threading.Thread | None = None
@@ -68,19 +84,27 @@ class ScanScheduler:
     def start(self) -> None:
         """Start the background loop, and the start-up scan if it is enabled.
 
+        The loop always runs, even with automatic scanning turned off
+        entirely (``scan_on_start=false``, ``scan_interval=0``): it is also
+        what serves the scan trigger file, and that must keep working in a
+        deployment that has switched the timer off.
+
         ``ensure_layout`` runs here unconditionally, before the check below:
         ``Scanner.begin`` runs it too, at the top of every scan, but a
-        deployment with automatic scanning turned off entirely
-        (``scan_on_start=false``, ``scan_interval=0``) would otherwise never
-        call it at all, and a version bump or an upgrade from the
-        unversioned layout has to be caught at start-up regardless.
+        deployment with automatic scanning turned off would otherwise not
+        call it until the first requested or trigger-driven scan, and a
+        version bump or an upgrade from the unversioned layout has to be
+        caught at start-up regardless.
         """
         if self._loop is not None:  # pragma: no cover - start is called once
             return
         ensure_layout(self.settings.cache_path)
         if not self.settings.scan_on_start and self.settings.scan_interval <= 0:
-            log.info("automatic scanning is off: scan_on_start=false, scan_interval=0")
-            return
+            log.info(
+                "automatic scanning is off: scan_on_start=false, scan_interval=0; "
+                "POST /api/scan and %s still work",
+                self.settings.scan_trigger_path,
+            )
         self._stop.clear()
         self._loop = threading.Thread(target=self._sleep_and_scan, name="scan-loop", daemon=True)
         self._loop.start()
@@ -199,37 +223,72 @@ class ScanScheduler:
             log.warning("the page cache could not be swept: %s", error)
 
     def _sleep_and_scan(self) -> None:
-        """The background loop: an optional first scan, then one per interval."""
+        """The background loop: an optional first scan, then a poll for the rest."""
         try:
             self._loop_forever()
         finally:
             self.scanner.database.close_thread()
 
     def _loop_forever(self) -> None:
+        """An optional start-up scan, then a poll every ``self.poll`` seconds.
+
+        The poll is what serves the scan trigger file, so it runs
+        unconditionally — even with ``scan_interval`` at ``0`` — and wakes up
+        at least that often regardless of how far away the periodic scan is.
+        A requested scan resets the periodic clock: the catalogue was just
+        refreshed, so the next one is a full interval away again.
+        """
         interval = self.settings.scan_interval
         if self.settings.scan_on_start:
             self._try_scan("start-up")
+        due = time.monotonic() + interval if interval > 0 else None
         while not self._stop.is_set():
-            if interval <= 0:
+            wait = self.poll if due is None else max(0.0, min(self.poll, due - time.monotonic()))
+            if self._stop.wait(wait):
                 return
-            if self._stop.wait(interval):
-                return
-            self._try_scan("scheduled")
+            if self._trigger_present():
+                requested = self._try_scan("requested", consume=self.settings.scan_trigger_path)
+                if requested and due is not None:
+                    due = time.monotonic() + interval
+            elif due is not None and time.monotonic() >= due:
+                self._try_scan("scheduled")
+                due = time.monotonic() + interval
 
-    def _try_scan(self, reason: str) -> None:
+    def _trigger_present(self) -> bool:
+        """Whether the scan trigger file is sitting there, asking for a scan."""
+        return self.settings.scan_trigger_path.is_file()
+
+    def _try_scan(self, reason: str, *, consume: Path | None = None) -> bool:
+        """Try to start a scan for ``reason``; ``True`` only when one actually ran.
+
+        ``consume`` — the scan trigger file, when this call is for it — is
+        unlinked only once ``_busy`` is held and only just before
+        ``scanner.begin()``. The order is the whole point: a touch that lands
+        while a scan is running is not consumed, so it waits for the next
+        wake-up and gets a scan of its own; a touch that lands after the
+        unlink and before the walk reaches its folder still gets a second
+        scan, which finds nothing to do and costs a fast phase. Nothing is
+        ever lost, at worst one scan is redundant.
+        """
         if not self._busy.acquire(blocking=False):
             log.info("skipping the %s scan: one is already running", reason)
-            return
+            return False
+        if consume is not None:
+            try:
+                consume.unlink(missing_ok=True)
+            except OSError as error:  # pragma: no cover - an unwritable data dir
+                log.warning("could not remove the scan trigger at %s: %s", consume, error)
         try:
             scan_id = self.scanner.begin()
         except Exception:  # pragma: no cover - the database is unusable
             log.exception("the %s scan could not be started", reason)
             self._busy.release()
-            return
+            return False
         self._current = scan_id
         self._progress = self._seed_progress(scan_id)
         log.info("starting the %s scan (%d)", reason, scan_id)
         self._finish(scan_id)
+        return True
 
 
 def scan_summary(result: ScanResult | None) -> dict[str, Any] | None:
