@@ -1,11 +1,13 @@
 """``organize-plan``, a read-only preview, and ``organize``, which writes.
 
-``organize-plan`` mirrors ``parse-report``: same walk, same configuration
-discovery, same parser. The only difference is what gets printed for each
-file — the canonical path it would get under `<Title>/<YYYY>/<Title> - <ISO
-date>[ - n<number>].pdf`, or inside its own declared publication folder, or
-why it would stay put. Nothing is ever opened for writing: this command
-builds names, it does not create, move, rename or delete a single file.
+``organize-plan`` prints :func:`~paperstand.organizer.migration.plan_library`,
+the same computation ``migrate`` plans against: same walk, same configuration
+discovery, same parser. The only thing this command does with the plan is
+print it — the canonical path a file would get under `<Title>/<YYYY>/<Title>
+- <ISO date>[ - n<number>].pdf`, or inside its own declared publication
+folder, or why it would stay put. Nothing is ever opened for writing: this
+command builds names, it does not create, move, rename or delete a single
+file.
 
 ``organize`` is the command that actually imports PDFs from a writable inbox
 into the library — see :mod:`paperstand.organizer.inbox` for the pipeline it
@@ -17,30 +19,16 @@ from __future__ import annotations
 
 import sys
 import threading
-from collections import defaultdict
 from collections.abc import Callable
 from pathlib import Path
 from signal import SIGINT, SIGTERM, signal
 from typing import TextIO
 
-from paperstand.cli.parse import (
-    default_config_path,
-    load_cli_config,
-    missing_explicit_config,
-    parse_file,
-)
+from paperstand.cli.parse import default_config_path, load_cli_config, missing_explicit_config
 from paperstand.config import ORGANIZER_REPORT, SCAN_TRIGGER, Settings, get_settings
 from paperstand.logging import get_logger
-from paperstand.organizer import (
-    OrganizeReport,
-    Unsorted,
-    organize_forever,
-    organize_once,
-    plan_issue,
-)
-from paperstand.organizer.resolve import declared_title_folders
-from paperstand.publication import PublicationIndex
-from paperstand.scanner.walker import Walk
+from paperstand.organizer import OrganizeReport, organize_forever, organize_once
+from paperstand.organizer.migration import InPlace, Unplaced, plan_library
 
 log = get_logger(__name__)
 
@@ -67,63 +55,33 @@ def organize_plan(
     print(f"configuration: {resolved_config or 'auto-discovered'}", file=stream)
     print(file=stream)
 
-    walk = Walk(root, config)
-    buffered = list(walk)
-    index = PublicationIndex(root)
-    index.load_all(walk.publications)
-    title_folders = declared_title_folders(index, walk.publications, config)
+    plan = plan_library(root, config)
 
-    # Source paths grouped by the canonical path they resolve to, so that two
-    # (or more) files landing on the same name can be reported together instead
-    # of one silently winning.
-    sources_by_canonical: dict[str, list[str]] = defaultdict(list)
     planned = 0
     in_place = 0
     unsorted = 0
-    for found in buffered:
-        rel_path = found.rel_path
-        library = config.library_for(rel_path)
-        if library is None:
-            # Belongs to no configured library: parse-report skips it the same
-            # way, since no profile ran on it at all.
-            continue
-        publication = index.resolve(found.publication_dir, library, config)
-        issue = parse_file(rel_path, root, config, publication)
-        if issue is None:
-            continue
-        plan = plan_issue(
-            issue,
-            publication_folder=title_folders.get((library.name, issue.title_name)),
-            library_path=library.path,
-        )
-        if isinstance(plan, Unsorted):
+    for entry in plan.entries:
+        if isinstance(entry, Unplaced):
             unsorted += 1
-            print(f"{rel_path} -> unsorted: {plan.reason}", file=stream)
-            continue
-        sources_by_canonical[plan.rel_path].append(rel_path)
-        if plan.rel_path == rel_path:
+            print(f"{entry.rel_path} -> unsorted: {entry.reason}", file=stream)
+        elif isinstance(entry, InPlace):
             in_place += 1
-            print(f"{rel_path} -> in place", file=stream)
+            print(f"{entry.rel_path} -> in place", file=stream)
         else:
             planned += 1
-            print(f"{rel_path} -> {plan.rel_path}", file=stream)
+            print(f"{entry.rel_path} -> {entry.destination}", file=stream)
 
-    collisions = {
-        canonical: sources
-        for canonical, sources in sources_by_canonical.items()
-        if len(sources) > 1
-    }
-    if collisions:
+    if plan.collisions:
         print(file=stream)
-        for canonical, sources in sorted(collisions.items()):
-            print(f"COLLISION {canonical}", file=stream)
-            for source in sorted(sources):
+        for group in plan.collisions:
+            print(f"COLLISION {group.destination}", file=stream)
+            for source in group.sources:
                 print(f"  {source}", file=stream)
 
     print(file=stream)
     print(
         f"{planned} planned, {in_place} in place, {unsorted} unsorted, "
-        f"{len(collisions)} collision(s)",
+        f"{len(plan.collisions)} collision(s)",
         file=stream,
     )
     return 0

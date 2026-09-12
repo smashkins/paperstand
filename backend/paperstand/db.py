@@ -411,6 +411,54 @@ def read_content_hashes(path: Path) -> dict[str, str]:
     return hashes
 
 
+def read_rel_path_hashes(path: Path) -> dict[str, str | None] | None:
+    """Every catalogued issue, keyed by its own ``rel_path``, mapped to its content hash.
+
+    The migrator's read of the catalogue: the mirror image of
+    :func:`read_content_hashes` — keyed by ``rel_path`` rather than by hash,
+    because what the migrator needs to know is, for the exact path it is
+    about to move, whether the catalogue can still recognise the file at its
+    new path afterwards.
+
+    ``{}`` when ``path`` does not exist at all: nothing has ever been
+    catalogued here, so there is nothing a migration could lose. ``None``
+    when the file is there but cannot be read, or its schema predates
+    content hashes (``PRAGMA user_version < 3``) — the one case a caller
+    must treat as "an apply run cannot safely proceed", since without a hash
+    a renamed row can never be matched back up by a later scan. A row whose
+    own ``content_hash`` column is ``NULL`` — a legacy row a scan has not
+    backfilled yet — keeps its place in the mapping with a ``None`` value,
+    told apart from a path the catalogue never heard of at all, which is
+    simply absent from the mapping.
+    """
+    if not path.exists():
+        return {}
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    try:
+        version = user_version(connection)
+        if version < 3:
+            log.warning(
+                "the catalogue at %s is schema %d, too old to carry content hashes",
+                path,
+                version,
+            )
+            return None
+        rows = connection.execute("SELECT rel_path, content_hash FROM issues").fetchall()
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    finally:
+        connection.close()
+    return {
+        str(rel_path): (str(row_hash) if row_hash is not None else None)
+        for rel_path, row_hash in rows
+    }
+
+
 def read_meta(path: Path, key: str) -> str | None:
     """One ``meta`` value, read from a database file that may not even exist.
 

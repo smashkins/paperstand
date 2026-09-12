@@ -9,6 +9,8 @@ package that touches the filesystem for anything but reading — one atomic,
 never-overwriting move, reused for the library, for `<inbox>/unsorted/` and
 for `<inbox>/duplicates/` alike. :mod:`paperstand.organizer.inbox` is the
 pipeline that ties all three together into ``paperstand organize``.
+:mod:`paperstand.organizer.migration` plans the same kind of move for files
+already inside the library — the computation ``organize-plan`` prints.
 """
 
 from paperstand.organizer.inbox import (
@@ -21,6 +23,14 @@ from paperstand.organizer.inbox import (
     Skipped,
     organize_forever,
     organize_once,
+)
+from paperstand.organizer.migration import (
+    Collision,
+    InPlace,
+    LibraryPlan,
+    Move,
+    Unplaced,
+    plan_library,
 )
 from paperstand.organizer.mover import (
     DestinationOccupied,
@@ -43,9 +53,13 @@ from paperstand.organizer.resolve import Resolved, Resolver
 
 __all__ = [
     "CanonicalPath",
+    "Collision",
     "DestinationOccupied",
     "Duplicate",
     "Failed",
+    "InPlace",
+    "LibraryPlan",
+    "Move",
     "Moved",
     "OrganizePlan",
     "OrganizeReport",
@@ -54,6 +68,7 @@ __all__ = [
     "Resolved",
     "Resolver",
     "Skipped",
+    "Unplaced",
     "Unsorted",
     "canonical_filename",
     "canonical_folder",
@@ -64,6 +79,7 @@ __all__ = [
     "organize_once",
     "park",
     "plan_issue",
+    "plan_library",
     "read_run",
     "remove_sidecar",
     "sidecar_path",
