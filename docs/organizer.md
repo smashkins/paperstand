@@ -192,12 +192,156 @@ trigger runs regardless of whether the periodic timer is on. A dry run writes th
 never the trigger: nothing in the library changed, so there is nothing for a scan to catch up
 on.
 
+## `migrate`
+
+Where `organize` imports PDFs into the library from a writable inbox, `migrate` works on
+files already inside it: the shape a rule change, or a newly declared `publication.yml`, may
+have made possible for a file that nothing renames on its own. It shares one planner with
+`organize-plan` — the same walk, the same canonical destinations — so what one previews is
+exactly what the other performs.
+
+```bash
+uv run --project backend python -m paperstand migrate --library ./library --data ./data
+```
+
+Without `--apply` this is a dry run, exactly as for `organize`: the report — the header, the
+catalogue's own warnings, every line, every folder `--apply` would remove — is identical, and
+nothing is written or moved.
+
+```bash
+uv run --project backend python -m paperstand migrate --library ./library --data ./data --apply
+```
+
+### Scan first
+
+`migrate` renames files the catalogue already knows about, and the catalogue can only
+recognise a renamed file again by its content hash — a row catalogued by a build before
+content-hash identity, or a library never scanned at all with this version, carries none yet.
+Scan the library once with this build before the first `--apply`: every row then already
+carries the hash the following scan needs to follow the rename and keep the issue's id,
+cover, pages and reading position exactly as they were.
+
+```
+library root:  /library
+configuration: /data/paperstand.yml
+catalogue:     /data/paperstand.db (118 rows, 118 hashed)
+mode:          apply
+```
+
+`--apply` refuses outright, before moving a single file, when the catalogue cannot be read at
+all, or when a file it would move has no hash yet — either would lose that file's cover and
+reading progress until the next scan re-derives them from scratch. A dry run prints the same
+warning in the `catalogue:` line and carries on, so the plan is still shown in full.
+
+### What moves and what stays
+
+One line per file, in the same walk order and against the same canonical layout
+`organize-plan` prints, followed by any `COLLISION` blocks, the folders an apply run removed,
+and a summary:
+
+```
+Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf -> Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-17.pdf
+Newspapers/Corriere del Ponte/2026/Corriere del Ponte - 2026-03-16.pdf -> in place
+Zines/Something.pdf -> unsorted: date would come from the file's modification time
+Newspapers/2026/09/06/Cronaca_24_Pagine_6_Settembre.pdf -> collision: Newspapers/Cronaca 24 Pagine/2026/Cronaca 24 Pagine - 2026-09-06.pdf is also the plan of 1 other file
+
+COLLISION Newspapers/Cronaca 24 Pagine/2026/Cronaca 24 Pagine - 2026-09-06.pdf
+  Newspapers/2026/09/06/Cronaca_24_Pagine_6_Settembre.pdf
+  Newspapers/2026/09/06/Cronaca_24_Pagine_6_Settembre_2026.pdf
+
+removed empty folder: Newspapers/2026/03/17
+
+110 moved, 7 in place, 1 unsorted, 3 collision(s), 0 duplicate, 0 failed, 41 empty folder(s) removed
+scan requested: /data/scan.request
+```
+
+A file is left exactly where it is for one of four reasons:
+
+- `unsorted: <reason>` — the file itself would be, exactly as `organize-plan` reports it: no
+  configured title matches its name, no date anywhere in it, a date that would come only from
+  its modification time, and the like.
+- `duplicate of <path>` — byte-identical to the file already at its destination. The
+  organizer never deletes; a maintainer removes one of the two copies by hand.
+- `collision: <reason>` — a member of a collision group (below), a cycle among this run's own
+  deferred moves, or the same file under another spelling of its case on a case-insensitive
+  filesystem.
+- `failed: <error>` — an unexpected error moving it, reported and left exactly as it was
+  (exit code `1`).
+
+Dry-run summaries read `110 to move, …` instead of `moved`, omit `failed` and the empty-folder
+count, and end there — no `removed empty folder:` line, no `scan requested:` line.
+
+### Collision groups never move
+
+Two or more files whose plan resolves to the same destination are a `COLLISION`, printed
+exactly as `organize-plan` prints one — and not one of them moves, not even a file already
+sitting at that destination: belonging to the group is what makes it unsafe to treat as
+settled, since renaming another member onto it could otherwise land silently on top of the
+wrong file. A maintainer resolves it by hand — renaming or deleting one of the files — and
+runs `migrate` again.
+
+### Empty folders
+
+An apply run that moves a file also removes the folders that move left empty: starting at
+the file's immediate parent and climbing one ancestor at a time, removing each with `rmdir`
+for as long as it is empty, and stopping at the library root, at a configured library's own
+folder, and at the first folder along the way that still holds something — a sibling file, or
+a declared publication's own `publication.yml` — which ends that chain without being reported
+as an error. A date-folder library leaves whole `YYYY/MM/DD` chains behind this way;
+`--keep-empty-folders` turns the removal off. `rmdir` only ever removes a folder already
+empty, never a file — rule 1's "never deletes a file" still holds — and a symlinked folder is
+never touched either, since `rmdir` refuses one.
+
+### The report and the trigger
+
+An applied run that moves at least one file writes its own report,
+`<data>/organizer/migrations/<started_at>.json` — one file per run, never overwritten, unlike
+`organize`'s `last-run.json` above. It holds the source → destination map of every file
+moved, the collision groups found, what was left in place and why, the folders removed, and
+whether a scan was requested; nothing in it is read by the server or served by any route. The
+same run also touches `<data>/scan.request`, exactly as an `organize` apply run does — see
+[The run report and the scan trigger](#the-run-report-and-the-scan-trigger) above — so the
+next scan recognises every moved file by its hash and keeps its id, cover, pages and reading
+position untouched: `added 0, removed 0`. A dry run writes neither file.
+
+### Idempotence
+
+A second `--apply` against a library `migrate` already brought into shape reports every file
+`in place` and moves nothing: nothing is written, no folder is removed, no scan is requested.
+Running it again is always safe.
+
+### The lock
+
+The whole run holds an exclusive lock on `<data>/organizer/.migrate.lock` — separate from
+`organize`'s own `<inbox>/.organizer.lock`, so the two may run at the same time; the mover's
+occupant check is what keeps either from ever overwriting what the other just did. A run that
+finds the lock already held prints one line and exits `0`, having moved nothing.
+
+### Exit codes
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Every file has an outcome — moved, in place, unsorted, duplicate and collision all count as success — including a run that found the lock already held, and a dry run whose catalogue warning was only a warning. |
+| `1` | The library's root marker is remembered but not on disk, or a move failed on an unexpected error; the file(s) involved were left exactly where they were. |
+| `2` | A usage error — the library is not a directory, or an explicit `--config` does not exist — or, in `--apply` only, the catalogue guard refused: it could not be read, or a movable file has no content hash yet. |
+
+### The compose profile
+
+`migrate` is not a service on a loop, the way `organize --every` is; it is run once, watched,
+through the same profile:
+
+```bash
+docker compose --profile organizer run --rm organizer migrate --apply
+```
+
 ## `organize-plan`
 
 `organize-plan` prints where every PDF under a directory *would* live under the canonical
 layout, without writing, moving, renaming or deleting a single file. It runs the same parser
 as `parse-report`, over the same walk, and is safe to run against a real collection: it never
-opens a file for writing.
+opens a file for writing. It is also the preview of [`migrate`](#migrate), above: the two
+commands share one planner, so what `organize-plan` prints for a file already inside the
+library is exactly what a `migrate` run would do with it.
 
 ```bash
 docker compose exec paperstand paperstand organize-plan /library
@@ -276,6 +420,5 @@ free pass, when another file's plan lands on the exact path it already occupies.
   *are* its identity, and its duplicate check.
 - **Create a folder for an unknown title.** An unmatched name goes to `unsorted/` in the
   inbox, not into a guessed folder the scanner would never catalogue.
-- **Move a file already inside the library.** Both commands work inbox-to-library, or
-  read-only inside the library; moving a file already catalogued to its canonical name is
-  later work on the same mover.
+- **Move a file inside the library on its own.** Only `migrate --apply`, run by you, does; it
+  never overwrites, never deletes, and only removes a folder its own moves emptied.

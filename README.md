@@ -15,7 +15,8 @@
 Paperstand is a self-hosted, Docker-first reader for a folder of PDF periodicals. Point it
 at a directory you already have — the server mounts it read-only and never writes to it; the
 one exception is the optional organizer service, which only ever adds a file moved in from
-its own inbox — and it reads the file names, works out the title and the issue date of each
+its own inbox, or, on request, moves one already there into the canonical layout — and it
+reads the file names, works out the title and the issue date of each
 one, and serves a newsstand: today's papers on the front page, a cover-first shelf per title,
 a calendar of back issues, an in-browser reader that streams a 60 MB broadsheet a few hundred
 kilobytes at a time, and an OPDS 1.2 feed for the reading app on your phone. Nothing is
@@ -46,8 +47,9 @@ by declarative profiles you can extend.
 
 - **The server reads a folder, read-only.** `/library` is mounted `:ro`; the optional
   organizer service is the only thing that ever writes there, and all it ever adds is a file
-  moved in from its own inbox. Everything the server itself writes — the catalogue, the
-  covers, the page cache — lives under `/data`.
+  moved in from its own inbox, or, on request, moves one already there into the canonical
+  layout. Everything the server itself writes — the catalogue, the covers, the page cache —
+  lives under `/data`.
 - **Understands the layouts you already have.** Date folders, one folder per title, one
   folder per year, flat directories, and the messy file names that come with them: numeric
   prefixes, `@handle_` prefixes, duplicate suffixes, Italian and English month names, issue
@@ -131,7 +133,7 @@ docker run -d --name paperstand -p 8080:8080 \
 
 | Variable | Default | What it does |
 | --- | --- | --- |
-| `LIBRARY_PATH` | `./library` | Host folder holding the PDFs. The server mounts it read-only at `/library`; only the optional organizer profile writes there, and only to add a file moved in from the inbox. |
+| `LIBRARY_PATH` | `./library` | Host folder holding the PDFs. The server mounts it read-only at `/library`; only the optional organizer profile writes there, and only to add a file moved in from the inbox, or, on request, to move one already there into the canonical layout. |
 | `INBOX_PATH` | `./inbox` | Host folder the optional organizer profile watches, mounted at `/inbox`. Unused unless that profile is started. |
 | `DATA_PATH` | `./data` | Host folder for the database and the caches, mounted at `/data` |
 | `PUID` / `PGID` | `1000` | The user and group the server drops to |
@@ -192,7 +194,10 @@ does not know.
 title's declared folder when it has one — entirely read-only, never writing anything.
 `paperstand organize` is what actually performs that move: it watches a writable inbox and
 imports what it recognises into the library, atomically and never overwriting a file already
-there; see [`docs/organizer.md`](docs/organizer.md).
+there. `paperstand migrate` does the same for a file already inside the library: with
+`--apply` it renames and relocates every unambiguous file to its own canonical path, in
+place, leaving anything unsorted, colliding or already there exactly where it is; see
+[`docs/organizer.md`](docs/organizer.md).
 
 ## OPDS
 

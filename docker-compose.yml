@@ -40,9 +40,13 @@ services:
   #
   #   docker compose --profile organizer up -d
   #
-  # This is the only container that ever writes into the library, and the
-  # only thing it ever does there is add a file moved in from the inbox; a
-  # file already in the library is never touched. See docs/organizer.md.
+  # This is the only container that ever writes into the library: on the
+  # loop above it only ever adds a file moved in from the inbox. A file
+  # already there moves only when you ask it to:
+  #
+  #   docker compose --profile organizer run --rm organizer migrate --apply
+  #
+  # See docs/organizer.md.
   organizer:
     profiles: ['organizer']
     image: ghcr.io/smashkins/paperstand:latest
