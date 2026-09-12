@@ -320,3 +320,119 @@ class HealthResponse(BaseModel):
     last_scan: ScanRecord | None
     scanning: bool
     issue_count: int
+
+
+class OrganizerMove(BaseModel):
+    """One file the organizer moved, or would move, in one run."""
+
+    source: str
+    """Inbox-relative path the file was found at."""
+    destination: str
+    """Library-relative path it was moved to."""
+
+
+class OrganizerParked(BaseModel):
+    """One file sitting under ``unsorted/`` or ``duplicates/`` at the end of a run.
+
+    A listing, not a diff: every ``*.pdf`` under either folder, recursively,
+    whether this run put it there or an earlier one did.
+    """
+
+    folder: Literal["unsorted", "duplicates"]
+    name: str
+    """Path relative to ``folder``."""
+    reason: str | None = None
+    """The first line of the sidecar, stripped; ``null`` when there is none."""
+    size: int
+    modified: str
+
+
+class OrganizerRun(BaseModel):
+    """What one organizer run did, or would do, written to ``<data>/organizer/last-run.json``.
+
+    Read back by the server on every ``GET /api/maintenance`` — a few
+    kilobytes, no caching, no watching. ``version`` guards the shape: a file
+    from a future Paperstand is ignored rather than misread.
+    """
+
+    version: Literal[1] = 1
+    started_at: str
+    finished_at: str
+    mode: Literal["apply", "dry-run"]
+    inbox: str
+    """The inbox's absolute path, as printed in the run's own header."""
+    refused: bool
+    """The library's root marker was remembered but not there: nothing walked."""
+    moved: int
+    duplicate: int
+    unsorted: int
+    skipped: int
+    failed: int
+    moves: list[OrganizerMove]
+    """This run's ``Moved`` outcomes."""
+    parked: list[OrganizerParked]
+    """The inventory of ``unsorted/`` and ``duplicates/`` after the run."""
+    scan_requested: bool
+    """Whether the trigger file was touched at the end of this run."""
+
+
+class NumberGap(BaseModel):
+    """A hole between two consecutive catalogued issue numbers of one title."""
+
+    volume: int | None
+    first: int
+    last: int
+
+
+class TitleGaps(BaseModel):
+    """One title's holes: in its numbering, in its declared cadence, or both."""
+
+    title_id: str
+    title_name: str
+    kind: Kind
+    frequency: Frequency | None
+    issue_key: IssueKey | None
+    first_date: str | None
+    last_date: str | None
+    issue_count: int
+    overdue_days: int | None
+    """Days since the last qualifying issue, past one period; ``null`` when
+    the title is not declared with a cadence, or is not overdue."""
+    date_gaps: list[str]
+    """Missing periods, newest first, capped at ``gaps.GAP_LIST_LIMIT``."""
+    date_gap_count: int
+    """How many periods are missing in total; always complete, even capped."""
+    number_gaps: list[NumberGap]
+    """Ranges of missing numbers, capped at ``gaps.GAP_LIST_LIMIT``."""
+    number_gap_count: int
+    """How many numbers are missing in total; always complete, even capped."""
+
+
+class UnsortedBucket(BaseModel):
+    """How many files the parser could not place, in one library.
+
+    A different thing from the organizer's own ``unsorted/`` folder: this is
+    the catalogue's own ``Unsorted`` title, per library.
+    """
+
+    title_id: str
+    library_id: str
+    library_name: str
+    count: int
+
+
+class MaintenanceSummary(BaseModel):
+    """What ``GET /api/maintenance`` answers with: the top-bar badge and the
+    page's own header."""
+
+    missing_count: int
+    missing_grace_days: int
+    unreadable_count: int
+    unsorted: list[UnsortedBucket]
+    unsorted_count: int
+    organizer: OrganizerRun | None
+    """The organizer's last run, or ``null`` when it has never run here."""
+    attention: int
+    """``missing_count + unreadable_count + len(organizer.parked)``: what a
+    person can act on now. Gaps are not counted — they are information, not
+    a backlog."""

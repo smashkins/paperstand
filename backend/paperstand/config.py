@@ -124,6 +124,29 @@ class Settings(BaseSettings):
         """Root of the on-disk caches (covers, rendered pages)."""
         return self.data / "cache"
 
+    @property
+    def organizer_report_path(self) -> Path:
+        """Path of the organizer's last-run report, written after every run."""
+        return self.data / ORGANIZER_REPORT
+
+    @property
+    def scan_trigger_path(self) -> Path:
+        """Path of the trigger file the scheduler polls for.
+
+        Touched by the organizer after an apply run that moved at least one
+        file, and by hand with ``touch``: a third way to ask for a scan, next
+        to the Settings button and ``POST /api/scan``, that needs no server
+        URL.
+        """
+        return self.data / SCAN_TRIGGER
+
+
+#: Where the organizer writes what its last run did, relative to ``data``.
+ORGANIZER_REPORT = "organizer/last-run.json"
+
+#: The scheduler's poll trigger, relative to ``data``.
+SCAN_TRIGGER = "scan.request"
+
 
 def get_settings() -> Settings:
     """Build a fresh :class:`Settings` instance from the current environment."""

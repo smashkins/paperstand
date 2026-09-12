@@ -244,3 +244,9 @@ def test_missing_grace_days_honours_its_environment_override(
 def test_a_negative_missing_grace_is_clamped_to_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PAPERSTAND_MISSING_GRACE_DAYS", "-3")
     assert Settings().missing_grace_days == 0
+
+
+def test_the_organizer_report_and_scan_trigger_live_under_data() -> None:
+    settings = Settings(data=Path("/data"))
+    assert settings.organizer_report_path == Path("/data/organizer/last-run.json")
+    assert settings.scan_trigger_path == Path("/data/scan.request")

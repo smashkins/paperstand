@@ -31,9 +31,11 @@ from paperstand.db import read_content_hashes, read_meta, user_version
 from paperstand.logging import get_logger
 from paperstand.organizer.mover import DestinationOccupied, move_file, park, remove_sidecar
 from paperstand.organizer.naming import Unsorted as PlanUnsorted
+from paperstand.organizer.report import inventory, write_run
 from paperstand.organizer.resolve import Resolver
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.walker import MARKER_FILE, LibraryFile, Walk
+from paperstand.schemas import OrganizerMove, OrganizerRun
 
 log = get_logger(__name__)
 
@@ -146,6 +148,8 @@ def organize_once(
     settle: float,
     now: float | None = None,
     out: TextIO,
+    report_path: Path | None = None,
+    trigger_path: Path | None = None,
 ) -> OrganizeReport:
     """Run one pass over ``inbox``, printing the report to ``out``.
 
@@ -157,6 +161,14 @@ def organize_once(
     ``apply`` decides whether anything is actually moved; the report is the
     same either way. ``now``, when given, stands in for the current time, so
     that the settle check is deterministic in a test.
+
+    ``report_path`` and ``trigger_path`` are both ``None`` by default, so
+    every earlier caller and test is unchanged. When ``report_path`` is
+    given, this run's :class:`~paperstand.schemas.OrganizerRun` is written
+    there — even a run that found the lock held skips this entirely, since it
+    did nothing and the last run's file is still true. When ``apply`` moved
+    at least one file and ``trigger_path`` is given, the trigger is touched
+    too, and one more line is printed after the summary.
     """
     report = OrganizeReport()
     lock_path = inbox / LOCK_NAME
@@ -166,6 +178,7 @@ def organize_once(
         except OSError:
             print(f"another organizer run holds {inbox}; nothing done", file=out)
             return report
+        started_at = now if now is not None else time.time()
         _run(
             inbox,
             library,
@@ -174,10 +187,20 @@ def organize_once(
             db_path,
             apply=apply,
             settle=settle,
-            now=now if now is not None else time.time(),
+            now=started_at,
             out=out,
             report=report,
         )
+        if report_path is not None:
+            _write_report(
+                inbox,
+                report,
+                apply=apply,
+                started_at=started_at,
+                report_path=report_path,
+                trigger_path=trigger_path,
+                out=out,
+            )
     return report
 
 
@@ -567,3 +590,58 @@ def _summary_line(outcomes: list[Outcome], *, apply: bool) -> str:
         f"{moved} moved, {duplicate} duplicate, {unsorted} unsorted, "
         f"{skipped} skipped, {failed} failed"
     )
+
+
+def _iso_utc(timestamp: float) -> str:
+    """A ``time.time()`` reading, as the ISO 8601 UTC string the report uses."""
+    return dt.datetime.fromtimestamp(timestamp, dt.UTC).replace(microsecond=0).isoformat()
+
+
+def _write_report(
+    inbox: Path,
+    report: OrganizeReport,
+    *,
+    apply: bool,
+    started_at: float,
+    report_path: Path,
+    trigger_path: Path | None,
+    out: TextIO,
+) -> None:
+    """Build this run's :class:`OrganizerRun`, touch the trigger, then write it.
+
+    The trigger is touched before the report is built, so ``scan_requested``
+    always reflects what actually happened, and its line is printed straight
+    after the summary — the last thing this run has to say.
+    """
+    moves = [
+        OrganizerMove(source=outcome.source, destination=outcome.destination)
+        for outcome in report.outcomes
+        if isinstance(outcome, Moved)
+    ]
+    scan_requested = False
+    if apply and moves and trigger_path is not None:
+        try:
+            trigger_path.touch()
+        except OSError as error:
+            log.warning("could not touch the scan trigger at %s: %s", trigger_path, error)
+        else:
+            scan_requested = True
+            print(f"scan requested: {trigger_path}", file=out)
+            log.info("touched the scan trigger at %s", trigger_path)
+
+    run = OrganizerRun(
+        started_at=_iso_utc(started_at),
+        finished_at=_iso_utc(time.time()),
+        mode="apply" if apply else "dry-run",
+        inbox=str(inbox),
+        refused=report.refused,
+        moved=len(moves),
+        duplicate=sum(1 for outcome in report.outcomes if isinstance(outcome, Duplicate)),
+        unsorted=sum(1 for outcome in report.outcomes if isinstance(outcome, Parked)),
+        skipped=sum(1 for outcome in report.outcomes if isinstance(outcome, Skipped)),
+        failed=report.failed,
+        moves=moves,
+        parked=inventory(inbox),
+        scan_requested=scan_requested,
+    )
+    write_run(report_path, run)

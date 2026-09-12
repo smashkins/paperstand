@@ -38,6 +38,7 @@ from paperstand.organizer.naming import (
     iso_date,
     plan_issue,
 )
+from paperstand.organizer.report import inventory, read_run, write_run
 from paperstand.organizer.resolve import Resolved, Resolver
 
 __all__ = [
@@ -56,12 +57,15 @@ __all__ = [
     "Unsorted",
     "canonical_filename",
     "canonical_folder",
+    "inventory",
     "iso_date",
     "move_file",
     "organize_forever",
     "organize_once",
     "park",
     "plan_issue",
+    "read_run",
     "remove_sidecar",
     "sidecar_path",
+    "write_run",
 ]
