@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-12
+
+The library becomes a place Paperstand can tidy. An issue is now identified by its bytes
+rather than its path, so a file can be renamed or moved and keeps its id, its cover, its
+cached pages and where you had got to in it. On that footing a folder can declare itself a
+title with a `publication.yml`, the new organizer can import PDFs from a writable inbox into
+a canonical layout, and `paperstand migrate` can bring a collection that grew up in any of
+the tolerant layouts into that one shape, in place, without the server ever writing inside
+the library. A file that vanishes is marked missing and kept for a grace period instead of
+being forgotten on the spot, a root marker tells an unmounted share apart from an emptied
+library, and a new maintenance page shows what needs a hand: missing issues, files the
+renderer cannot open, whatever the organizer parked, and the holes in a title's numbering
+or its cadence.
+
+Upgrading rewrites every issue id once, so a bookmarked reader URL and an OPDS
+`urn:paperstand:issue:` change one time; covers are renamed, never re-rendered. Create
+`.paperstand-library` in the library root before the first scan if you want the root-marker
+protection, and run that first scan before asking `migrate` to move anything.
+
 ### Added
 
 - A dry-run `organize-plan` command that prints where each file would live
@@ -334,7 +353,8 @@ Italian, an in-browser reader, and an OPDS 1.2 feed for mobile reading apps.
 - Serving Paperstand under a sub-path is not supported.
 
 
-[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/smashkins/paperstand/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/smashkins/paperstand/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/smashkins/paperstand/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/smashkins/paperstand/releases/tag/v0.1.0
