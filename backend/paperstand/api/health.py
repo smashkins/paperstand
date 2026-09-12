@@ -32,6 +32,7 @@ SCAN_FIELDS = (
     "removed",
     "covers_done",
     "errors",
+    "missing",
     "message",
 )
 

@@ -69,6 +69,7 @@ ISSUE_COLUMNS = """
     i.label AS label,
     i.matched_rule AS matched_rule,
     i.duplicate_of AS duplicate_of,
+    i.missing_since AS missing_since,
     i.page_count AS page_count,
     i.page_w AS page_w,
     i.page_h AS page_h,
@@ -101,6 +102,13 @@ LATEST_FIRST = "i.issue_date DESC, i.variant IS NULL DESC, i.filename DESC"
 #: A title somebody would call a periodical, as opposed to the ``Unsorted``
 #: bucket the parser uses for the files it could not place.
 REAL_TITLE = "t.source <> 'unsorted'"
+
+#: Whether an issue belongs on a shelf a reader browses: not a duplicate, and
+#: not missing. Every list, count and calendar in this module applies it —
+#: `issue_row`/`get_issue` are the deliberate exception, since a bookmarked
+#: detail URL and the maintenance view (P1.6) both need to reach a row this
+#: hides. Assumes the issues table is aliased ``i``.
+VISIBLE = "i.duplicate_of IS NULL AND i.missing_since IS NULL"
 
 
 # --------------------------------------------------------------------- urls
@@ -176,6 +184,7 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         file_url=file_url(identifier),
         added_at=str(row["added_at"]),
         is_duplicate=row["duplicate_of"] is not None,
+        missing_since=row["missing_since"],
         progress=progress,
     )
 
@@ -186,14 +195,14 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
 def list_libraries(connection: sqlite3.Connection) -> list[Library]:
     """Every configured library, with what the catalogue holds for it."""
     rows = connection.execute(
-        """
+        f"""
         SELECT l.id, l.name, l.path, l.kind,
                (SELECT count(*) FROM titles t WHERE t.library_id = l.id) AS title_count,
                (SELECT count(*) FROM issues i
-                  WHERE i.library_id = l.id AND i.duplicate_of IS NULL) AS issue_count,
+                  WHERE i.library_id = l.id AND {VISIBLE}) AS issue_count,
                (SELECT count(*) FROM issues i
                   JOIN titles t ON t.id = i.title_id
-                  WHERE i.library_id = l.id AND i.duplicate_of IS NULL
+                  WHERE i.library_id = l.id AND {VISIBLE}
                     AND t.source = 'unsorted') AS unsorted_count
         FROM libraries l
         ORDER BY l.name COLLATE NOCASE
@@ -213,28 +222,34 @@ def list_libraries(connection: sqlite3.Connection) -> list[Library]:
     ]
 
 
-def catalogue_totals(connection: sqlite3.Connection) -> tuple[int, int, int]:
-    """Titles, non-duplicate issues and duplicates, across every library."""
+def catalogue_totals(connection: sqlite3.Connection) -> tuple[int, int, int, int]:
+    """Titles, visible issues, duplicates and missing issues, across every library."""
     row = connection.execute(
-        """
+        f"""
         SELECT (SELECT count(*) FROM titles) AS titles,
-               (SELECT count(*) FROM issues WHERE duplicate_of IS NULL) AS issues,
-               (SELECT count(*) FROM issues WHERE duplicate_of IS NOT NULL) AS duplicates
+               (SELECT count(*) FROM issues i WHERE {VISIBLE}) AS issues,
+               (SELECT count(*) FROM issues WHERE duplicate_of IS NOT NULL) AS duplicates,
+               (SELECT count(*) FROM issues WHERE missing_since IS NOT NULL) AS missing
         """
     ).fetchone()
-    return int(row["titles"]), int(row["issues"]), int(row["duplicates"])
+    return (
+        int(row["titles"]),
+        int(row["issues"]),
+        int(row["duplicates"]),
+        int(row["missing"]),
+    )
 
 
 # ------------------------------------------------------------------- titles
 
-TITLE_SELECT = """
+TITLE_SELECT = f"""
 SELECT t.id, t.library_id, t.name, t.sort_name, t.kind, t.source,
        t.slug, t.frequency, t.language, t.issue_key, t.parent_slug, t.supplements,
        count(i.id) AS issue_count,
        min(i.issue_date) AS first_date,
        max(i.issue_date) AS last_date
 FROM titles t
-LEFT JOIN issues i ON i.title_id = t.id AND i.duplicate_of IS NULL
+LEFT JOIN issues i ON i.title_id = t.id AND {VISIBLE}
 """
 
 
@@ -285,7 +300,13 @@ def list_titles(
         if sort == "latest"
         else "ORDER BY t.sort_name, t.id"
     )
-    rows = connection.execute(f"{TITLE_SELECT} {clause} GROUP BY t.id {order}", params).fetchall()
+    # A title whose issues are all hidden — every one a duplicate, or missing
+    # — has nothing to show on a shelf; `get_title` still answers for it by
+    # id, since a bookmarked title page must not 404 just because its one
+    # issue went missing.
+    rows = connection.execute(
+        f"{TITLE_SELECT} {clause} GROUP BY t.id HAVING count(i.id) > 0 {order}", params
+    ).fetchall()
     latest = latest_issue_per_title(connection, [str(row["id"]) for row in rows])
     return [_title_from_row(row, latest.get(str(row["id"]))) for row in rows]
 
@@ -305,10 +326,10 @@ def get_title(connection: sqlite3.Connection, title_id: str) -> TitleDetail | No
 def title_years(connection: sqlite3.Connection, title_id: str) -> list[YearCount]:
     """How many issues of a title fall in each year, newest year first."""
     rows = connection.execute(
-        """
-        SELECT CAST(substr(issue_date, 1, 4) AS INTEGER) AS year, count(*) AS count
-        FROM issues
-        WHERE title_id = :id AND duplicate_of IS NULL AND issue_date IS NOT NULL
+        f"""
+        SELECT CAST(substr(i.issue_date, 1, 4) AS INTEGER) AS year, count(*) AS count
+        FROM issues i
+        WHERE i.title_id = :id AND {VISIBLE} AND i.issue_date IS NOT NULL
         GROUP BY year
         ORDER BY year DESC
         """,
@@ -332,12 +353,12 @@ def title_calendar(
     years = title_years(connection, title_id)
     chosen = year if year is not None else (years[0].year if years else dt.date.today().year)
     rows = connection.execute(
-        """
-        SELECT id, issue_date
-        FROM issues
-        WHERE title_id = :id AND duplicate_of IS NULL AND issue_date IS NOT NULL
-          AND substr(issue_date, 1, 4) = :year
-        ORDER BY variant IS NULL ASC, added_at ASC, id ASC
+        f"""
+        SELECT i.id AS id, i.issue_date AS issue_date
+        FROM issues i
+        WHERE i.title_id = :id AND {VISIBLE} AND i.issue_date IS NOT NULL
+          AND substr(i.issue_date, 1, 4) = :year
+        ORDER BY i.variant IS NULL ASC, i.added_at ASC, i.id ASC
         """,
         {"id": title_id, "year": f"{chosen:04d}"},
     ).fetchall()
@@ -357,11 +378,19 @@ def _issue_where(
     date_to: str | None,
     year: int | None,
     include_duplicates: bool,
+    missing: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     where: list[str] = []
     params: dict[str, Any] = {}
-    if not include_duplicates:
-        where.append("i.duplicate_of IS NULL")
+    if missing:
+        # The maintenance filter: only what is hidden for having gone
+        # missing. The duplicate rule plays no part — a missing row's
+        # `duplicate_of` is already cleared the moment it goes missing.
+        where.append("i.missing_since IS NOT NULL")
+    elif include_duplicates:
+        where.append("i.missing_since IS NULL")
+    else:
+        where.append(VISIBLE)
     if title is not None:
         where.append("i.title_id = :title")
         params["title"] = title
@@ -397,8 +426,14 @@ def list_issues(
     limit: int = 50,
     offset: int = 0,
     include_duplicates: bool = False,
+    missing: bool = False,
 ) -> tuple[list[Issue], int]:
-    """A page of issues and the total the same filters match."""
+    """A page of issues and the total the same filters match.
+
+    ``missing`` is the maintenance filter (P1.6): with it, ``sort`` is
+    ignored and the page comes back most-recently-gone first, since "how
+    long has this been missing" is the only ordering that view needs.
+    """
     clause, params = _issue_where(
         title=title,
         kind=kind,
@@ -407,6 +442,7 @@ def list_issues(
         date_to=date_to,
         year=year,
         include_duplicates=include_duplicates,
+        missing=missing,
     )
     total = int(
         connection.execute(
@@ -414,8 +450,9 @@ def list_issues(
             params,
         ).fetchone()["total"]
     )
+    order = "i.missing_since DESC, i.id DESC" if missing else ISSUE_ORDER[sort]
     rows = connection.execute(
-        f"{ISSUE_SELECT} {clause} ORDER BY {ISSUE_ORDER[sort]} LIMIT :limit OFFSET :offset",
+        f"{ISSUE_SELECT} {clause} ORDER BY {order} LIMIT :limit OFFSET :offset",
         {**params, "limit": limit, "offset": offset},
     ).fetchall()
     return [issue_from_row(row) for row in rows], total
@@ -451,14 +488,14 @@ def neighbours(connection: sqlite3.Connection, row: sqlite3.Row) -> tuple[str | 
     }
     order = "ifnull(issue_date, '') {0}, filename {0}"
     previous = connection.execute(
-        "SELECT id FROM issues WHERE title_id = :title AND duplicate_of IS NULL AND "
+        f"SELECT id FROM issues i WHERE i.title_id = :title AND {VISIBLE} AND "
         "(ifnull(issue_date, '') < :date OR "
         " (ifnull(issue_date, '') = :date AND filename < :filename)) "
         f"ORDER BY {order.format('DESC')} LIMIT 1",
         params,
     ).fetchone()
     following = connection.execute(
-        "SELECT id FROM issues WHERE title_id = :title AND duplicate_of IS NULL AND "
+        f"SELECT id FROM issues i WHERE i.title_id = :title AND {VISIBLE} AND "
         "(ifnull(issue_date, '') > :date OR "
         " (ifnull(issue_date, '') = :date AND filename > :filename)) "
         f"ORDER BY {order.format('ASC')} LIMIT 1",
@@ -492,7 +529,7 @@ def latest_issue_per_title(
         return {}
     placeholders = ", ".join("?" * len(title_ids))
     sql = _windowed(
-        f"WHERE i.duplicate_of IS NULL AND i.title_id IN ({placeholders})",
+        f"WHERE {VISIBLE} AND i.title_id IN ({placeholders})",
         LATEST_FIRST,
         "",
     )
@@ -510,7 +547,7 @@ def latest_per_kind(connection: sqlite3.Connection, kind: str) -> list[Issue]:
     last.
     """
     sql = _windowed(
-        f"WHERE i.duplicate_of IS NULL AND t.kind = :kind AND {REAL_TITLE}",
+        f"WHERE {VISIBLE} AND t.kind = :kind AND {REAL_TITLE}",
         LATEST_FIRST,
         "ORDER BY issue_date DESC, sort_name ASC",
     )
@@ -526,8 +563,7 @@ def issues_on_date(connection: sqlite3.Connection, kind: str, date: str) -> list
     never hides the daily on its own day.
     """
     sql = _windowed(
-        f"WHERE i.duplicate_of IS NULL AND t.kind = :kind AND i.issue_date = :date "
-        f"AND {REAL_TITLE}",
+        f"WHERE {VISIBLE} AND t.kind = :kind AND i.issue_date = :date AND {REAL_TITLE}",
         "i.variant IS NULL DESC, i.added_at DESC, i.filename ASC",
         "ORDER BY sort_name ASC",
     )
@@ -538,10 +574,10 @@ def issues_on_date(connection: sqlite3.Connection, kind: str, date: str) -> list
 def latest_date_on_or_before(connection: sqlite3.Connection, kind: str, date: str) -> str | None:
     """The most recent day at or before ``date`` that has an issue of ``kind``."""
     row = connection.execute(
-        """
+        f"""
         SELECT max(i.issue_date) AS latest
         FROM issues i JOIN titles t ON t.id = i.title_id
-        WHERE i.duplicate_of IS NULL AND t.kind = :kind
+        WHERE {VISIBLE} AND t.kind = :kind
           AND i.issue_date IS NOT NULL AND i.issue_date <= :date
           AND t.source <> 'unsorted'
         """,
@@ -553,8 +589,7 @@ def latest_date_on_or_before(connection: sqlite3.Connection, kind: str, date: st
 def recently_added(connection: sqlite3.Connection, limit: int) -> list[Issue]:
     """The issues that joined the catalogue last."""
     rows = connection.execute(
-        f"{ISSUE_SELECT} WHERE i.duplicate_of IS NULL "
-        "ORDER BY i.added_at DESC, i.id DESC LIMIT :limit",
+        f"{ISSUE_SELECT} WHERE {VISIBLE} ORDER BY i.added_at DESC, i.id DESC LIMIT :limit",
         {"limit": limit},
     ).fetchall()
     return [issue_from_row(row) for row in rows]
@@ -563,7 +598,7 @@ def recently_added(connection: sqlite3.Connection, limit: int) -> list[Issue]:
 # --------------------------------------------------------- unsorted, search
 
 #: The bucket the parser drops a file into when it cannot tell what it is.
-UNSORTED_WHERE = f"WHERE i.duplicate_of IS NULL AND NOT ({REAL_TITLE})"
+UNSORTED_WHERE = f"WHERE {VISIBLE} AND NOT ({REAL_TITLE})"
 
 #: Where a search looks. A file whose name says what it is but whose title was
 #: never configured is found by its file name, which is the point.
@@ -614,7 +649,7 @@ def search_issues(
     name.
     """
     condition = " OR ".join(f"{field} LIKE :q ESCAPE '\\'" for field in SEARCH_FIELDS)
-    clause = f"WHERE i.duplicate_of IS NULL AND ({condition})"
+    clause = f"WHERE {VISIBLE} AND ({condition})"
     params = {"q": like_pattern(text)}
     total = int(
         connection.execute(
@@ -705,7 +740,7 @@ def continue_reading(connection: sqlite3.Connection, limit: int) -> list[Issue]:
     won, in the scan that noticed.
     """
     rows = connection.execute(
-        f"{ISSUE_SELECT} WHERE i.duplicate_of IS NULL AND p.page > 1 "
+        f"{ISSUE_SELECT} WHERE {VISIBLE} AND p.page > 1 "
         "AND coalesce(i.page_count, p.page_count) IS NOT NULL "
         "AND p.page < coalesce(i.page_count, p.page_count) "
         "ORDER BY p.updated_at DESC, i.id DESC LIMIT :limit",
@@ -717,11 +752,12 @@ def continue_reading(connection: sqlite3.Connection, limit: int) -> list[Issue]:
 def issues_with_progress(connection: sqlite3.Connection, limit: int) -> list[Issue]:
     """Every issue the reader has a position in, most recent first.
 
-    Duplicates are excluded rather than made optional: this list is "where you
-    were reading", and two rows for the same issue is never the answer to that.
+    Duplicates and missing issues are excluded rather than made optional:
+    this list is "where you were reading", and two rows for the same issue —
+    or a row nobody can open right now — is never the answer to that.
     """
     rows = connection.execute(
-        f"{ISSUE_SELECT} WHERE p.issue_id IS NOT NULL AND i.duplicate_of IS NULL "
+        f"{ISSUE_SELECT} WHERE p.issue_id IS NOT NULL AND {VISIBLE} "
         "ORDER BY p.updated_at DESC, i.id DESC LIMIT :limit",
         {"limit": limit},
     ).fetchall()

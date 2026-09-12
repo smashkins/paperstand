@@ -225,6 +225,17 @@
 						"title": "Library Id",
 						"type": "string"
 					},
+					"missing_since": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Missing Since"
+					},
 					"page_count": {
 						"anyOf": [
 							{
@@ -424,6 +435,17 @@
 					"matched_rule": {
 						"title": "Matched Rule",
 						"type": "string"
+					},
+					"missing_since": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Missing Since"
 					},
 					"next_issue_id": {
 						"anyOf": [
@@ -705,7 +727,7 @@
 				"type": "object"
 			},
 			"ScanProgress": {
-				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward. It has no default:\nevery snapshot carries it explicitly, ``null`` or not, so the generated\nclient sees a field that is always there rather than one that might be\nmissing.\n\n``covers_done`` counts successes only; a cover the pool could not render\nis ``covers_failed`` instead, so a bar or an \"N of M\" line wants\n``covers_done + covers_failed`` to reach ``covers_total`` even when some\nof that N were failures.\n\n``hashed`` counts every file this scan has read in full to compute a\ncontent hash — a brand new file, a legacy row backfilled once, a touch\nand a replacement alike. Right after an upgrade this is nearly every\nfile in the library, which is the only feedback while that one-time\nbackfill works through it; a later scan hashes only what actually\nchanged.",
+				"description": "A scan already in progress, as ``GET /api/scan/status`` reports it.\n\n``covers_total`` is ``null`` during the ``catalogue`` phase — the fast\nphase never counts the files it will find before it has walked them —\nand known from the first ``covers`` snapshot onward. It has no default:\nevery snapshot carries it explicitly, ``null`` or not, so the generated\nclient sees a field that is always there rather than one that might be\nmissing.\n\n``covers_done`` counts successes only; a cover the pool could not render\nis ``covers_failed`` instead, so a bar or an \"N of M\" line wants\n``covers_done + covers_failed`` to reach ``covers_total`` even when some\nof that N were failures.\n\n``hashed`` counts every file this scan has read in full to compute a\ncontent hash — a brand new file, a legacy row backfilled once, a touch\nand a replacement alike. Right after an upgrade this is nearly every\nfile in the library, which is the only feedback while that one-time\nbackfill works through it; a later scan hashes only what actually\nchanged.\n\n``missing`` counts rows whose file this scan did not find but did not\nremove either, because they are within\n``PAPERSTAND_MISSING_GRACE_DAYS`` of the scan that first noticed —\nknown only once the fast phase is nearly done, so it reads ``0`` on\nevery snapshot before that.",
 				"properties": {
 					"added": {
 						"title": "Added",
@@ -746,6 +768,10 @@
 						"title": "Hashed",
 						"type": "integer"
 					},
+					"missing": {
+						"title": "Missing",
+						"type": "integer"
+					},
 					"phase": {
 						"enum": [
 							"catalogue",
@@ -782,6 +808,7 @@
 					"removed",
 					"errors",
 					"hashed",
+					"missing",
 					"covers_done",
 					"covers_failed",
 					"covers_total"
@@ -861,6 +888,17 @@
 							}
 						],
 						"title": "Message"
+					},
+					"missing": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Missing"
 					},
 					"removed": {
 						"anyOf": [
@@ -983,6 +1021,10 @@
 						],
 						"title": "Message"
 					},
+					"missing": {
+						"title": "Missing",
+						"type": "integer"
+					},
 					"removed": {
 						"title": "Removed",
 						"type": "integer"
@@ -1009,6 +1051,7 @@
 					"removed",
 					"covers_done",
 					"errors",
+					"missing",
 					"message",
 					"duration"
 				],
@@ -1041,6 +1084,10 @@
 						"title": "Libraries",
 						"type": "array"
 					},
+					"missing_count": {
+						"title": "Missing Count",
+						"type": "integer"
+					},
 					"pages_bytes": {
 						"title": "Pages Bytes",
 						"type": "integer"
@@ -1055,6 +1102,7 @@
 					"title_count",
 					"issue_count",
 					"duplicate_count",
+					"missing_count",
 					"covers_bytes",
 					"pages_bytes",
 					"db_bytes"
@@ -1594,7 +1642,7 @@
 		},
 		"/api/issues": {
 			"get": {
-				"description": "A filtered, sorted page of issues, with the total behind it.",
+				"description": "A filtered, sorted page of issues, with the total behind it.\n\n``missing`` shows only what every other filter hides for having gone\nmissing — the maintenance view (P1.6) will use it; it is ``false``\neverywhere else, including the default list.",
 				"operationId": "list_issues_api_issues_get",
 				"parameters": [
 					{
@@ -1746,6 +1794,16 @@
 						"schema": {
 							"default": false,
 							"title": "Include Duplicates",
+							"type": "boolean"
+						}
+					},
+					{
+						"in": "query",
+						"name": "missing",
+						"required": false,
+						"schema": {
+							"default": false,
+							"title": "Missing",
 							"type": "boolean"
 						}
 					}

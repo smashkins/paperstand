@@ -32,7 +32,7 @@ from paperstand.main import create_app
 from paperstand.opds import atom
 from paperstand.opds import router as opds_router
 from paperstand.proxy import TrustedProxies
-from tests.conftest import quiet_settings
+from tests.conftest import quiet_settings, sample_issue_id
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 DC = "{http://purl.org/dc/terms/}"
@@ -310,6 +310,33 @@ def test_recently_added_is_what_the_last_scans_brought_in(
     assert [text(entry, f"{DC}identifier") for entry in entries(root)] == [
         f"urn:paperstand:issue:{issue['id']}" for issue in expected["items"]
     ]
+
+
+def test_a_missing_issue_leaves_every_feed_it_used_to_be_in(
+    catalogue_settings: Settings,
+) -> None:
+    """Hidden the way a duplicate is: the queries the feeds are built from
+    already exclude it, so no OPDS-specific change is needed."""
+    a_newspaper = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
+    identifier = sample_issue_id(catalogue_settings.library, a_newspaper)
+    with serving(catalogue_settings) as client:
+        title = client.get(f"/api/issues/{identifier}").json()["title_id"]
+        rows(
+            catalogue_settings.db_path,
+            "UPDATE issues SET missing_since = ?, duplicate_of = NULL WHERE id = ?",
+            utc_now(),
+            identifier,
+        )
+
+        _, recent = fetch(client, "/opds/recent")
+        _, today_feed = fetch(client, "/opds/today")
+        _, title_feed = fetch(client, f"/opds/titles/{title}")
+        _, search_feed = fetch(client, "/opds/search", q="Corriere")
+
+        for feed in (recent, today_feed, title_feed, search_feed):
+            assert f"urn:paperstand:issue:{identifier}" not in [
+                text(entry, f"{DC}identifier") for entry in entries(feed)
+            ]
 
 
 # ------------------------------------------------------------------ entries

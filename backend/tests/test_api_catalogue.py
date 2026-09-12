@@ -9,6 +9,8 @@ falsify.
 from __future__ import annotations
 
 import datetime as dt
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -20,9 +22,23 @@ from paperstand.api import progress as progress_api
 from paperstand.api import titles as titles_api
 from paperstand.api import today as today_api
 from paperstand.config import Settings
+from paperstand.db import utc_now
 from tests.conftest import SAMPLE_TODAY, sample_issue_id
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
+
+
+def mark_missing(db_path: Path, issue_id: str) -> None:
+    """Mark an issue missing, the way a scan would once its file vanished."""
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "UPDATE issues SET missing_since = ?, duplicate_of = NULL WHERE id = ?",
+            (utc_now(), issue_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
 
 
 def titles(client: TestClient, **params: Any) -> list[dict[str, Any]]:
@@ -381,3 +397,82 @@ def test_an_issue_carries_its_urls_its_rule_and_its_neighbours(
 
 def test_an_unknown_issue_is_a_404(catalogue_client: TestClient) -> None:
     assert catalogue_client.get("/api/issues/nope").status_code == 404
+
+
+# ------------------------------------------------------------------- missing
+
+
+def test_a_missing_issue_is_hidden_from_lists_the_calendar_and_the_counts(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
+    detail = catalogue_client.get(f"/api/issues/{identifier}").json()
+    title_id = detail["title_id"]
+    before_stats = catalogue_client.get("/api/stats").json()
+    before_title = catalogue_client.get(f"/api/titles/{title_id}").json()
+
+    mark_missing(catalogue_settings.db_path, identifier)
+
+    listed = catalogue_client.get("/api/issues", params={"limit": 200}).json()["items"]
+    assert identifier not in {item["id"] for item in listed}
+
+    by_title = catalogue_client.get("/api/issues", params={"title": title_id, "limit": 200}).json()[
+        "items"
+    ]
+    assert identifier not in {item["id"] for item in by_title}
+
+    calendar = catalogue_client.get(f"/api/titles/{title_id}/calendar").json()
+    assert identifier not in calendar["days"].values()
+
+    stats = catalogue_client.get("/api/stats").json()
+    assert stats["issue_count"] == before_stats["issue_count"] - 1
+    assert stats["missing_count"] == before_stats["missing_count"] + 1
+
+    after_title = catalogue_client.get(f"/api/titles/{title_id}").json()
+    assert after_title["issue_count"] == before_title["issue_count"] - 1
+
+
+def test_a_missing_issue_shows_with_the_filter_and_at_its_own_url(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
+    mark_missing(catalogue_settings.db_path, identifier)
+
+    only_missing = catalogue_client.get("/api/issues", params={"missing": True}).json()
+    assert identifier in {item["id"] for item in only_missing["items"]}
+    assert all(item["missing_since"] is not None for item in only_missing["items"])
+
+    detail = catalogue_client.get(f"/api/issues/{identifier}").json()
+    assert detail["missing_since"] is not None
+
+
+def test_a_missing_issues_cover_is_cached_but_its_file_is_gone(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
+    mark_missing(catalogue_settings.db_path, identifier)
+    (catalogue_settings.library / A_NEWSPAPER).unlink()
+
+    cover = catalogue_client.get(f"/api/issues/{identifier}/cover.jpg")
+    assert cover.status_code == 200
+
+    pdf = catalogue_client.get(f"/api/issues/{identifier}/file")
+    assert pdf.status_code == 404
+
+
+def test_a_title_whose_only_issue_is_missing_disappears_but_answers_by_id(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    title = title_named(catalogue_client, "Bright Meadows")
+    issues = catalogue_client.get(
+        "/api/issues", params={"title": title["id"], "limit": 200}
+    ).json()["items"]
+    assert len(issues) == 1  # the sample library declares exactly one
+
+    mark_missing(catalogue_settings.db_path, issues[0]["id"])
+
+    remaining = {item["name"] for item in titles(catalogue_client, library="magazines")}
+    assert "Bright Meadows" not in remaining
+    detail = catalogue_client.get(f"/api/titles/{title['id']}")
+    assert detail.status_code == 200
+    assert detail.json()["issue_count"] == 0

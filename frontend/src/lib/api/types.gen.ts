@@ -34,6 +34,10 @@ export interface paths {
 		/**
 		 * List Issues
 		 * @description A filtered, sorted page of issues, with the total behind it.
+		 *
+		 *     ``missing`` shows only what every other filter hides for having gone
+		 *     missing — the maintenance view (P1.6) will use it; it is ``false``
+		 *     everywhere else, including the default list.
 		 */
 		get: operations['list_issues_api_issues_get'];
 		put?: never;
@@ -477,6 +481,8 @@ export interface components {
 			label: string;
 			/** Library Id */
 			library_id: string;
+			/** Missing Since */
+			missing_since?: string | null;
 			/** Page Count */
 			page_count?: number | null;
 			progress?: components['schemas']['Progress'] | null;
@@ -542,6 +548,8 @@ export interface components {
 			library_id: string;
 			/** Matched Rule */
 			matched_rule: string;
+			/** Missing Since */
+			missing_since?: string | null;
 			/** Next Issue Id */
 			next_issue_id?: string | null;
 			/** Page Count */
@@ -666,6 +674,12 @@ export interface components {
 		 *     file in the library, which is the only feedback while that one-time
 		 *     backfill works through it; a later scan hashes only what actually
 		 *     changed.
+		 *
+		 *     ``missing`` counts rows whose file this scan did not find but did not
+		 *     remove either, because they are within
+		 *     ``PAPERSTAND_MISSING_GRACE_DAYS`` of the scan that first noticed —
+		 *     known only once the fast phase is nearly done, so it reads ``0`` on
+		 *     every snapshot before that.
 		 */
 		ScanProgress: {
 			/** Added */
@@ -684,6 +698,8 @@ export interface components {
 			files_seen: number;
 			/** Hashed */
 			hashed: number;
+			/** Missing */
+			missing: number;
 			/**
 			 * Phase
 			 * @enum {string}
@@ -717,6 +733,8 @@ export interface components {
 			id: number;
 			/** Message */
 			message?: string | null;
+			/** Missing */
+			missing?: number | null;
 			/** Removed */
 			removed?: number | null;
 			/** Started At */
@@ -759,6 +777,8 @@ export interface components {
 			files_seen: number;
 			/** Message */
 			message: string | null;
+			/** Missing */
+			missing: number;
 			/** Removed */
 			removed: number;
 			/** Scan Id */
@@ -783,6 +803,8 @@ export interface components {
 			issue_count: number;
 			/** Libraries */
 			libraries: components['schemas']['Library'][];
+			/** Missing Count */
+			missing_count: number;
 			/** Pages Bytes */
 			pages_bytes: number;
 			/** Title Count */
@@ -965,6 +987,7 @@ export interface operations {
 				limit?: number;
 				offset?: number;
 				include_duplicates?: boolean;
+				missing?: boolean;
 			};
 			header?: never;
 			path?: never;
