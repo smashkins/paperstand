@@ -213,6 +213,29 @@ def test_the_scheduler_stays_quiet_when_it_is_told_to(settings: Settings) -> Non
         database.close()
 
 
+def test_the_scheduler_ensures_the_cache_layout_even_with_scanning_off(
+    settings: Settings,
+) -> None:
+    """A deployment with automatic scanning entirely off must still get a
+    legacy cache migrated, or a stale version pruned, at start-up — no scan
+    ever runs to do it through ``Scanner.begin`` otherwise."""
+    legacy = settings.cache_path / "covers" / "ab"
+    legacy.mkdir(parents=True)
+    (legacy / "abcdef0123456789.cover.jpg").write_bytes(b"cover bytes")
+    (legacy / "abcdef0123456789.thumb.jpg").write_bytes(b"thumb bytes")
+    database = open_database(settings.db_path)
+    scheduler = ScanScheduler(settings, database)
+    try:
+        scheduler.start()
+        assert scheduler.last is None  # scanning really is off
+        assert not legacy.exists()
+        migrated = settings.cache_path / "covers" / "v1" / "ab" / "abcdef0123456789.cover.jpg"
+        assert migrated.is_file()
+        scheduler.stop()
+    finally:
+        database.close()
+
+
 def test_repeated_scans_do_not_leak_connections(sample_settings: Settings) -> None:
     """A scan thread opens a connection of its own; it must hand it back."""
     database = open_database(sample_settings.db_path)

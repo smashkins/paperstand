@@ -82,7 +82,7 @@ def create_router(database: Database | None) -> APIRouter:
             matched_rule=str(row["matched_rule"]),
             prev_issue_id=previous,
             next_issue_id=following,
-            pages_url_template=pages_url_template(issue_id, int(row["mtime_ns"])),
+            pages_url_template=pages_url_template(issue_id),
         )
 
     return router

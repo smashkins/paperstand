@@ -4,24 +4,23 @@
 ``.../pages/{n}.webp`` all answer the same way: look in the cache, and render
 into it when the answer is not there.
 
-The two kinds of image are cached differently on purpose.
+Every URL carries ``?v=<COVER_VERSION>`` or ``?v=<PAGE_VERSION>``
+(:mod:`paperstand.cache`): the id names the bytes an image was rendered
+from — an issue replaced with different content is a new issue, with a new
+id, never this one — and ``v`` names the rendering parameters that produced
+the image at that address. A touch of the underlying PDF changes neither, so
+the same URL keeps serving the same file for ever, which is what lets it
+answer ``immutable``; a version bump changes ``v`` for every issue at once,
+and the *old* address — still held by a browser that cached it for a
+year — answers ``no-cache`` instead, so the client comes back and is handed
+the new one.
 
 **Covers** are produced by the scanner for every issue it catalogues, so this
-endpoint is a safety net: a cache wiped by hand, a ``/data`` restored without
-it, an issue whose slow phase has not run yet. Their URLs carry ``?v=`` — the
-modification time of the PDF the image came from — which makes them immutable
-for as long as the file does not change, and revalidated when a caller drops the
-parameter.
+endpoint is mostly a safety net: a cache wiped by hand, a ``/data`` restored
+without it, an issue whose slow phase has not run yet.
 
-**Pages** are never produced ahead of time; there are too many. They are
-rendered on demand, at one of a handful of widths, and carry the same ``?v=``.
-Deleting the server's copies — which the scanner does whenever a file changes —
-says nothing to a browser or a proxy that cached the image for a year, so the
-version has to be in the URL for ``immutable`` to be honest.
-
-Which is why ``immutable`` is only ever answered to a ``v`` that *matches* the
-issue's current modification time. A stale ``v`` still gets its image, but with
-``no-cache``, so the client comes back and finds out the URL has moved on.
+**Pages** are never produced ahead of time; there are too many, so they are
+always rendered on demand, at one of a handful of widths.
 """
 
 from __future__ import annotations
@@ -41,6 +40,7 @@ from paperstand.api.common import (
     etag_matches,
     library_file,
 )
+from paperstand.cache import COVER_VERSION, PAGE_VERSION, cover_paths
 from paperstand.config import Settings
 from paperstand.db import Database
 from paperstand.logging import get_logger
@@ -51,7 +51,7 @@ from paperstand.render.pages import (
     RenderError,
     snap_width,
 )
-from paperstand.scanner.covers import CoverError, cover_paths, render_cover
+from paperstand.scanner.covers import CoverError, render_cover
 
 log = get_logger(__name__)
 
@@ -63,18 +63,16 @@ PAGE_FAILED = "this page could not be rendered"
 NO_SUCH_PAGE = "the document has no such page"
 
 
-def caching(version: str | None, mtime_ns: int) -> str:
-    """``immutable`` for the URL that names this version of the file, else not.
+def caching(version: str | None, current: int) -> str:
+    """``immutable`` for the URL that names the current rendering version, else not.
 
-    An id names one set of bytes for good — a PDF replaced with different
-    content is a new issue with a new id, never this one — but the URL is
-    still versioned by the file's modification time, which moves on a touch
-    even when the bytes, and so the id, do not. A ``v`` that is no longer the
-    file's current modification time is a client holding an address that may
-    have moved on, and it is told to check back rather than trust a stale
-    cache blindly.
+    An id names one set of bytes for good; ``v`` names the parameters an
+    image at that address was rendered with. A ``v`` that is not the
+    version this build renders at — an old cached URL, from before a bump —
+    is a client holding an address that may have moved on, and it is told
+    to check back rather than trust a stale cache blindly.
     """
-    return IMMUTABLE if version == str(mtime_ns) else REVALIDATE
+    return IMMUTABLE if version == str(current) else REVALIDATE
 
 
 def image_response(
@@ -123,9 +121,8 @@ def create_router(
                         raise HTTPException(status_code=503, detail=COVER_FAILED)
         stat = wanted.stat()
         kind = "thumb" if thumbnail else "cover"
-        mtime_ns = int(row["mtime_ns"])
-        etag = f'"{issue_id}-{kind}-{mtime_ns}-{stat.st_mtime_ns}"'
-        return image_response(request, wanted, JPEG, etag, caching(version, mtime_ns))
+        etag = f'"{issue_id}-{kind}-v{COVER_VERSION}-{stat.st_mtime_ns}"'
+        return image_response(request, wanted, JPEG, etag, caching(version, COVER_VERSION))
 
     cover_outcomes: dict[int | str, dict[str, Any]] = {
         200: {"content": {JPEG: {}}, "description": "The image"},
@@ -156,7 +153,9 @@ def create_router(
     def cover(
         request: Request,
         issue_id: str,
-        v: Annotated[str | None, Query(description="Cache buster: the PDF's mtime")] = None,
+        v: Annotated[
+            str | None, Query(description="The rendering version this address names")
+        ] = None,
     ) -> Response:
         """The issue's cover, rendered on demand when the cache has lost it."""
         return cover_image(request, issue_id, v, thumbnail=False)
@@ -178,7 +177,9 @@ def create_router(
     def thumbnail(
         request: Request,
         issue_id: str,
-        v: Annotated[str | None, Query(description="Cache buster: the PDF's mtime")] = None,
+        v: Annotated[
+            str | None, Query(description="The rendering version this address names")
+        ] = None,
     ) -> Response:
         """The issue's thumbnail, rendered on demand when the cache has lost it."""
         return cover_image(request, issue_id, v, thumbnail=True)
@@ -211,7 +212,9 @@ def create_router(
             int | None,
             Query(ge=1, le=MAX_WIDTH_QUERY, description="Snapped to the next width up"),
         ] = None,
-        v: Annotated[str | None, Query(description="Cache buster: the PDF's mtime")] = None,
+        v: Annotated[
+            str | None, Query(description="The rendering version this address names")
+        ] = None,
     ) -> Response:
         """One page of an issue as a WebP image, rendered on demand."""
         connection = catalogue(database)
@@ -231,8 +234,7 @@ def create_router(
         except RenderError as error:
             log.warning("cannot render page %d of %s: %s", page, issue_id, error)
             raise HTTPException(status_code=503, detail=PAGE_FAILED) from error
-        mtime_ns = int(row["mtime_ns"])
-        etag = f'"{issue_id}-{mtime_ns}-{page}-{width}"'
-        return image_response(request, image, WEBP, etag, caching(v, mtime_ns))
+        etag = f'"{issue_id}-v{PAGE_VERSION}-{page}-{width}"'
+        return image_response(request, image, WEBP, etag, caching(v, PAGE_VERSION))
 
     return router

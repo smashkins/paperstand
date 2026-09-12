@@ -16,6 +16,7 @@ import datetime as dt
 import threading
 from typing import Any
 
+from paperstand.cache import ensure_layout
 from paperstand.config import Settings
 from paperstand.db import Database
 from paperstand.logging import get_logger
@@ -65,9 +66,18 @@ class ScanScheduler:
         return self._last
 
     def start(self) -> None:
-        """Start the background loop, and the start-up scan if it is enabled."""
+        """Start the background loop, and the start-up scan if it is enabled.
+
+        ``ensure_layout`` runs here unconditionally, before the check below:
+        ``Scanner.begin`` runs it too, at the top of every scan, but a
+        deployment with automatic scanning turned off entirely
+        (``scan_on_start=false``, ``scan_interval=0``) would otherwise never
+        call it at all, and a version bump or an upgrade from the
+        unversioned layout has to be caught at start-up regardless.
+        """
         if self._loop is not None:  # pragma: no cover - start is called once
             return
+        ensure_layout(self.settings.cache_path)
         if not self.settings.scan_on_start and self.settings.scan_interval <= 0:
             log.info("automatic scanning is off: scan_on_start=false, scan_interval=0")
             return

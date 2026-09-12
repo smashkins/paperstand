@@ -1906,7 +1906,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -1919,7 +1919,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}
@@ -1964,7 +1964,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -1977,7 +1977,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}
@@ -2153,7 +2153,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -2166,7 +2166,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}
@@ -2243,7 +2243,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -2256,7 +2256,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}
@@ -2434,7 +2434,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -2447,7 +2447,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}
@@ -2492,7 +2492,7 @@
 						}
 					},
 					{
-						"description": "Cache buster: the PDF's mtime",
+						"description": "The rendering version this address names",
 						"in": "query",
 						"name": "v",
 						"required": false,
@@ -2505,7 +2505,7 @@
 									"type": "null"
 								}
 							],
-							"description": "Cache buster: the PDF's mtime",
+							"description": "The rendering version this address names",
 							"title": "V"
 						}
 					}

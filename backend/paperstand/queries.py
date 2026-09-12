@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from typing import Any, NamedTuple
 from urllib.parse import quote
 
+from paperstand.cache import COVER_VERSION, PAGE_VERSION
 from paperstand.db import utc_now
 from paperstand.schemas import (
     Aspect,
@@ -114,14 +115,14 @@ VISIBLE = "i.duplicate_of IS NULL AND i.missing_since IS NULL"
 # --------------------------------------------------------------------- urls
 
 
-def cover_url(identifier: str, mtime_ns: int) -> str:
-    """Where an issue's 900 px cover lives, versioned by the file it came from."""
-    return f"/api/issues/{quote(identifier)}/cover.jpg?v={mtime_ns}"
+def cover_url(identifier: str) -> str:
+    """Where an issue's 900 px cover lives, versioned by the rendering parameters."""
+    return f"/api/issues/{quote(identifier)}/cover.jpg?v={COVER_VERSION}"
 
 
-def thumb_url(identifier: str, mtime_ns: int) -> str:
+def thumb_url(identifier: str) -> str:
     """Where an issue's 300 px thumbnail lives."""
-    return f"/api/issues/{quote(identifier)}/thumb.jpg?v={mtime_ns}"
+    return f"/api/issues/{quote(identifier)}/thumb.jpg?v={COVER_VERSION}"
 
 
 def file_url(identifier: str) -> str:
@@ -129,16 +130,17 @@ def file_url(identifier: str) -> str:
     return f"/api/issues/{quote(identifier)}/file"
 
 
-def pages_url_template(identifier: str, mtime_ns: int) -> str:
+def pages_url_template(identifier: str) -> str:
     """The template a reader fills in with a page number and a width.
 
-    Versioned like the covers are. An id names one set of bytes for good — a
-    PDF replaced with different content is a new issue with a new id, never
-    this one — but the modification time still moves on a touch, so without
-    ``v`` a browser that cached a page for a year would go on trusting an
-    address the scan may since have thrown its server-side copy away from.
+    Versioned like the covers are, but by :data:`~paperstand.cache.PAGE_VERSION`
+    rather than the file's modification time: an id names one set of bytes for
+    good — a PDF replaced with different content is a new issue with a new id,
+    never this one — and a touch that only moves the mtime must not change an
+    address a browser has cached for a year. Bumping the version is what
+    changes it, on purpose, for every issue at once.
     """
-    return f"/api/issues/{quote(identifier)}/pages/{{n}}.webp?w={{w}}&v={mtime_ns}"
+    return f"/api/issues/{quote(identifier)}/pages/{{n}}.webp?w={{w}}&v={PAGE_VERSION}"
 
 
 # ------------------------------------------------------------------ mapping
@@ -147,7 +149,6 @@ def pages_url_template(identifier: str, mtime_ns: int) -> str:
 def issue_from_row(row: sqlite3.Row) -> Issue:
     """Turn one joined row into the response model."""
     identifier = str(row["id"])
-    mtime_ns = int(row["mtime_ns"])
     aspect = None
     if row["page_w"] is not None and row["page_h"] is not None:
         aspect = Aspect(page_w=float(row["page_w"]), page_h=float(row["page_h"]))
@@ -179,8 +180,8 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         content_hash=row["content_hash"],
         page_count=int(row["page_count"]) if row["page_count"] is not None else None,
         aspect=aspect,
-        cover_url=cover_url(identifier, mtime_ns),
-        thumb_url=thumb_url(identifier, mtime_ns),
+        cover_url=cover_url(identifier),
+        thumb_url=thumb_url(identifier),
         file_url=file_url(identifier),
         added_at=str(row["added_at"]),
         is_duplicate=row["duplicate_of"] is not None,

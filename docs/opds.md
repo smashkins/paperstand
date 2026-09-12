@@ -64,8 +64,8 @@ Each issue entry carries its cover, its thumbnail and one acquisition link to th
   <dc:language>it</dc:language>
   <category term="newspaper" label="Newspaper"/>
   <summary type="text">Corriere del Ponte · 17 March 2026 · 48 pages · 41.8 MB</summary>
-  <link rel="http://opds-spec.org/image" href="…/cover.jpg?v=…" type="image/jpeg"/>
-  <link rel="http://opds-spec.org/image/thumbnail" href="…/thumb.jpg?v=…" type="image/jpeg"/>
+  <link rel="http://opds-spec.org/image" href="…/cover.jpg?v=1" type="image/jpeg"/>
+  <link rel="http://opds-spec.org/image/thumbnail" href="…/thumb.jpg?v=1" type="image/jpeg"/>
   <link rel="http://opds-spec.org/acquisition" href="…/file" type="application/pdf"
         title="Download PDF"/>
 </entry>

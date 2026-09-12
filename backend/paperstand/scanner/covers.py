@@ -5,11 +5,13 @@ apart from the scanner so that the expensive work can run on a worker pool, and
 so that a PDF nobody can read produces a value — a :class:`CoverError` — instead
 of an exception that would take the whole scan down with it.
 
-The cache layout, under ``<data>/cache``::
+The cache layout itself — versioned directories under ``<data>/cache/covers``,
+what a version bump does — lives in :mod:`paperstand.cache`; the names below
+are imported from there and re-exported so that every existing import of this
+module keeps working. What follows is what version 1 renders::
 
-    covers/<id[:2]>/<id>.cover.jpg    900 px wide, JPEG quality 85
-    covers/<id[:2]>/<id>.thumb.jpg    300 px wide, JPEG quality 85
-    pages/<id>/<n>-<w>.webp           rendered pages
+    covers/v1/<id[:2]>/<id>.cover.jpg    900 px wide, JPEG quality 85
+    covers/v1/<id[:2]>/<id>.thumb.jpg    300 px wide, JPEG quality 85
 
 Both images are produced from a single render, then resized to an exact width,
 so that a caller can rely on the widths without knowing the page's aspect ratio.
@@ -18,7 +20,6 @@ so that a caller can rely on the widths without knowing the page's aspect ratio.
 from __future__ import annotations
 
 import os
-import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,21 +27,45 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
+from paperstand.cache import (
+    clear_cache as clear_cache,
+)
+from paperstand.cache import (
+    cover_paths as cover_paths,
+)
+from paperstand.cache import (
+    covers_root as covers_root,
+)
+from paperstand.cache import (
+    has_cover as has_cover,
+)
+from paperstand.cache import (
+    move_cache as move_cache,
+)
+from paperstand.cache import (
+    page_cache_dir as page_cache_dir,
+)
+from paperstand.cache import (
+    pages_root as pages_root,
+)
 from paperstand.logging import get_logger
 
 log = get_logger(__name__)
 
 #: Width, in pixels, of the two generated images.
+#: A change here changes the layout `COVER_VERSION` names — bump it.
 COVER_WIDTH = 900
 THUMB_WIDTH = 300
 
-#: JPEG quality of both images.
+#: JPEG quality of both images. A change here changes the layout
+#: `COVER_VERSION` names — bump it.
 JPEG_QUALITY = 85
 
 #: First page text is a search aid, not a transcript.
 TEXT_LIMIT = 20_000
 
 #: Rendering wider than this makes no difference to a 900 px image.
+#: A change here changes the layout `COVER_VERSION` names — bump it.
 MAX_ZOOM = 8.0
 
 
@@ -61,84 +86,6 @@ class CoverError:
     """Why one PDF could not be read."""
 
     message: str
-
-
-def covers_root(cache_root: Path) -> Path:
-    """The directory holding every cover and thumbnail."""
-    return cache_root / "covers"
-
-
-def pages_root(cache_root: Path) -> Path:
-    """The directory holding every rendered page."""
-    return cache_root / "pages"
-
-
-def cover_paths(cache_root: Path, identifier: str) -> tuple[Path, Path]:
-    """Where the cover and the thumbnail of an issue live."""
-    folder = covers_root(cache_root) / identifier[:2]
-    return folder / f"{identifier}.cover.jpg", folder / f"{identifier}.thumb.jpg"
-
-
-def page_cache_dir(cache_root: Path, identifier: str) -> Path:
-    """Where the rendered pages of an issue live."""
-    return pages_root(cache_root) / identifier
-
-
-def clear_cache(cache_root: Path, identifier: str) -> None:
-    """Delete everything cached for an issue: its images and its pages.
-
-    Called when a file changes and when it disappears, so that a stale cover can
-    never outlive the bytes it was rendered from.
-    """
-    cover, thumbnail = cover_paths(cache_root, identifier)
-    for path in (cover, thumbnail):
-        path.unlink(missing_ok=True)
-    shutil.rmtree(page_cache_dir(cache_root, identifier), ignore_errors=True)
-
-
-def move_cache(cache_root: Path, old: str, new: str) -> None:
-    """Move everything cached for ``old`` onto ``new``, without re-rendering.
-
-    Called once, when a row's id changes to the content hash it always had —
-    the one-time backfill of a legacy row, or a rename that took the id along
-    with it in an older build. The bytes never changed, so the cover, the
-    thumbnail and every already-rendered page are still correct; only the name
-    they are filed under is wrong. A source that was never rendered is skipped,
-    not an error, and a target that already exists — rendered fresh under the
-    new id before this ran — wins: the source is discarded rather than
-    overwriting it.
-    """
-    old_cover, old_thumbnail = cover_paths(cache_root, old)
-    new_cover, new_thumbnail = cover_paths(cache_root, new)
-    new_cover.parent.mkdir(parents=True, exist_ok=True)
-    for source, target in ((old_cover, new_cover), (old_thumbnail, new_thumbnail)):
-        _move_file(source, target)
-
-    old_pages = page_cache_dir(cache_root, old)
-    new_pages = page_cache_dir(cache_root, new)
-    if not old_pages.is_dir():
-        return
-    if new_pages.exists():
-        shutil.rmtree(old_pages, ignore_errors=True)
-        return
-    new_pages.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(old_pages), str(new_pages))
-
-
-def _move_file(source: Path, target: Path) -> None:
-    """Move ``source`` onto ``target``, keeping whatever is already there."""
-    if not source.is_file():
-        return
-    if target.exists():
-        source.unlink(missing_ok=True)
-        return
-    os.replace(source, target)
-
-
-def has_cover(cache_root: Path, identifier: str) -> bool:
-    """Whether both images of an issue are on disk."""
-    cover, thumbnail = cover_paths(cache_root, identifier)
-    return cover.is_file() and thumbnail.is_file()
 
 
 def render_cover(pdf_path: Path, identifier: str, cache_root: Path) -> CoverResult | CoverError:

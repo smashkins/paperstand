@@ -1051,7 +1051,7 @@ export interface operations {
 	issue_cover: {
 		parameters: {
 			query?: {
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;
@@ -1092,7 +1092,7 @@ export interface operations {
 	issue_cover_head: {
 		parameters: {
 			query?: {
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;
@@ -1243,7 +1243,7 @@ export interface operations {
 			query?: {
 				/** @description Snapped to the next width up */
 				w?: number | null;
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;
@@ -1294,7 +1294,7 @@ export interface operations {
 			query?: {
 				/** @description Snapped to the next width up */
 				w?: number | null;
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;
@@ -1438,7 +1438,7 @@ export interface operations {
 	issue_thumb: {
 		parameters: {
 			query?: {
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;
@@ -1479,7 +1479,7 @@ export interface operations {
 	issue_thumb_head: {
 		parameters: {
 			query?: {
-				/** @description Cache buster: the PDF's mtime */
+				/** @description The rendering version this address names */
 				v?: string | null;
 			};
 			header?: never;

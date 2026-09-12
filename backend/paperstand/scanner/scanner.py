@@ -46,6 +46,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+from paperstand.cache import ensure_layout
 from paperstand.config import LibraryConfig, PaperstandConfig, Settings, load_config
 from paperstand.db import (
     Database,
@@ -234,7 +235,13 @@ class Scanner:
 
         Separate from :meth:`run` so that a caller can be handed the id of the
         scan it just asked for before that scan has done anything.
+
+        Also where the cache layout is brought up to date — two cheap
+        ``listdir``s — so that a version bump, or an upgrade from the
+        pre-P1.5 unversioned layout, is caught before the slow phase or an
+        image request ever reads through ``covers_root``/``pages_root``.
         """
+        ensure_layout(self.settings.cache_path)
         with self.database.transaction() as connection:
             cursor = connection.execute(
                 "INSERT INTO scans (started_at, status) VALUES (?, 'running')",

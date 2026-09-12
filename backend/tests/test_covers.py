@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
+import paperstand.cache as cache_module
+from paperstand.cache import covers_root, ensure_layout, pages_root
 from paperstand.scanner.covers import (
     COVER_WIDTH,
     JPEG_QUALITY,
@@ -170,3 +173,79 @@ def test_move_cache_lets_an_existing_target_win(
     assert target_cover.read_bytes() == target_cover_bytes
     assert target_thumb.read_bytes() == target_thumb_bytes
     assert (target_pages / "1-900.webp").read_bytes() == b"already there"
+
+
+# ------------------------------------------------------------- ensure_layout
+
+
+def test_paths_land_under_the_current_version(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    assert covers_root(cache) == cache / "covers" / "v1"
+    assert pages_root(cache) == cache / "pages" / "v1"
+    cover, _ = cover_paths(cache, "abcdef0123456789")
+    assert cover.is_relative_to(cache / "covers" / "v1")
+    assert page_cache_dir(cache, "abcdef0123456789").is_relative_to(cache / "pages" / "v1")
+
+
+def test_ensure_layout_tolerates_an_absent_cache(tmp_path: Path) -> None:
+    ensure_layout(tmp_path / "absent")  # must not raise
+
+
+def test_ensure_layout_is_a_no_op_on_an_already_current_cache(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    ensure_layout(cache)
+    ensure_layout(cache)  # nothing to migrate or remove; must not raise
+
+
+def test_ensure_layout_migrates_a_legacy_layout_with_every_file_intact(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    legacy_cover_dir = cache / "covers" / "ab"
+    legacy_cover_dir.mkdir(parents=True)
+    (legacy_cover_dir / "abcdef0123456789.cover.jpg").write_bytes(b"cover bytes")
+    (legacy_cover_dir / "abcdef0123456789.thumb.jpg").write_bytes(b"thumb bytes")
+    legacy_pages_dir = cache / "pages" / "abcdef0123456789"
+    legacy_pages_dir.mkdir(parents=True)
+    (legacy_pages_dir / "1-900.webp").write_bytes(b"page bytes")
+
+    ensure_layout(cache)
+
+    assert has_cover(cache, "abcdef0123456789")
+    cover, thumbnail = cover_paths(cache, "abcdef0123456789")
+    assert cover.read_bytes() == b"cover bytes"
+    assert thumbnail.read_bytes() == b"thumb bytes"
+    page = page_cache_dir(cache, "abcdef0123456789") / "1-900.webp"
+    assert page.read_bytes() == b"page bytes"
+    # The legacy directories are gone, not just superseded.
+    assert not legacy_cover_dir.exists()
+    assert not legacy_pages_dir.exists()
+
+
+def test_ensure_layout_removes_a_stale_version_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache"
+    stale = cache / "covers" / "v1" / "ab"
+    stale.mkdir(parents=True)
+    (stale / "abcdef0123456789.cover.jpg").write_bytes(b"x")
+    (stale / "abcdef0123456789.thumb.jpg").write_bytes(b"y")
+
+    monkeypatch.setattr(cache_module, "COVER_VERSION", 2)
+    ensure_layout(cache)
+
+    assert not (cache / "covers" / "v1").exists()
+
+
+def test_ensure_layout_keeps_an_existing_target_over_a_legacy_source(tmp_path: Path) -> None:
+    cache = tmp_path / "cache"
+    legacy = cache / "covers" / "ab" / "abcdef0123456789.cover.jpg"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"legacy bytes")
+    fresh = cache / "covers" / "v1" / "ab" / "abcdef0123456789.cover.jpg"
+    fresh.parent.mkdir(parents=True)
+    fresh.write_bytes(b"fresh bytes")
+
+    ensure_layout(cache)
+
+    assert fresh.read_bytes() == b"fresh bytes"
+    assert not legacy.exists()
+    assert not (cache / "covers" / "ab").exists()

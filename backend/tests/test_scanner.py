@@ -1188,6 +1188,58 @@ def test_a_library_that_never_had_the_marker_empties_the_pre_p15_way(tmp_path: P
     assert result.removed == 1
 
 
+# ------------------------------------------------------------ the versioned cache
+
+
+def test_a_legacy_cache_layout_is_migrated_before_the_next_scan_renders(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_once(scan_settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    cover, thumb = cover_paths(scan_settings.cache_path, identifier)
+    cover_bytes = cover.read_bytes()
+    thumb_bytes = thumb.read_bytes()
+
+    # Recreate the pre-P1.5, unversioned layout from the same bytes, and
+    # throw away the versioned copy so only the legacy one is left to serve.
+    legacy_folder = scan_settings.cache_path / "covers" / identifier[:2]
+    legacy_folder.mkdir(parents=True)
+    (legacy_folder / f"{identifier}.cover.jpg").write_bytes(cover_bytes)
+    (legacy_folder / f"{identifier}.thumb.jpg").write_bytes(thumb_bytes)
+    shutil.rmtree(scan_settings.cache_path / "covers" / "v1")
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a migrated cover must not be re-rendered")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert result.covers_done == 0
+    assert has_cover(scan_settings.cache_path, identifier)
+    new_cover, new_thumb = cover_paths(scan_settings.cache_path, identifier)
+    assert new_cover.read_bytes() == cover_bytes
+    assert new_thumb.read_bytes() == thumb_bytes
+    assert not legacy_folder.exists()
+
+
+def test_bumping_the_cover_version_removes_v1_and_re_renders_every_cover(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = scan_once(scan_settings)
+    assert first.covers_done == sample_library.catalogued_files
+    v1 = scan_settings.cache_path / "covers" / "v1"
+    assert v1.is_dir()
+
+    monkeypatch.setattr("paperstand.cache.COVER_VERSION", 2)
+    result = scan_once(scan_settings)
+
+    assert not v1.exists()
+    assert result.covers_done == sample_library.catalogued_files
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    assert has_cover(scan_settings.cache_path, identifier)
+    assert (scan_settings.cache_path / "covers" / "v2").is_dir()
+
+
 # ------------------------------------------------- an incomplete walk deletes nothing
 
 
