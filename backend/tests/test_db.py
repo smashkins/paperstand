@@ -23,6 +23,7 @@ from paperstand.db import (
     migrate,
     open_database,
     read_content_hashes,
+    read_meta,
     set_meta,
     title_id,
     user_version,
@@ -538,3 +539,32 @@ def test_read_content_hashes_on_a_populated_schema_3_database(
     assert expected, "the scanned sample library produced no hashed row to check"
 
     assert read_content_hashes(catalogue_settings.db_path) == expected
+
+
+# --------------------------------------------------------------------- read_meta
+
+
+def test_read_meta_on_an_absent_file_returns_none(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        assert read_meta(tmp_path / "absent.db", "library_marker") is None
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_read_meta_on_an_unset_key_returns_none(tmp_path: Path) -> None:
+    database = open_database(tmp_path / "paperstand.db")
+    database.close()
+
+    assert read_meta(tmp_path / "paperstand.db", "library_marker") is None
+
+
+def test_read_meta_reads_back_what_set_meta_wrote(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    database = open_database(path)
+    with database.transaction() as connection:
+        set_meta(connection, "library_marker", "1")
+    database.close()
+
+    assert read_meta(path, "library_marker") == "1"

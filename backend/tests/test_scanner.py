@@ -34,6 +34,7 @@ from paperstand.scanner.covers import (
 )
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
+from paperstand.scanner.walker import MARKER_FILE
 from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
@@ -1087,6 +1088,104 @@ def test_a_title_whose_issues_are_all_missing_survives_drop_empty(tmp_path: Path
     assert result.missing == 1
     assert query(settings, "SELECT id FROM titles WHERE id = ?", (title["id"],))
     assert query(settings, "SELECT id FROM issues WHERE title_id = ?", (title["id"],))
+
+
+# --------------------------------------------------------------- the root marker
+
+
+def _write_zine(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = pymupdf.open()
+    document.new_page()
+    document.save(path)
+    document.close()
+
+
+def _meta(settings: Settings, key: str) -> str | None:
+    rows = query(settings, "SELECT value FROM meta WHERE key = ?", (key,))
+    return str(rows[0]["value"]) if rows else None
+
+
+def test_a_scan_records_the_marker_once_it_sees_it(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    (root / MARKER_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (root / MARKER_FILE).touch()
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert _meta(settings, "library_marker") == "1"
+
+
+def test_a_root_with_no_marker_is_never_remembered(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+
+    scan_once(settings)
+
+    assert _meta(settings, "library_marker") is None
+
+
+def test_emptying_a_marked_root_refuses_the_scan_and_touches_nothing(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    aside = tmp_path / "library.off"
+    (root / MARKER_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (root / MARKER_FILE).touch()
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+    first = scan_once(settings)
+    assert first.added == 1
+    before_issues = [dict(row) for row in query(settings, "SELECT * FROM issues")]
+    before_titles = [dict(row) for row in query(settings, "SELECT * FROM titles")]
+    identifier = str(before_issues[0]["id"])
+    assert has_cover(settings.cache_path, identifier)
+
+    # An unmounted share: the mount point is still a directory, just an
+    # empty one — exactly what a listing of an emptied library looks like.
+    root.rename(aside)
+    root.mkdir()
+
+    result = scan_once(settings)
+
+    assert result.status == "error"
+    assert MARKER_FILE in (result.message or "")
+    assert "share mounted" in (result.message or "")
+    assert [dict(row) for row in query(settings, "SELECT * FROM issues")] == before_issues
+    assert [dict(row) for row in query(settings, "SELECT * FROM titles")] == before_titles
+    assert has_cover(settings.cache_path, identifier)
+    scans_row = query(
+        settings, "SELECT status, message FROM scans WHERE id = ?", (result.scan_id,)
+    )[0]
+    assert scans_row["status"] == "error"
+    assert scans_row["message"] == result.message
+
+    # The marker — and the library behind it — comes back: the very next
+    # scan goes through cleanly, changing nothing.
+    root.rmdir()
+    aside.rename(root)
+    second = scan_once(settings)
+
+    assert second.status == "ok"
+    assert (second.added, second.updated, second.removed, second.missing) == (0, 0, 0, 0)
+
+
+def test_a_library_that_never_had_the_marker_empties_the_pre_p15_way(tmp_path: Path) -> None:
+    """No marker was ever seen, so nothing is remembered, and an emptied root
+    is read exactly as it always was: everything under it gone."""
+    root = tmp_path / "library"
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data", missing_grace_days=0)
+    first = scan_once(settings)
+    assert first.added == 1
+
+    (root / "Zines" / "A - 2026-01-01.pdf").unlink()
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert result.removed == 1
 
 
 # ------------------------------------------------- an incomplete walk deletes nothing

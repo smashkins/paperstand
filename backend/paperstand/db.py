@@ -411,6 +411,32 @@ def read_content_hashes(path: Path) -> dict[str, str]:
     return hashes
 
 
+def read_meta(path: Path, key: str) -> str | None:
+    """One ``meta`` value, read from a database file that may not even exist.
+
+    The read-only sibling of :func:`read_content_hashes`, opened the same
+    way — ``file:...?mode=ro`` so an absent file raises rather than being
+    created — for the same caller: the organizer, which has to know whether
+    the library's root marker is remembered before it moves a single file,
+    without opening the catalogue for writing to find out. An absent file,
+    a database mid-write or any other :class:`sqlite3.Error` all come back
+    as ``None``, logged once.
+    """
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    try:
+        row = connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    finally:
+        connection.close()
+    return str(row[0]) if row is not None else None
+
+
 def set_meta(connection: sqlite3.Connection, key: str, value: str) -> None:
     """Write one ``meta`` value."""
     connection.execute(

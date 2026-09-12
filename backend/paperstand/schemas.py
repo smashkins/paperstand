@@ -311,6 +311,11 @@ class HealthResponse(BaseModel):
     version: str
     library_path: str
     library_ok: bool
+    library_marker: bool | None
+    """The root marker: ``null`` when no scan has ever seen one (protection
+    not set up), ``true`` when the file is present, ``false`` when a scan
+    remembered it and it is gone now — the case that makes ``library_ok``
+    false even though the root itself is a directory."""
     db_ok: bool
     last_scan: ScanRecord | None
     scanning: bool

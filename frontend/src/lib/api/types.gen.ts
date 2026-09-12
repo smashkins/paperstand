@@ -427,6 +427,8 @@ export interface components {
 			/** Issue Count */
 			issue_count: number;
 			last_scan: components['schemas']['ScanRecord'] | null;
+			/** Library Marker */
+			library_marker: boolean | null;
 			/** Library Ok */
 			library_ok: boolean;
 			/** Library Path */

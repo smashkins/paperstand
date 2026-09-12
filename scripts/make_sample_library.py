@@ -92,6 +92,13 @@ MARKER_TEXT = (
     "library.\n"
 )
 
+# The library root marker Paperstand itself looks for (`scanner/walker.py`),
+# not this script's own `--clean` safety marker above: the generator writes
+# it empty, the same way a real deployment's user would with `touch`, so that
+# `make dev` against the sample library exercises the protected path and the
+# docs can show the file in the tree.
+LIBRARY_MARKER_NAME = ".paperstand-library"
+
 
 def protected_paths() -> set[Path]:
     """Directories that are never a sample library, marker or not."""
@@ -631,6 +638,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / MARKER_NAME).write_text(MARKER_TEXT, encoding="utf-8")
+    (out / LIBRARY_MARKER_NAME).touch()
 
     started = time.perf_counter()
     builder = LibraryBuilder(out)

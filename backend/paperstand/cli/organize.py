@@ -190,9 +190,12 @@ def organize(
 
     Exit codes: ``2`` for a usage error (``inbox`` or ``library`` is not a
     directory, one is inside the other, or an explicit ``--config`` does not
-    exist); ``1`` when a move failed on an unexpected error; ``0`` otherwise,
-    including when unsorted or duplicate files were found, and when another
-    run already held the lock.
+    exist); ``1`` when a move failed on an unexpected error, or when the
+    library's root marker is remembered but not on disk — a share that may
+    not be mounted where ``--library`` expects it; ``0`` otherwise, including
+    when unsorted or duplicate files were found, and when another run
+    already held the lock. Under ``--every`` a missing marker skips just
+    that iteration, with one warning, rather than ending the loop.
     """
     stream = out or sys.stdout
     inbox_root = inbox.resolve()
@@ -234,7 +237,8 @@ def organize(
         )
 
     if every is None:
-        return 1 if run().failed else 0
+        result = run()
+        return 1 if (result.failed or result.refused) else 0
 
     stop = threading.Event()
     restore = _install_stop_handlers(stop)

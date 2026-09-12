@@ -14,9 +14,10 @@ from fastapi import APIRouter
 
 from paperstand import __version__
 from paperstand.config import Settings
-from paperstand.db import Database
+from paperstand.db import Database, get_meta
 from paperstand.logging import get_logger
 from paperstand.scanner.scheduler import ScanScheduler
+from paperstand.scanner.walker import MARKER_FILE
 from paperstand.schemas import HealthResponse, ScanRecord
 
 log = get_logger(__name__)
@@ -53,6 +54,25 @@ def last_scan(database: Database | None) -> ScanRecord | None:
     return ScanRecord(**{field: row[field] for field in SCAN_FIELDS})
 
 
+def library_marker(settings: Settings, database: Database | None) -> bool | None:
+    """The root marker's state: ``None`` unset, ``True`` present, ``False`` lost.
+
+    One read of ``meta``, alongside the count query :func:`issue_count`
+    already makes: a catalogue that could not be opened has never
+    remembered a marker either, so both come back the same way.
+    """
+    if database is None:
+        return None
+    try:
+        remembered = get_meta(database.connection, "library_marker") == "1"
+    except sqlite3.Error as error:
+        log.warning("cannot read the library marker: %s", error)
+        return None
+    if not remembered:
+        return None
+    return (settings.library / MARKER_FILE).is_file()
+
+
 def issue_count(database: Database | None) -> int | None:
     """How many issues the catalogue holds; ``None`` when it cannot be read."""
     if database is None:
@@ -77,11 +97,13 @@ def create_router(
     def health() -> HealthResponse:
         """Report the service, the library, the database and the last scan."""
         total = issue_count(database)
+        marker = library_marker(settings, database)
         return HealthResponse(
             status="ok",
             version=__version__,
             library_path=str(settings.library),
-            library_ok=settings.library.is_dir(),
+            library_ok=settings.library.is_dir() and marker is not False,
+            library_marker=marker,
             db_ok=total is not None,
             last_scan=last_scan(database),
             scanning=scheduler is not None and scheduler.running,

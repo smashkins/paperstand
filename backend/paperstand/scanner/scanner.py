@@ -9,18 +9,27 @@ opened just long enough to hash it, because an issue's identity is its content,
 not its path: a rename or a move keeps the same id, cover, pages and reading
 position, a byte-identical copy is a duplicate wherever it sits, and only
 different bytes make a new issue. A file whose stat has not moved and already
-carries a hash is never reopened. Files that disappeared take their rows and
-their cached images with them — unless the same content turns up again
-elsewhere in the same scan, in which case the row moves rather than being
-replaced — titles left without issues are dropped, and every surviving group of
-same-day, same-number files is resolved into one winner and its duplicates.
-When the configuration changed since the last scan — a title added, a library
-renamed — every row that already carries a hash is re-parsed from its path
-alone, without being reopened.
+carries a hash is never reopened. A file that disappeared is marked missing
+rather than removed on the spot — hidden, its row, cover and reading position
+kept — unless the same content turns up again elsewhere in the same scan, in
+which case the row moves rather than being replaced; only once
+``missing_grace_days`` has passed does a still-missing row actually go, taking
+its cached images with it. Titles left without issues are dropped, and every
+surviving group of same-day, same-number files is resolved into one winner and
+its duplicates. When the configuration changed since the last scan — a title
+added, a library renamed — every row that already carries a hash is re-parsed
+from its path alone, without being reopened.
+
+Before any of that, a root the walk *can* list is refused outright when it was
+seen to carry :data:`~paperstand.scanner.walker.MARKER_FILE` on some earlier
+scan and does not now: the emptied directory of a share that failed to mount
+looks, to a plain listing, exactly like a library cleared out on purpose, and
+the marker is the one thing that tells the two apart.
 
 The **slow phase** opens the PDFs whose cover is still missing, on a small worker
 pool, and records what it finds. A file that cannot be read costs that row an
-error message; the scan still ends ``ok``.
+error message; the scan still ends ``ok``. It never runs at all after a refused
+fast phase.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Literal
 
 from paperstand.config import LibraryConfig, PaperstandConfig, Settings, load_config
@@ -61,7 +71,7 @@ from paperstand.scanner.covers import (
     render_cover,
 )
 from paperstand.scanner.hashing import content_hash
-from paperstand.scanner.walker import LibraryFile, Walk, top_level_folders
+from paperstand.scanner.walker import MARKER_FILE, LibraryFile, Walk, top_level_folders
 
 log = get_logger(__name__)
 
@@ -283,6 +293,11 @@ class Scanner:
             result.duration,
             result.summary(),
         )
+        if result.status == "error":
+            # A refused scan — the marker check, or any other failure that
+            # made the fast phase bail before writing a single row — has
+            # nothing for the slow phase to build covers from.
+            return result
         result = self._slow_phase(result, started_at)
         return replace(result, duration=time.perf_counter() - started)
 
@@ -325,9 +340,19 @@ class Scanner:
         )
 
     def _fast_phase(self, scan_id: int, config: PaperstandConfig, started_at: str) -> ScanResult:
-        """Walk, hash what needs it, remove what is gone, resolve duplicates."""
+        """Walk, hash what needs it, remove what is gone, resolve duplicates.
+
+        Refuses outright — before touching a single row — when the root
+        marker was remembered by an earlier scan and is not there now: a
+        directory the walk can list but that has lost the file a user put
+        there is exactly the shape of a share that failed to mount, not a
+        library emptied on purpose.
+        """
         root = self.settings.library
         connection = self.database.connection
+        remembered_marker = get_meta(connection, "library_marker") == "1"
+        if root.is_dir() and remembered_marker and not self._marker_still_there(root):
+            return self._refuse_unmounted(scan_id, root, connection)
         stored_hash = get_meta(connection, "config_hash")
 
         with self.database.transaction():
@@ -402,6 +427,14 @@ class Scanner:
         # still climbs snapshot by snapshot while this runs, so a caller
         # watching progress sees the walk itself, not a stall before it.
         walk = Walk(root, config)
+        if walk.marker and not remembered_marker:
+            # Seeing the file is the whole evidence: recorded the instant a
+            # scan notices it, whether or not this walk turns out complete.
+            # There is no way to forget it short of deleting the `meta` key
+            # by hand — a marker that goes away is exactly the case it
+            # exists for.
+            with self.database.transaction():
+                set_meta(connection, "library_marker", "1")
         buffered: list[LibraryFile] = []
         for found in walk:
             files_seen += 1
@@ -737,6 +770,31 @@ class Scanner:
             missing=missing,
             message=message,
         )
+
+    @staticmethod
+    def _marker_still_there(root: Path) -> bool:
+        """Whether the marker can be confirmed present, for the refusal check.
+
+        A root that cannot even be listed answers ``True`` here — "not
+        proven gone" — so that an unreadable root falls through to the
+        walk's own handling (nothing removed, an error counted) instead of
+        being misread as an unmounted share.
+        """
+        try:
+            return (root / MARKER_FILE).is_file()
+        except OSError:
+            return True
+
+    @staticmethod
+    def _refuse_unmounted(scan_id: int, root: Path, connection: sqlite3.Connection) -> ScanResult:
+        """Refuse a scan whose root has lost the marker it was remembered by."""
+        count = int(connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"])
+        message = (
+            f"the library root {root} has no {MARKER_FILE} marker — is the "
+            f"share mounted? {count} issue(s) left untouched"
+        )
+        log.warning("scan %d: %s", scan_id, message)
+        return ScanResult(scan_id=scan_id, status="error", message=message)
 
     def _incomplete(self, scan_id: int, walk: Walk, kept: int) -> str | None:
         """Explain a walk that could not see everything, or ``None`` when it did."""

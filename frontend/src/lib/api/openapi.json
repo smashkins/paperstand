@@ -84,6 +84,17 @@
 							}
 						]
 					},
+					"library_marker": {
+						"anyOf": [
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Library Marker"
+					},
 					"library_ok": {
 						"title": "Library Ok",
 						"type": "boolean"
@@ -110,6 +121,7 @@
 					"version",
 					"library_path",
 					"library_ok",
+					"library_marker",
 					"db_ok",
 					"last_scan",
 					"scanning",
