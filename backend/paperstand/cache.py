@@ -10,12 +10,17 @@ issue it came from::
 
 Bumping :data:`COVER_VERSION` or :data:`PAGE_VERSION` after a change to how an
 image is produced is the whole of a cache invalidation: :func:`ensure_layout`,
-called at the top of every scan and once at start-up, deletes the previous
+called at the top of every scan and once at start-up, deletes every stale
 version's directory outright — the next render picks up the new parameters —
-and moves anything left over from an even older, unversioned layout into the
-current one instead of re-rendering it, since the bytes already on disk are
-exactly what version 1's parameters would still produce; only their address
-was wrong.
+and moves anything left over from an even older, unversioned layout into
+``v1`` instead of re-rendering it, since the bytes already on disk are
+exactly what version 1's own parameters would still produce; only their
+address was wrong. Never into whatever version happens to be current — a
+later bump may render differently, and an installation upgrading straight
+from the unversioned layout must not have those older bytes served under a
+newer, immutable URL. A ``v1`` this migration produces after the version has
+since moved past it is then pruned by the same pass, exactly like any other
+stale version.
 
 This module owns the *paths*; the rendering itself stays in
 :mod:`paperstand.scanner.covers` and :mod:`paperstand.render.pages`, which
@@ -152,7 +157,16 @@ def ensure_layout(cache_root: Path) -> None:
 
 
 def _ensure_one(root: Path, current: int) -> None:
-    """Prune every stale ``v<M>`` under ``root`` and migrate anything else."""
+    """Migrate anything legacy under ``root`` into ``v1``, then prune every
+    stale ``v<M>``, in that order.
+
+    A legacy, unversioned entry predates rendering version 1, not whatever
+    version happens to be current: it is version 1's own output, and only
+    ever migrates there, never into a later version it was not rendered
+    with. The prune runs afterwards, over a fresh listing, so a ``v1`` this
+    migration just produced is itself removed like any other stale version
+    when the current version has since moved past it.
+    """
     try:
         children = list(root.iterdir())
     except FileNotFoundError:
@@ -161,15 +175,19 @@ def _ensure_one(root: Path, current: int) -> None:
         log.warning("cannot list %s: %s", root, error)
         return
 
-    legacy: list[Path] = []
+    legacy = [child for child in children if _VERSION_DIR.match(child.name) is None]
+    if legacy:
+        _migrate_legacy(root / "v1", legacy)
+
+    try:
+        children = list(root.iterdir())
+    except OSError as error:
+        log.warning("cannot list %s: %s", root, error)
+        return
     for child in children:
         match = _VERSION_DIR.match(child.name)
-        if match is None:
-            legacy.append(child)
-        elif int(match.group(1)) != current:
+        if match is not None and int(match.group(1)) != current:
             _remove_stale(child)
-    if legacy:
-        _migrate_legacy(root / f"v{current}", legacy)
 
 
 def _remove_stale(path: Path) -> None:

@@ -63,8 +63,13 @@
 			try {
 				const status = await api.scanStatus();
 				scan = status;
-				// The scan has just landed, so its row now carries a finish time.
-				if (!status.running) lastRun = (await api.health()).last_scan;
+				// The scan has just landed, so its row now carries a finish time,
+				// and the marker may have changed along with it.
+				if (!status.running) {
+					const health = await api.health();
+					lastRun = health.last_scan;
+					libraryMarker = health.library_marker;
+				}
 			} catch {
 				// A blip is not worth showing: the next tick tries again.
 			}

@@ -235,6 +235,26 @@ def test_ensure_layout_removes_a_stale_version_directory(
     assert not (cache / "covers" / "v1").exists()
 
 
+def test_ensure_layout_migrates_legacy_into_v1_not_the_current_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy, unversioned cache is rendering-version 1's own output,
+    never whatever version happens to be current: an installation upgrading
+    straight from the unversioned layout past a bumped version must not have
+    those older bytes served under the new, immutable URLs."""
+    cache = tmp_path / "cache"
+    legacy_cover_dir = cache / "covers" / "ab"
+    legacy_cover_dir.mkdir(parents=True)
+    (legacy_cover_dir / "abcdef0123456789.cover.jpg").write_bytes(b"cover bytes")
+    (legacy_cover_dir / "abcdef0123456789.thumb.jpg").write_bytes(b"thumb bytes")
+
+    monkeypatch.setattr(cache_module, "COVER_VERSION", 2)
+    ensure_layout(cache)
+
+    assert not (cache / "covers" / "v2" / "ab").exists()
+    assert not (cache / "covers" / "v1").exists()
+
+
 def test_ensure_layout_keeps_an_existing_target_over_a_legacy_source(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     legacy = cache / "covers" / "ab" / "abcdef0123456789.cover.jpg"
