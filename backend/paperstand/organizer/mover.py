@@ -16,6 +16,7 @@ instead, with the source left exactly as it was.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import shutil
@@ -53,7 +54,14 @@ def move_file(source: Path, destination: Path) -> None:
 
     Raises :class:`DestinationOccupied` when ``destination`` already exists —
     at either the first or the final link attempt — always leaving ``source``
-    untouched. Any other :class:`OSError` propagates.
+    untouched, since nothing has been created yet at that point. Any other
+    :class:`OSError` propagates; when it comes from the final
+    ``os.unlink(source)`` — a source directory that does not permit removing
+    entries, say — the destination this call just created is removed first,
+    best-effort, so a failed move leaves neither name behind rather than an
+    untracked extra copy sitting in the library. A failure while removing
+    that destination is silently ignored: it must never replace or mask the
+    original error, which is what the caller sees.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -65,7 +73,12 @@ def move_file(source: Path, destination: Path) -> None:
             _copy_and_link(source, destination)
         else:
             raise
-    os.unlink(source)
+    try:
+        os.unlink(source)
+    except OSError:
+        with contextlib.suppress(OSError):
+            destination.unlink()
+        raise
 
 
 def _copy_and_link(source: Path, destination: Path) -> None:

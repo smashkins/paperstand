@@ -49,6 +49,57 @@ def test_the_destinations_parents_are_created(tmp_path: Path) -> None:
     assert destination.is_file()
 
 
+def test_a_failed_unlink_removes_the_destination_and_leaves_the_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A destination linked successfully but then unable to have its source
+    unlinked — a source directory that does not permit removing entries,
+    say — must not leave an untracked extra copy behind: the destination
+    this call just created is removed, the source stays exactly where it
+    was, and the original error is what the caller sees.
+
+    ``Path.unlink`` calls ``os.unlink`` internally, so the fake below sees
+    the destination's own cleanup unlink too — real for that one, since this
+    test's whole point is that the cleanup succeeds."""
+    source = _write(tmp_path / "inbox" / "Confini - 2026.pdf", b"original bytes")
+    destination = tmp_path / "library" / "Confini" / "2026" / source.name
+
+    real_unlink = os.unlink
+
+    def flaky_unlink(path: str | os.PathLike[str], *args: object, **kwargs: object) -> None:
+        if Path(path) == source:
+            raise OSError(errno.EACCES, "permission denied")
+        real_unlink(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("paperstand.organizer.mover.os.unlink", flaky_unlink)
+
+    with pytest.raises(OSError, match="permission denied"):
+        move_file(source, destination)
+
+    assert source.read_bytes() == b"original bytes"
+    assert not destination.exists()
+
+
+def test_a_failed_cleanup_does_not_mask_the_original_unlink_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Best-effort cleanup: when removing the destination also fails, the
+    caller still sees the original ``os.unlink(source)`` failure, never the
+    cleanup's own error."""
+    source = _write(tmp_path / "inbox" / "Confini - 2026.pdf", b"original bytes")
+    destination = tmp_path / "library" / "Confini" / "2026" / source.name
+
+    def always_fails(path: str | os.PathLike[str], *_args: object, **_kwargs: object) -> None:
+        if Path(path) == source:
+            raise OSError(errno.EACCES, "permission denied")
+        raise OSError(errno.EROFS, "read-only file system")
+
+    monkeypatch.setattr("paperstand.organizer.mover.os.unlink", always_fails)
+
+    with pytest.raises(OSError, match="permission denied"):
+        move_file(source, destination)
+
+
 def test_a_cross_device_move_copies_and_leaves_no_part_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
