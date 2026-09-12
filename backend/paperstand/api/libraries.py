@@ -58,13 +58,14 @@ def create_router(settings: Settings, database: Database | None) -> APIRouter:
     def stats() -> Stats:
         """What the catalogue holds, and what the caches cost on disk."""
         connection = catalogue(database)
-        titles, issues, duplicates = queries.catalogue_totals(connection)
+        titles, issues, duplicates, missing = queries.catalogue_totals(connection)
         cache = settings.cache_path
         return Stats(
             libraries=queries.list_libraries(connection),
             title_count=titles,
             issue_count=issues,
             duplicate_count=duplicates,
+            missing_count=missing,
             covers_bytes=directory_size(covers_root(cache)),
             pages_bytes=directory_size(pages_root(cache)),
             db_bytes=database_size(settings.db_path),

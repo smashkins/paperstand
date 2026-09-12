@@ -39,6 +39,14 @@ log = get_logger(__name__)
 #: The only extension a library file may have.
 PDF_SUFFIX = ".pdf"
 
+#: A plain file, its content ignored, that a user creates once at the
+#: library root as a statement: "this folder is the library". Paperstand
+#: never creates it — nothing writes into the library — and once a scan has
+#: seen it, the fact is remembered in ``meta`` for good: a share that comes
+#: unmounted, leaving an empty directory where the marker used to be, is
+#: exactly the case it exists to catch.
+MARKER_FILE = ".paperstand-library"
+
 MAX_DEPTH = 32
 """Hard stop on recursion, so a pathological tree cannot exhaust the stack."""
 
@@ -69,8 +77,10 @@ class Walk:
 
     Iterate it to get the PDFs. Afterwards, :attr:`root_ok` says whether the root
     itself could be listed, :attr:`unreadable` holds the prefixes the walk had to
-    give up on, and :meth:`covers` says whether a given path was in territory the
-    walk actually reached.
+    give up on, :meth:`covers` says whether a given path was in territory the
+    walk actually reached, and :attr:`marker` says whether the root currently
+    carries :data:`MARKER_FILE` — known as soon as the walk is constructed,
+    before a single file is iterated.
     """
 
     def __init__(self, root: Path, config: PaperstandConfig) -> None:
@@ -80,6 +90,30 @@ class Walk:
         self.unreadable: set[str] = set()
         self.publications: dict[str, str] = {}
         """Folder (relative to the root) -> its ``publication.yml``'s relative path."""
+        self.marker = self._has_marker(root)
+
+    @staticmethod
+    def _has_marker(root: Path) -> bool:
+        """Whether ``root`` carries :data:`MARKER_FILE`.
+
+        A directory of that name is not a marker — it is not the plain file
+        a user is asked to create — and is logged once rather than silently
+        treated as absent. A root that cannot even be listed (as opposed to
+        one that plainly is not there) answers ``False`` without raising:
+        that is "no idea", not "seen and gone", and it is for
+        ``root_ok``/``unreadable`` to say so, not this check.
+        """
+        marker_path = root / MARKER_FILE
+        try:
+            if marker_path.is_dir():
+                log.warning(
+                    "%s is a directory, not the plain marker file paperstand expects there",
+                    marker_path,
+                )
+                return False
+            return marker_path.is_file()
+        except OSError:
+            return False
 
     def __iter__(self) -> Iterator[LibraryFile]:
         if not self.root_ok:

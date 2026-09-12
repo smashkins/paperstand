@@ -34,6 +34,7 @@ from paperstand.scanner.covers import (
 )
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
+from paperstand.scanner.walker import MARKER_FILE
 from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
@@ -295,18 +296,24 @@ def test_a_second_scan_changes_nothing_and_is_quick(scan_settings: Settings) -> 
 
 
 def test_deleting_a_file_removes_its_row_and_its_cache(
-    scan_settings: Settings, sample_library: SampleLibrary
+    sample_library: SampleLibrary, data_dir: Path
 ) -> None:
-    scan_once(scan_settings)
+    """With the grace off, a vanished file is removed on the very next scan —
+    the earlier behaviour, still available through
+    ``PAPERSTAND_MISSING_GRACE_DAYS=0``."""
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=0)
+    write_sample_config(settings.config_path)
+    scan_once(settings)
     identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
-    assert has_cover(scan_settings.cache_path, identifier)
+    assert has_cover(settings.cache_path, identifier)
     sample_library.path(A_NEWSPAPER).unlink()
 
-    result = scan_once(scan_settings)
+    result = scan_once(settings)
 
     assert result.removed == 1
-    assert A_NEWSPAPER not in rel_paths(scan_settings)
-    assert not has_cover(scan_settings.cache_path, identifier)
+    assert result.missing == 0
+    assert A_NEWSPAPER not in rel_paths(settings)
+    assert not has_cover(settings.cache_path, identifier)
 
 
 def test_a_changed_file_is_a_replacement_with_a_new_id_and_no_progress(
@@ -389,13 +396,32 @@ def test_changing_the_configuration_reassigns_titles_without_rendering(
     assert unsorted > 1
 
 
-def test_dropping_a_library_from_the_configuration_forgets_its_issues(
+def test_dropping_a_library_from_the_configuration_leaves_it_missing_until_the_grace_expires(
     scan_settings: Settings,
 ) -> None:
-    scan_once(scan_settings)
+    scan_once(scan_settings)  # the default 7-day grace
     config = yaml.safe_load(scan_settings.config_path.read_text("utf-8"))
     config["libraries"] = [lib for lib in config["libraries"] if lib["name"] != "Zines"]
     scan_settings.config_path.write_text(yaml.safe_dump(config, sort_keys=False), "utf-8")
+
+    scan_once(scan_settings)
+
+    assert issues_in(scan_settings, "zines") > 0
+    assert title_names(scan_settings, "zines") != set()
+    assert query(scan_settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    rows = query(scan_settings, "SELECT missing_since FROM issues WHERE library_id = 'zines'")
+    assert rows
+    assert all(row["missing_since"] is not None for row in rows)
+
+    connection = sqlite3.connect(scan_settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' "
+                "WHERE library_id = 'zines'"
+            )
+    finally:
+        connection.close()
 
     scan_once(scan_settings)
 
@@ -856,6 +882,454 @@ def test_a_missing_library_does_not_empty_the_catalogue(
     assert result.status == "ok"
     assert (result.files_seen, result.removed) == (0, 0)
     assert len(rel_paths(scan_settings)) == first.added
+
+
+# --------------------------------------------------------------- missing with grace
+
+
+def test_a_vanished_file_is_marked_missing_not_removed(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    set_progress(settings, identifier, 3)
+    pages = page_cache_dir(settings.cache_path, identifier)
+    pages.mkdir(parents=True, exist_ok=True)
+    (pages / "1-900.webp").write_bytes(b"cached page")
+
+    sample_library.path(A_NEWSPAPER).unlink()
+    result = scan_once(settings)
+
+    assert result.missing == 1
+    assert result.removed == 0
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is not None
+    assert row["rel_path"] == A_NEWSPAPER
+    assert has_cover(settings.cache_path, identifier)
+    assert (pages / "1-900.webp").is_file()
+    assert progress_of(settings, identifier) == 3
+
+
+def test_restoring_a_missing_file_at_the_same_path_clears_it_without_rendering(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    target = sample_library.path(A_NEWSPAPER)
+    aside = data_dir / "aside.pdf"
+    shutil.move(str(target), aside)
+    scan_once(settings)
+    assert (
+        query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+            "missing_since"
+        ]
+        is not None
+    )
+    cover, _ = cover_paths(settings.cache_path, identifier)
+    cover_mtime = cover.stat().st_mtime_ns
+
+    shutil.move(str(aside), target)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while a missing file was only restored")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.missing == 0
+    assert result.removed == 0
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is None
+    assert row["rel_path"] == A_NEWSPAPER
+    assert cover.stat().st_mtime_ns == cover_mtime
+
+
+def test_restoring_a_missing_file_elsewhere_clears_it_at_the_new_path(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    target = sample_library.path(A_NEWSPAPER)
+    aside = data_dir / "aside.pdf"
+    shutil.move(str(target), aside)
+    scan_once(settings)
+    cover, _ = cover_paths(settings.cache_path, identifier)
+    cover_mtime = cover.stat().st_mtime_ns
+
+    new_path = sample_library.path("Zines/restored-elsewhere.pdf")
+    shutil.move(str(aside), new_path)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while a missing file only moved")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.missing == 0
+    assert (result.added, result.removed) == (0, 0)
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is None
+    assert row["rel_path"] == "Zines/restored-elsewhere.pdf"
+    assert cover.stat().st_mtime_ns == cover_mtime
+
+
+def test_a_second_scan_within_the_grace_leaves_a_missing_row_untouched(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    sample_library.path(A_NEWSPAPER).unlink()
+    first = scan_once(settings)
+    before = query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+        "missing_since"
+    ]
+
+    second = scan_once(settings)
+
+    assert first.missing == 1
+    assert second.missing == 1
+    assert second.removed == 0
+    after = query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+        "missing_since"
+    ]
+    assert after == before
+    assert has_cover(settings.cache_path, identifier)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0,
+    reason="an unreadable directory needs POSIX permissions and a non-root user",
+)
+def test_missing_still_counts_a_row_whose_folder_the_walk_cannot_list(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """A row an earlier scan marked missing, now behind a folder this walk
+    cannot even list, never reaches `gone` this time — `walk.covers` excludes
+    it — but it still carries `missing_since`, and `missing` must count it."""
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    sample_library.path(A_NEWSPAPER).unlink()
+    first = scan_once(settings)
+    assert first.missing == 1
+
+    locked = sample_library.path(A_NEWSPAPER).parent
+    locked.chmod(0o000)
+    try:
+        result = scan_once(settings)
+    finally:
+        locked.chmod(0o755)
+
+    assert result.status == "ok"
+    assert result.missing == 1
+
+
+def test_a_missing_row_past_its_grace_is_removed_and_progress_migrates_to_a_survivor(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=3)
+    write_sample_config(settings.config_path)
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_id = f"{identifier}-2"
+    set_progress(settings, identifier, 6)
+
+    original.unlink()
+    scan_once(settings)  # marks it missing
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' WHERE id = ?",
+                (identifier,),
+            )
+    finally:
+        connection.close()
+
+    result = scan_once(settings)
+
+    assert result.removed == 1
+    assert result.missing == 0
+    assert not query(settings, "SELECT id FROM issues WHERE id = ?", (identifier,))
+    assert not has_cover(settings.cache_path, identifier)
+    assert progress_of(settings, copy_id) == 6
+    assert progress_of(settings, identifier) is None
+
+
+def test_a_missing_row_keeps_no_duplicate_pointer_and_is_excluded_from_grouping(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """Deleting the plain issue frees the dedup-suffixed copy that shared its
+    content hash: the missing row is dropped from the grouping outright,
+    rather than the copy becoming its duplicate or the other way round."""
+    settings = prepare(sample_library.root, data_dir)
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_id = f"{identifier}-2"
+    before = query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (copy_id,))[0]
+    assert before["duplicate_of"] == identifier
+
+    original.unlink()
+    scan_once(settings)
+
+    winner_row = query(
+        settings, "SELECT duplicate_of, missing_since FROM issues WHERE id = ?", (identifier,)
+    )[0]
+    copy_row = query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (copy_id,))[0]
+    assert winner_row["missing_since"] is not None
+    assert winner_row["duplicate_of"] is None
+    assert copy_row["duplicate_of"] is None
+
+
+def test_the_slow_phase_never_opens_a_missing_rows_file(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    cover, thumb = cover_paths(settings.cache_path, identifier)
+    sample_library.path(A_NEWSPAPER).unlink()
+    scan_once(settings)  # marks it missing; the cache is left exactly as it was
+    cover.unlink()
+    thumb.unlink()
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a missing row's file was opened by the slow phase")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.covers_done == 0
+    row = query(settings, "SELECT cover_status FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["cover_status"] == "ok"
+
+
+def test_a_title_whose_issues_are_all_missing_survives_drop_empty(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Solo Title"
+    folder.mkdir(parents=True)
+    (folder / "Solo Title - 2026-01-01.pdf").write_bytes(b"%PDF-1.7\n" + b"x" * 300)
+    settings = quiet_settings(root, tmp_path / "data")
+    scan_once(settings)
+    title = query(settings, "SELECT id FROM titles WHERE name = 'Solo Title'")[0]
+
+    (folder / "Solo Title - 2026-01-01.pdf").unlink()
+    result = scan_once(settings)
+
+    assert result.missing == 1
+    assert query(settings, "SELECT id FROM titles WHERE id = ?", (title["id"],))
+    assert query(settings, "SELECT id FROM issues WHERE title_id = ?", (title["id"],))
+
+
+def test_an_auto_discovered_library_survives_the_grace_when_its_folder_vanishes(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """With no `paperstand.yml`, ``Zines`` is discovered from the top-level
+    folder alone. When that whole folder is moved away, ``Zines`` is no
+    longer part of the discovered configuration — but its rows are still
+    only newly missing, and the library must go on existing until the grace
+    that hides them has actually run out."""
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=3)
+    scan_once(settings)
+    zine_rows = query(settings, "SELECT id FROM issues WHERE library_id = 'zines'")
+    zine_ids = [str(row["id"]) for row in zine_rows]
+    assert zine_ids
+    covers = [cover_paths(settings.cache_path, identifier)[0] for identifier in zine_ids]
+    assert all(cover.is_file() for cover in covers)
+
+    shutil.rmtree(sample_library.path("Zines"))
+    result = scan_once(settings)
+
+    assert result.missing == len(zine_ids)
+    assert query(settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    assert title_names(settings, "zines")
+    rows = query(settings, "SELECT missing_since FROM issues WHERE library_id = 'zines'")
+    assert len(rows) == len(zine_ids)
+    assert all(row["missing_since"] is not None for row in rows)
+    assert all(cover.is_file() for cover in covers)
+
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' "
+                "WHERE library_id = 'zines'"
+            )
+    finally:
+        connection.close()
+
+    result = scan_once(settings)
+
+    assert result.removed == len(zine_ids)
+    assert not query(settings, "SELECT id FROM issues WHERE library_id = 'zines'")
+    assert not title_names(settings, "zines")
+    assert not query(settings, "SELECT id FROM libraries WHERE id = 'zines'")
+    assert not any(cover.is_file() for cover in covers)
+
+
+# --------------------------------------------------------------- the root marker
+
+
+def _write_zine(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = pymupdf.open()
+    document.new_page()
+    document.save(path)
+    document.close()
+
+
+def _meta(settings: Settings, key: str) -> str | None:
+    rows = query(settings, "SELECT value FROM meta WHERE key = ?", (key,))
+    return str(rows[0]["value"]) if rows else None
+
+
+def test_a_scan_records_the_marker_once_it_sees_it(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    (root / MARKER_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (root / MARKER_FILE).touch()
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert _meta(settings, "library_marker") == "1"
+
+
+def test_a_root_with_no_marker_is_never_remembered(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+
+    scan_once(settings)
+
+    assert _meta(settings, "library_marker") is None
+
+
+def test_emptying_a_marked_root_refuses_the_scan_and_touches_nothing(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    aside = tmp_path / "library.off"
+    (root / MARKER_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (root / MARKER_FILE).touch()
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data")
+    first = scan_once(settings)
+    assert first.added == 1
+    before_issues = [dict(row) for row in query(settings, "SELECT * FROM issues")]
+    before_titles = [dict(row) for row in query(settings, "SELECT * FROM titles")]
+    identifier = str(before_issues[0]["id"])
+    assert has_cover(settings.cache_path, identifier)
+
+    # An unmounted share: the mount point is still a directory, just an
+    # empty one — exactly what a listing of an emptied library looks like.
+    root.rename(aside)
+    root.mkdir()
+
+    result = scan_once(settings)
+
+    assert result.status == "error"
+    assert MARKER_FILE in (result.message or "")
+    assert "share mounted" in (result.message or "")
+    assert [dict(row) for row in query(settings, "SELECT * FROM issues")] == before_issues
+    assert [dict(row) for row in query(settings, "SELECT * FROM titles")] == before_titles
+    assert has_cover(settings.cache_path, identifier)
+    scans_row = query(
+        settings, "SELECT status, message FROM scans WHERE id = ?", (result.scan_id,)
+    )[0]
+    assert scans_row["status"] == "error"
+    assert scans_row["message"] == result.message
+
+    # The marker — and the library behind it — comes back: the very next
+    # scan goes through cleanly, changing nothing.
+    root.rmdir()
+    aside.rename(root)
+    second = scan_once(settings)
+
+    assert second.status == "ok"
+    assert (second.added, second.updated, second.removed, second.missing) == (0, 0, 0, 0)
+
+
+def test_a_library_that_never_had_the_marker_empties_the_pre_p15_way(tmp_path: Path) -> None:
+    """No marker was ever seen, so nothing is remembered, and an emptied root
+    is read exactly as it always was: everything under it gone."""
+    root = tmp_path / "library"
+    _write_zine(root / "Zines" / "A - 2026-01-01.pdf")
+    settings = quiet_settings(root, tmp_path / "data", missing_grace_days=0)
+    first = scan_once(settings)
+    assert first.added == 1
+
+    (root / "Zines" / "A - 2026-01-01.pdf").unlink()
+    result = scan_once(settings)
+
+    assert result.status == "ok"
+    assert result.removed == 1
+
+
+# ------------------------------------------------------------ the versioned cache
+
+
+def test_a_legacy_cache_layout_is_migrated_before_the_next_scan_renders(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scan_once(scan_settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    cover, thumb = cover_paths(scan_settings.cache_path, identifier)
+    cover_bytes = cover.read_bytes()
+    thumb_bytes = thumb.read_bytes()
+
+    # Recreate the earlier, unversioned layout from the same bytes, and
+    # throw away the versioned copy so only the legacy one is left to serve.
+    legacy_folder = scan_settings.cache_path / "covers" / identifier[:2]
+    legacy_folder.mkdir(parents=True)
+    (legacy_folder / f"{identifier}.cover.jpg").write_bytes(cover_bytes)
+    (legacy_folder / f"{identifier}.thumb.jpg").write_bytes(thumb_bytes)
+    shutil.rmtree(scan_settings.cache_path / "covers" / "v1")
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a migrated cover must not be re-rendered")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(scan_settings)
+
+    assert result.covers_done == 0
+    assert has_cover(scan_settings.cache_path, identifier)
+    new_cover, new_thumb = cover_paths(scan_settings.cache_path, identifier)
+    assert new_cover.read_bytes() == cover_bytes
+    assert new_thumb.read_bytes() == thumb_bytes
+    assert not legacy_folder.exists()
+
+
+def test_bumping_the_cover_version_removes_v1_and_re_renders_every_cover(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = scan_once(scan_settings)
+    assert first.covers_done == sample_library.catalogued_files
+    v1 = scan_settings.cache_path / "covers" / "v1"
+    assert v1.is_dir()
+
+    monkeypatch.setattr("paperstand.cache.COVER_VERSION", 2)
+    result = scan_once(scan_settings)
+
+    assert not v1.exists()
+    assert result.covers_done == sample_library.catalogued_files
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    assert has_cover(scan_settings.cache_path, identifier)
+    assert (scan_settings.cache_path / "covers" / "v2").is_dir()
 
 
 # ------------------------------------------------- an incomplete walk deletes nothing

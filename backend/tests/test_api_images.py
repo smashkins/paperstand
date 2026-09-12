@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from paperstand.api import images as images_api
+from paperstand.cache import COVER_VERSION, PAGE_VERSION
 from paperstand.config import Settings
 from paperstand.render import pages as render_pages
 from paperstand.render.locks import KeyedLock
@@ -349,33 +350,33 @@ def test_a_scan_sweeps_the_page_cache(settings: Settings) -> None:
 # ------------------------------------------------- versioned page addresses
 
 
-def test_the_page_template_carries_the_version(
+def test_every_url_carries_the_rendering_version(
     catalogue_client: TestClient, issue_id_: str
 ) -> None:
-    """A URL is only safe to keep for a year if it names what it points at."""
+    """A URL is only safe to keep for a year if it names what it points at —
+    the rendering parameters, not the file's own modification time."""
     issue = catalogue_client.get(f"/api/issues/{issue_id_}").json()
-    version = issue["cover_url"].split("v=")[1]
 
-    template = issue["pages_url_template"]
-
-    assert template == f"/api/issues/{issue_id_}/pages/{{n}}.webp?w={{w}}&v={version}"
-    filled = template.replace("{n}", "1").replace("{w}", "800")
+    assert issue["cover_url"] == f"/api/issues/{issue_id_}/cover.jpg?v={COVER_VERSION}"
+    assert issue["thumb_url"] == f"/api/issues/{issue_id_}/thumb.jpg?v={COVER_VERSION}"
+    assert issue["pages_url_template"] == (
+        f"/api/issues/{issue_id_}/pages/{{n}}.webp?w={{w}}&v={PAGE_VERSION}"
+    )
+    filled = issue["pages_url_template"].replace("{n}", "1").replace("{w}", "800")
     response = catalogue_client.get(filled)
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert version in response.headers["etag"]
+    assert f"v{PAGE_VERSION}" in response.headers["etag"]
 
 
-def test_a_stale_version_is_served_but_never_immutable(
+def test_a_stale_page_version_is_served_but_never_immutable(
     catalogue_client: TestClient, issue_id_: str
 ) -> None:
-    """A replaced PDF keeps its id and its URLs; the version is what moves."""
     current = catalogue_client.get(
-        f"/api/issues/{issue_id_}/pages/1.webp",
-        params={"w": 400, "v": _version(catalogue_client, issue_id_)},
+        f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400, "v": PAGE_VERSION}
     )
     stale = catalogue_client.get(
-        f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400, "v": "1"}
+        f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400, "v": PAGE_VERSION + 1}
     )
     missing = catalogue_client.get(f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400})
 
@@ -386,30 +387,38 @@ def test_a_stale_version_is_served_but_never_immutable(
     assert stale.content == current.content
 
 
-def test_a_covers_version_is_checked_too(catalogue_client: TestClient, issue_id_: str) -> None:
+def test_a_stale_cover_version_is_served_but_never_immutable(
+    catalogue_client: TestClient, issue_id_: str
+) -> None:
     matching = catalogue_client.get(
-        f"/api/issues/{issue_id_}/cover.jpg", params={"v": _version(catalogue_client, issue_id_)}
+        f"/api/issues/{issue_id_}/cover.jpg", params={"v": COVER_VERSION}
     )
-    stale = catalogue_client.get(f"/api/issues/{issue_id_}/cover.jpg", params={"v": "1"})
+    stale = catalogue_client.get(
+        f"/api/issues/{issue_id_}/cover.jpg", params={"v": COVER_VERSION + 1}
+    )
 
     assert matching.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert stale.headers["cache-control"] == "no-cache"
 
 
-def test_the_page_validator_moves_with_the_document(
-    catalogue_client: TestClient, issue_id_: str
+def test_touching_the_pdfs_mtime_changes_neither_the_url_nor_the_etag(
+    catalogue_client: TestClient, catalogue_settings: Settings, issue_id_: str
 ) -> None:
-    etag = catalogue_client.get(f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400}).headers[
-        "etag"
-    ]
+    """The version is the whole of the address; the file's own mtime plays no
+    part in it any more."""
+    before = catalogue_client.get(f"/api/issues/{issue_id_}").json()
+    etag_before = catalogue_client.get(f"/api/issues/{issue_id_}/cover.jpg").headers["etag"]
 
-    assert _version(catalogue_client, issue_id_) in etag
+    target = catalogue_settings.library / A_NEWSPAPER
+    future = target.stat().st_mtime + 120
+    os.utime(target, (future, future))
 
+    after = catalogue_client.get(f"/api/issues/{issue_id_}").json()
+    etag_after = catalogue_client.get(f"/api/issues/{issue_id_}/cover.jpg").headers["etag"]
 
-def _version(client: TestClient, issue_id_: str) -> str:
-    issue = client.get(f"/api/issues/{issue_id_}").json()
-    version: str = issue["cover_url"].split("v=")[1]
-    return version
+    assert after["cover_url"] == before["cover_url"]
+    assert after["pages_url_template"] == before["pages_url_template"]
+    assert etag_after == etag_before
 
 
 # ---------------------------------------------- one render, however many ask

@@ -12,6 +12,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import io
+import logging
 import shutil
 import tempfile
 import threading
@@ -37,6 +38,7 @@ from paperstand.organizer.inbox import (
 from paperstand.organizer.mover import sidecar_path
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
+from paperstand.scanner.walker import MARKER_FILE
 from tests.test_cli_organize import _fingerprint
 
 #: An existing, catalogued library file: copying it verbatim into the inbox
@@ -695,6 +697,92 @@ def test_a_scan_after_apply_catalogues_the_moved_file_under_its_title(
         database.close()
     assert row is not None
     assert row["name"] == "Il Mattutino"
+
+
+# --------------------------------------------------------------- the root marker
+
+
+def _remembered_marker_settings(tmp_path: Path) -> Settings:
+    """A library that has already had a scan remember its root marker."""
+    library = tmp_path / "library"
+    (library / MARKER_FILE).parent.mkdir(parents=True, exist_ok=True)
+    (library / MARKER_FILE).touch()
+    settings = Settings(
+        library=library,
+        data=tmp_path / "data",
+        config=None,
+        static=None,
+        scan_on_start=False,
+        scan_interval=0,
+    )
+    scan_once(settings)
+    return settings
+
+
+def test_organize_once_refuses_when_the_marker_is_remembered_but_gone(
+    inbox: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = _remembered_marker_settings(tmp_path)
+    (settings.library / MARKER_FILE).unlink()
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        report, output = _run(
+            inbox,
+            settings,
+            PaperstandConfig.model_validate({"libraries": []}),
+            apply=True,
+        )
+
+    assert report.refused is True
+    assert report.outcomes == []
+    assert f"marker {MARKER_FILE} missing" in output
+    assert (inbox / "Il_Mattutino_2026-03-21.pdf").exists()
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert any(MARKER_FILE in record.message for record in warnings)
+
+
+def test_organize_exits_1_when_the_marker_is_remembered_but_gone(
+    inbox: Path, tmp_path: Path
+) -> None:
+    settings = _remembered_marker_settings(tmp_path)
+    (settings.library / MARKER_FILE).unlink()
+    _write_pdf(inbox / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    code = organize(
+        inbox,
+        settings.library,
+        settings.data,
+        None,
+        apply=True,
+        settle=0,
+        out=io.StringIO(),
+    )
+
+    assert code == 1
+    assert (inbox / "Il_Mattutino_2026-03-21.pdf").exists()
+
+
+def test_organize_forever_keeps_going_through_a_refused_iteration(
+    inbox: Path, tmp_path: Path
+) -> None:
+    settings = _remembered_marker_settings(tmp_path)
+    (settings.library / MARKER_FILE).unlink()
+    config = PaperstandConfig.model_validate({"libraries": []})
+    stop = threading.Event()
+    calls: list[OrganizeReport] = []
+
+    def run() -> OrganizeReport:
+        report, _ = _run(inbox, settings, config, apply=True)
+        calls.append(report)
+        if len(calls) == 3:
+            stop.set()
+        return report
+
+    organize_forever(run, 0, stop)
+
+    assert len(calls) == 3
+    assert all(report.refused for report in calls)
 
 
 # ---------------------------------------------------------------------- CLI

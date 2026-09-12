@@ -10,6 +10,37 @@ settings.
 
 Nothing is ever written inside the library.
 
+## The root marker
+
+Create an empty file named `.paperstand-library` at the library root:
+
+```bash
+touch /path/to/library/.paperstand-library
+```
+
+The first scan that sees it records the fact for good — there is no way to forget it short of
+deleting the `library_marker` row from the database by hand. From then on, a scan whose root
+can be listed but does not carry the file is **refused**: no library is synced, nothing is
+walked, no row, cover or title is touched, and the catalogue's `scans` table gets an entry with
+`status: error` naming the marker. That is deliberately different from an empty root that has
+never carried the marker, which still empties the catalogue as it always has (subject to the
+grace period below) — the marker is an opt-in, not a requirement.
+
+The point is telling apart two things that look identical to a plain directory listing: a
+library genuinely cleared out, and a network share, a bind mount or a symlink that failed to
+come up, leaving an empty directory sitting where the library used to be. Without the marker,
+the second case reads as "delete everything"; with it, the scan stops instead, and picks back
+up on its own the next time it finds the marker again — no re-render, nothing lost.
+
+A directory named `.paperstand-library` does not count; it has to be the plain file. The
+Settings page reports the marker's state under **Libraries** — not set up, present, or
+missing — and `GET /api/health` carries the same three states as `library_marker`
+(`null`/`true`/`false`), with `library_ok` following it: a root that is a directory but whose
+remembered marker is gone answers `library_ok: false`. `paperstand organize --apply` checks
+the same thing before it moves a single file, for the same reason: a file landed on the host
+directory behind a failed mount is invisible to the share, and there is no undoing that once it
+has moved.
+
 ## Supported layouts
 
 All four arrangements below are understood, and they can be mixed inside the same library.
@@ -190,6 +221,20 @@ ids that used to come from a path alone; a second scan hashes nothing. A file mo
 that first scan runs cannot be recognised as a move — the row it used to be has no hash yet
 to compare against — and is read as a deletion plus an arrival, the same as it always was:
 scan once before reorganising a library.
+
+A file that simply vanishes — moved out by hand, a share that drops one entry, anything short
+of the whole root going away — is not removed on the spot either. The scan that first cannot
+find it marks the row **missing** instead: hidden from the storefront, the calendar, *Today*,
+search and every count, exactly like a duplicate, but its row, its cover, its cached pages and
+its reading position all stay exactly as they were. If the same bytes turn up again before
+`PAPERSTAND_MISSING_GRACE_DAYS` (seven, by default) has passed — at the same path or anywhere
+else in the library — the mark is cleared and nothing is re-rendered; past that many days, the
+row is removed the way it always was, handing its reading position to a same-hash survivor
+first if one exists. Setting the grace to `0` restores the earlier behaviour of removing a
+vanished file on the very first scan that does not find it. This is the one exception a
+**replacement** does not get: a path that now holds *different* bytes is a new issue from the
+moment it is seen, immediately, whatever the grace is set to — grace is for a file that
+disappeared, not one that was overwritten.
 
 ## What is skipped
 

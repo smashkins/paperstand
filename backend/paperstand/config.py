@@ -48,9 +48,9 @@ class Settings(BaseSettings):
     ``docs/configuration.md`` is the reference.
 
     The settings, in the order they are declared: ``library``, ``inbox``, ``data``,
-    ``config``, ``static``, ``scan_on_start``, ``scan_interval``, ``cover_workers``,
-    ``render_workers``, ``page_cache_max_mb``, ``base_url``, ``log_level``,
-    ``trusted_proxies``, ``port``, ``host``, ``tz``.
+    ``config``, ``static``, ``scan_on_start``, ``scan_interval``, ``missing_grace_days``,
+    ``cover_workers``, ``render_workers``, ``page_cache_max_mb``, ``base_url``,
+    ``log_level``, ``trusted_proxies``, ``port``, ``host``, ``tz``.
     """
 
     model_config = SettingsConfigDict(
@@ -77,6 +77,19 @@ class Settings(BaseSettings):
 
     scan_on_start: bool = True
     scan_interval: int = 900
+
+    missing_grace_days: int = 7
+    """How long a catalogued issue whose file has vanished is kept, hidden,
+    before its row is forgotten. ``0`` restores the earlier behaviour: gone
+    the first scan that does not find it. A negative value is clamped to
+    zero rather than rejected — there is no sane reading of "keep it for
+    minus three days"."""
+
+    @field_validator("missing_grace_days")
+    @classmethod
+    def _clamp_missing_grace_days(cls, value: int) -> int:
+        return max(0, value)
+
     cover_workers: int = 2
     render_workers: int = 2
     page_cache_max_mb: int = 2048

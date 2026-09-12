@@ -37,7 +37,7 @@ from paperstand.parsing.normalize import slugify
 log = get_logger(__name__)
 
 #: Version of the schema this build of Paperstand writes.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: How long a writer waits for a lock before giving up, in milliseconds.
 BUSY_TIMEOUT_MS = 10_000
@@ -184,8 +184,22 @@ CREATE INDEX issues_hash ON issues (content_hash);
 COMMIT;
 """
 
+# `missing_since` is the `started_at` of the scan that first failed to find
+# the file behind a row; `NULL` means present. It is what lets a scan hide a
+# vanished issue for a grace period instead of deleting it on the spot, the
+# way `content_hash` let a moved file keep its identity. `scans.missing`
+# counts how many rows are missing — new or still within grace — at the end
+# of a scan, a number `removed` alone cannot report.
+SCHEMA_V4 = """
+BEGIN;
+ALTER TABLE issues ADD COLUMN missing_since TEXT;
+CREATE INDEX issues_missing ON issues (missing_since);
+ALTER TABLE scans ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
+COMMIT;
+"""
+
 #: One entry per schema version, in order. Append; never edit a released one.
-MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
+MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
 
 
 class DatabaseError(RuntimeError):
@@ -395,6 +409,32 @@ def read_content_hashes(path: Path) -> dict[str, str]:
     for row_hash, rel_path in rows:
         hashes.setdefault(str(row_hash), str(rel_path))
     return hashes
+
+
+def read_meta(path: Path, key: str) -> str | None:
+    """One ``meta`` value, read from a database file that may not even exist.
+
+    The read-only sibling of :func:`read_content_hashes`, opened the same
+    way — ``file:...?mode=ro`` so an absent file raises rather than being
+    created — for the same caller: the organizer, which has to know whether
+    the library's root marker is remembered before it moves a single file,
+    without opening the catalogue for writing to find out. An absent file,
+    a database mid-write or any other :class:`sqlite3.Error` all come back
+    as ``None``, logged once.
+    """
+    try:
+        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    try:
+        row = connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    except sqlite3.Error as error:
+        log.warning("cannot read the catalogue at %s: %s", path, error)
+        return None
+    finally:
+        connection.close()
+    return str(row[0]) if row is not None else None
 
 
 def set_meta(connection: sqlite3.Connection, key: str, value: str) -> None:

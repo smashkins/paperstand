@@ -1,10 +1,12 @@
 """Rendering PDF pages to WebP, and keeping the cache that holds them bounded.
 
 A page is rendered once and then served from
-``<data>/cache/pages/<issue id>/<n>-<w>.webp`` for ever: the file name carries
-everything that identifies the image, and the scanner deletes the whole
-directory when the PDF underneath changes, so a cached page can never be stale.
-That is what lets the endpoint answer ``Cache-Control: immutable``.
+``<data>/cache/pages/v<PAGE_VERSION>/<issue id>/<n>-<w>.webp`` for ever: the
+file name carries everything that identifies the image, and the scanner
+deletes the whole directory when the PDF underneath changes, so a cached page
+can never be stale. That is what lets the endpoint answer ``Cache-Control:
+immutable``. The version directory is :mod:`paperstand.cache`'s doing — see
+there for what a version bump costs and when to make one.
 
 Two things bound the cost.
 
@@ -45,14 +47,23 @@ from pathlib import Path
 import pymupdf
 from PIL import Image
 
+from paperstand.cache import (
+    page_cache_dir as page_cache_dir,
+)
+from paperstand.cache import (
+    page_path as page_path,
+)
+from paperstand.cache import (
+    pages_root as pages_root,
+)
 from paperstand.config import Settings
 from paperstand.logging import get_logger
 from paperstand.render.locks import KeyedLock
-from paperstand.scanner.covers import page_cache_dir, pages_root
 
 log = get_logger(__name__)
 
 #: The widths, in pixels, a page is ever rendered at.
+#: A change here changes the layout `PAGE_VERSION` names — bump it.
 PAGE_WIDTHS: tuple[int, ...] = (200, 400, 800, 1200, 1600, 2000)
 
 #: The width used when the request does not ask for one.
@@ -64,10 +75,12 @@ DEFAULT_WIDTH = 1200
 #: travelling through the renderer.
 MAX_WIDTH_QUERY = 100_000
 
-#: WebP quality. 80 is where the artefacts stop being visible on a page of text.
+#: WebP quality. 80 is where the artefacts stop being visible on a page of
+#: text. A change here changes the layout `PAGE_VERSION` names — bump it.
 WEBP_QUALITY = 80
 
 #: Rendering wider than this per point of page width is pointless.
+#: A change here changes the layout `PAGE_VERSION` names — bump it.
 MAX_ZOOM = 8.0
 
 #: How many renders go by before the cache is swept without being asked to.
@@ -114,11 +127,6 @@ def snap_width(width: int | None) -> int:
         if width <= candidate:
             return candidate
     return PAGE_WIDTHS[-1]
-
-
-def page_path(cache_root: Path, identifier: str, page: int, width: int) -> Path:
-    """Where one rendered page lives."""
-    return page_cache_dir(cache_root, identifier) / f"{page}-{width}.webp"
 
 
 def render_page(pdf_path: Path, page: int, width: int, target: Path) -> Path:

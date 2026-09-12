@@ -35,6 +35,19 @@ def mark_duplicate(db_path: Path, issue_id: str, winner: str) -> None:
         connection.close()
 
 
+def mark_missing(db_path: Path, issue_id: str) -> None:
+    """Mark an issue missing, the way a scan would once its file vanished."""
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            "UPDATE issues SET missing_since = datetime('now'), duplicate_of = NULL WHERE id = ?",
+            (issue_id,),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 # -------------------------------------------------------------------- today
 
 
@@ -124,6 +137,23 @@ def test_continue_reading_holds_what_was_started_and_not_finished(
     assert today(catalogue_client, date=SAMPLE_TODAY.isoformat())["continue_reading"] == []
     catalogue_client.put(f"/api/issues/{identifier}/progress", json={"page": issue["page_count"]})
     assert today(catalogue_client, date=SAMPLE_TODAY.isoformat())["continue_reading"] == []
+
+
+def test_a_missing_newspaper_is_absent_from_today_and_from_continue_reading(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
+    catalogue_client.put(f"/api/issues/{identifier}/progress", json={"page": 2})
+    assert today(catalogue_client, date=SAMPLE_TODAY.isoformat())["newspapers_date"] == (
+        SAMPLE_TODAY.isoformat()
+    )
+
+    mark_missing(catalogue_settings.db_path, identifier)
+
+    payload = today(catalogue_client, date=SAMPLE_TODAY.isoformat())
+    assert identifier not in {issue["id"] for issue in payload["newspapers"]}
+    assert identifier not in {issue["id"] for issue in payload["continue_reading"]}
+    assert identifier not in {issue["id"] for issue in payload["recently_added"]}
 
 
 def test_today_defaults_to_the_day_in_the_configured_zone(catalogue_client: TestClient) -> None:

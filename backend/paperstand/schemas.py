@@ -94,6 +94,13 @@ class Issue(BaseModel):
     file_url: str
     added_at: str
     is_duplicate: bool
+    missing_since: str | None = None
+    """When a scan first failed to find this issue's file; ``null`` while it
+    is present. Set, the issue is hidden everywhere a reader looks — the
+    storefront, the calendar, search, OPDS — until the file returns or the
+    grace period (``PAPERSTAND_MISSING_GRACE_DAYS``) elapses and the row is
+    forgotten. Reachable through ``GET /api/issues?missing=true`` and at its
+    own detail URL throughout."""
     progress: Progress | None = None
 
 
@@ -176,6 +183,7 @@ class Stats(BaseModel):
     title_count: int
     issue_count: int
     duplicate_count: int
+    missing_count: int
     covers_bytes: int
     pages_bytes: int
     db_bytes: int
@@ -220,6 +228,12 @@ class ScanProgress(BaseModel):
     file in the library, which is the only feedback while that one-time
     backfill works through it; a later scan hashes only what actually
     changed.
+
+    ``missing`` counts rows whose file this scan did not find but did not
+    remove either, because they are within
+    ``PAPERSTAND_MISSING_GRACE_DAYS`` of the scan that first noticed —
+    known only once the fast phase is nearly done, so it reads ``0`` on
+    every snapshot before that.
     """
 
     scan_id: int
@@ -232,6 +246,7 @@ class ScanProgress(BaseModel):
     removed: int
     errors: int
     hashed: int
+    missing: int
     covers_done: int
     covers_failed: int
     covers_total: int | None
@@ -248,6 +263,7 @@ class ScanSummary(BaseModel):
     removed: int
     covers_done: int
     errors: int
+    missing: int
     message: str | None
     duration: float
 
@@ -280,6 +296,7 @@ class ScanRecord(BaseModel):
     removed: int | None = None
     covers_done: int | None = None
     errors: int | None = None
+    missing: int | None = None
     message: str | None = None
 
 
@@ -294,6 +311,11 @@ class HealthResponse(BaseModel):
     version: str
     library_path: str
     library_ok: bool
+    library_marker: bool | None
+    """The root marker: ``null`` when no scan has ever seen one (protection
+    not set up), ``true`` when the file is present, ``false`` when a scan
+    remembered it and it is gone now — the case that makes ``library_ok``
+    false even though the root itself is a directory."""
     db_ok: bool
     last_scan: ScanRecord | None
     scanning: bool

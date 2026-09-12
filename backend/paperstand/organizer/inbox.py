@@ -27,13 +27,13 @@ from typing import TextIO
 import pymupdf
 
 from paperstand.config import PaperstandConfig
-from paperstand.db import read_content_hashes, user_version
+from paperstand.db import read_content_hashes, read_meta, user_version
 from paperstand.logging import get_logger
 from paperstand.organizer.mover import DestinationOccupied, move_file, park, remove_sidecar
 from paperstand.organizer.naming import Unsorted as PlanUnsorted
 from paperstand.organizer.resolve import Resolver
 from paperstand.scanner.hashing import content_hash
-from paperstand.scanner.walker import LibraryFile, Walk
+from paperstand.scanner.walker import MARKER_FILE, LibraryFile, Walk
 
 log = get_logger(__name__)
 
@@ -123,6 +123,11 @@ class OrganizeReport:
     """What one run did, or would do, to every file it looked at."""
 
     outcomes: list[Outcome] = field(default_factory=list)
+    refused: bool = False
+    """The run touched nothing at all because the library's root marker is
+    remembered but not there — the one case worth its own exit code, since
+    every ``Failed`` outcome below is about a single file and this is about
+    not trusting the root at all."""
 
     @property
     def failed(self) -> int:
@@ -220,6 +225,19 @@ def _run(
     )
     print(f"{'catalogue:':<14} {catalogue_line}", file=out)
     print(f"{'mode:':<14} {mode}", file=out)
+
+    if _marker_missing(library, db_path):
+        # The files would land on the host directory behind the mount,
+        # invisible to the share, in both modes — a dry run's destinations
+        # would be exactly as wrong as `--apply`'s moves.
+        print(
+            f"{'library:':<14} marker {MARKER_FILE} missing — is the share mounted? nothing moved",
+            file=out,
+        )
+        log.warning("the library root %s has no %s marker; nothing moved", library, MARKER_FILE)
+        report.refused = True
+        return
+
     print(file=out)
 
     resolver = Resolver(library, config)
@@ -247,6 +265,16 @@ def _run(
 
     print(file=out)
     print(_summary_line(report.outcomes, apply=apply), file=out)
+
+
+def _marker_missing(library: Path, db_path: Path) -> bool:
+    """Whether the library's root marker is remembered but not there.
+
+    The organizer must refuse an unmounted root exactly as a scan does: a
+    file landed on the host directory behind a failed mount is invisible to
+    the share, and there is no undoing that once it has moved.
+    """
+    return read_meta(db_path, "library_marker") == "1" and not (library / MARKER_FILE).is_file()
 
 
 def _catalogue(db_path: Path) -> tuple[str, dict[str, str]]:

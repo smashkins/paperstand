@@ -10,6 +10,7 @@ from paperstand import __version__
 from paperstand.config import Settings
 from paperstand.main import create_app
 from paperstand.scanner.scanner import scan_once
+from paperstand.scanner.walker import MARKER_FILE
 from tests.conftest import SampleLibrary, quiet_settings
 
 
@@ -22,6 +23,7 @@ def test_health_returns_expected_shape(client: TestClient, settings: Settings) -
         "version": __version__,
         "library_path": str(settings.library),
         "library_ok": True,
+        "library_marker": None,
         "db_ok": True,
         "last_scan": None,
         "scanning": False,
@@ -59,3 +61,39 @@ def test_health_reports_the_catalogue_and_the_last_scan(
     assert payload["last_scan"]["status"] == "ok"
     assert payload["last_scan"]["files_seen"] == sample_library.catalogued_files
     assert payload["scanning"] is False
+
+
+# --------------------------------------------------------------- the root marker
+
+
+def test_library_marker_is_null_when_never_seen(client: TestClient) -> None:
+    assert client.get("/api/health").json()["library_marker"] is None
+
+
+def test_library_marker_is_true_once_a_scan_has_seen_it(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    (root / MARKER_FILE).parent.mkdir(parents=True)
+    (root / MARKER_FILE).touch()
+    settings = quiet_settings(root, tmp_path / "data")
+    scan_once(settings)
+
+    with TestClient(create_app(settings)) as client:
+        payload = client.get("/api/health").json()
+
+    assert payload["library_marker"] is True
+    assert payload["library_ok"] is True
+
+
+def test_library_marker_is_false_once_lost_and_library_ok_follows(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    (root / MARKER_FILE).parent.mkdir(parents=True)
+    (root / MARKER_FILE).touch()
+    settings = quiet_settings(root, tmp_path / "data")
+    scan_once(settings)
+    (root / MARKER_FILE).unlink()
+
+    with TestClient(create_app(settings)) as client:
+        payload = client.get("/api/health").json()
+
+    assert payload["library_marker"] is False
+    assert payload["library_ok"] is False

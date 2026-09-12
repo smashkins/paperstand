@@ -9,18 +9,27 @@ opened just long enough to hash it, because an issue's identity is its content,
 not its path: a rename or a move keeps the same id, cover, pages and reading
 position, a byte-identical copy is a duplicate wherever it sits, and only
 different bytes make a new issue. A file whose stat has not moved and already
-carries a hash is never reopened. Files that disappeared take their rows and
-their cached images with them — unless the same content turns up again
-elsewhere in the same scan, in which case the row moves rather than being
-replaced — titles left without issues are dropped, and every surviving group of
-same-day, same-number files is resolved into one winner and its duplicates.
-When the configuration changed since the last scan — a title added, a library
-renamed — every row that already carries a hash is re-parsed from its path
-alone, without being reopened.
+carries a hash is never reopened. A file that disappeared is marked missing
+rather than removed on the spot — hidden, its row, cover and reading position
+kept — unless the same content turns up again elsewhere in the same scan, in
+which case the row moves rather than being replaced; only once
+``missing_grace_days`` has passed does a still-missing row actually go, taking
+its cached images with it. Titles left without issues are dropped, and every
+surviving group of same-day, same-number files is resolved into one winner and
+its duplicates. When the configuration changed since the last scan — a title
+added, a library renamed — every row that already carries a hash is re-parsed
+from its path alone, without being reopened.
+
+Before any of that, a root the walk *can* list is refused outright when it was
+seen to carry :data:`~paperstand.scanner.walker.MARKER_FILE` on some earlier
+scan and does not now: the emptied directory of a share that failed to mount
+looks, to a plain listing, exactly like a library cleared out on purpose, and
+the marker is the one thing that tells the two apart.
 
 The **slow phase** opens the PDFs whose cover is still missing, on a small worker
 pool, and records what it finds. A file that cannot be read costs that row an
-error message; the scan still ends ``ok``.
+error message; the scan still ends ``ok``. It never runs at all after a refused
+fast phase.
 """
 
 from __future__ import annotations
@@ -34,8 +43,10 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Literal
 
+from paperstand.cache import ensure_layout
 from paperstand.config import LibraryConfig, PaperstandConfig, Settings, load_config
 from paperstand.db import (
     Database,
@@ -61,7 +72,7 @@ from paperstand.scanner.covers import (
     render_cover,
 )
 from paperstand.scanner.hashing import content_hash
-from paperstand.scanner.walker import LibraryFile, Walk, top_level_folders
+from paperstand.scanner.walker import MARKER_FILE, LibraryFile, Walk, top_level_folders
 
 log = get_logger(__name__)
 
@@ -123,6 +134,13 @@ class ScanProgress:
     during the hashing pre-pass, before the catalogue transaction opens, so a
     caller watching it sees a large backfill's own progress rather than a
     stall before the fast phase's other counters start moving.
+
+    ``missing`` counts rows whose file this scan did not find but did not
+    remove either — newly missing this scan, or still within
+    :attr:`~paperstand.config.Settings.missing_grace_days` of an earlier
+    one — known only once the fast phase's single write transaction is
+    almost done, so it is ``0`` on every snapshot before that and set once on
+    the last one.
     """
 
     scan_id: int
@@ -134,6 +152,7 @@ class ScanProgress:
     removed: int = 0
     errors: int = 0
     hashed: int = 0
+    missing: int = 0
     covers_done: int = 0
     covers_failed: int = 0
     covers_total: int | None = None
@@ -152,6 +171,7 @@ class ScanResult:
     covers_done: int = 0
     errors: int = 0
     hashed: int = 0
+    missing: int = 0
     message: str | None = None
     duration: float = 0.0
 
@@ -160,7 +180,7 @@ class ScanResult:
         return (
             f"files_seen={self.files_seen} added={self.added} updated={self.updated} "
             f"removed={self.removed} covers_done={self.covers_done} errors={self.errors} "
-            f"hashed={self.hashed}"
+            f"hashed={self.hashed} missing={self.missing}"
         )
 
 
@@ -174,6 +194,9 @@ class _Existing:
     content_hash: str | None
     """``None`` marks a legacy row, written before schema 3, still waiting to
     be hashed once — the fast phase's own backfill, not a migration script."""
+    missing_since: str | None = None
+    """When this scan started looking for a file it did not find; ``None``
+    while the file is present."""
     cover_status: str = "pending"
     cover_error: str | None = None
     page_count: int | None = None
@@ -212,7 +235,13 @@ class Scanner:
 
         Separate from :meth:`run` so that a caller can be handed the id of the
         scan it just asked for before that scan has done anything.
+
+        Also where the cache layout is brought up to date — two cheap
+        ``listdir``s — so that a version bump, or an upgrade from the
+        earlier unversioned layout, is caught before the slow phase or an
+        image request ever reads through ``covers_root``/``pages_root``.
         """
+        ensure_layout(self.settings.cache_path)
         with self.database.transaction() as connection:
             cursor = connection.execute(
                 "INSERT INTO scans (started_at, status) VALUES (?, 'running')",
@@ -271,6 +300,11 @@ class Scanner:
             result.duration,
             result.summary(),
         )
+        if result.status == "error":
+            # A refused scan — the marker check, or any other failure that
+            # made the fast phase bail before writing a single row — has
+            # nothing for the slow phase to build covers from.
+            return result
         result = self._slow_phase(result, started_at)
         return replace(result, duration=time.perf_counter() - started)
 
@@ -286,6 +320,7 @@ class Scanner:
         removed: int = 0,
         errors: int = 0,
         hashed: int = 0,
+        missing: int = 0,
         covers_done: int = 0,
         covers_failed: int = 0,
         covers_total: int | None = None,
@@ -304,6 +339,7 @@ class Scanner:
                 removed=removed,
                 errors=errors,
                 hashed=hashed,
+                missing=missing,
                 covers_done=covers_done,
                 covers_failed=covers_failed,
                 covers_total=covers_total,
@@ -311,9 +347,19 @@ class Scanner:
         )
 
     def _fast_phase(self, scan_id: int, config: PaperstandConfig, started_at: str) -> ScanResult:
-        """Walk, hash what needs it, remove what is gone, resolve duplicates."""
+        """Walk, hash what needs it, remove what is gone, resolve duplicates.
+
+        Refuses outright — before touching a single row — when the root
+        marker was remembered by an earlier scan and is not there now: a
+        directory the walk can list but that has lost the file a user put
+        there is exactly the shape of a share that failed to mount, not a
+        library emptied on purpose.
+        """
         root = self.settings.library
         connection = self.database.connection
+        remembered_marker = get_meta(connection, "library_marker") == "1"
+        if root.is_dir() and remembered_marker and not self._marker_still_there(root):
+            return self._refuse_unmounted(scan_id, root, connection)
         stored_hash = get_meta(connection, "config_hash")
 
         with self.database.transaction():
@@ -326,6 +372,7 @@ class Scanner:
                 size=int(row["size"]),
                 mtime_ns=int(row["mtime_ns"]),
                 content_hash=row["content_hash"],
+                missing_since=row["missing_since"],
                 cover_status=str(row["cover_status"]),
                 cover_error=row["cover_error"],
                 page_count=row["page_count"],
@@ -334,8 +381,9 @@ class Scanner:
                 first_page_text=row["first_page_text"],
             )
             for row in connection.execute(
-                "SELECT id, rel_path, size, mtime_ns, content_hash, cover_status, "
-                "cover_error, page_count, page_w, page_h, first_page_text FROM issues"
+                "SELECT id, rel_path, size, mtime_ns, content_hash, missing_since, "
+                "cover_status, cover_error, page_count, page_w, page_h, first_page_text "
+                "FROM issues"
             )
         }
         # Every id already spoken for, kept apart from `existing` so that
@@ -350,7 +398,7 @@ class Scanner:
                 legacy,
             )
 
-        files_seen = added = updated = removed = errors = hashed = 0
+        files_seen = added = updated = removed = errors = hashed = missing = 0
         unchanged: list[str] = []
         # Files whose path matched no row in pass one, carried into pass two
         # once `gone` is known: only then can a rename or a move be told apart
@@ -375,6 +423,7 @@ class Scanner:
                 removed=removed,
                 errors=errors,
                 hashed=hashed,
+                missing=missing,
             )
 
         snapshot()
@@ -385,6 +434,14 @@ class Scanner:
         # still climbs snapshot by snapshot while this runs, so a caller
         # watching progress sees the walk itself, not a stall before it.
         walk = Walk(root, config)
+        if walk.marker and not remembered_marker:
+            # Seeing the file is the whole evidence: recorded the instant a
+            # scan notices it, whether or not this walk turns out complete.
+            # There is no way to forget it short of deleting the `meta` key
+            # by hand — a marker that goes away is exactly the case it
+            # exists for.
+            with self.database.transaction():
+                set_meta(connection, "library_marker", "1")
         buffered: list[LibraryFile] = []
         for found in walk:
             files_seen += 1
@@ -537,7 +594,7 @@ class Scanner:
                 snapshot()
 
             connection.executemany(
-                "UPDATE issues SET last_seen_scan = ? WHERE id = ?",
+                "UPDATE issues SET last_seen_scan = ?, missing_since = NULL WHERE id = ?",
                 ((scan_id, identifier) for identifier in unchanged),
             )
             # Only files the walk actually looked for may be removed. A root that
@@ -638,10 +695,44 @@ class Scanner:
                 clear_cache(self.settings.cache_path, stored.id)
             removed += len(displaced)
 
-            # A row about to be removed hands its reading position to a row
-            # that shares its content hash, if one is still live: the copy
-            # that stays is the one a reader would expect to pick up from.
-            for stored in gone.values():
+            # `gone` now holds only rows this scan neither found at their old
+            # path nor matched by hash to an arrival: genuinely vanished, not
+            # moved. Split three ways against the grace period: a row goes
+            # straight to `expired` when the grace is off, stays `missing`
+            # (new or still within grace) otherwise, or falls to `expired`
+            # once its own `missing_since` is old enough.
+            grace_days = self.settings.missing_grace_days
+            cutoff = (
+                dt.datetime.fromisoformat(started_at) - dt.timedelta(days=grace_days)
+            ).isoformat()
+            newly_missing: dict[str, _Existing] = {}
+            expired: dict[str, _Existing] = {}
+            for rel_path, stored in gone.items():
+                if grace_days <= 0:
+                    expired[rel_path] = stored
+                elif stored.missing_since is None:
+                    newly_missing[rel_path] = stored
+                elif stored.missing_since <= cutoff:
+                    expired[rel_path] = stored
+                # else: still missing, within grace — left untouched
+
+            # Cache, progress and `last_seen_scan` are untouched for a row
+            # newly marked missing: it may come back, and its cover is still
+            # the right one to show while it is hidden. Any `duplicate_of` it
+            # carried is cleared here — a missing copy is neither a winner
+            # nor a loser — and `_mark_duplicates` keeps it clear until the
+            # row is regrouped on its return.
+            connection.executemany(
+                "UPDATE issues SET missing_since = ?, duplicate_of = NULL WHERE id = ?",
+                ((started_at, stored.id) for stored in newly_missing.values()),
+            )
+
+            # A row about to be removed for good hands its reading position
+            # to a row that shares its content hash, if one is still live:
+            # the copy that stays is the one a reader would expect to pick up
+            # from. A row only marked missing keeps its own position, since
+            # it is still the row a reader would come back to.
+            for stored in expired.values():
                 if stored.content_hash is None:
                     continue
                 survivor = connection.execute(
@@ -651,7 +742,20 @@ class Scanner:
                 if survivor is not None:
                     self._migrate_progress(connection, [(str(survivor["id"]), stored.id)])
 
-            removed += self._remove(connection, gone)
+            removed += self._remove(connection, expired)
+            # `missing` is read back from the catalogue rather than kept as a
+            # running total from the split above: a row an earlier scan
+            # marked missing, now behind a folder this walk could not even
+            # list, never reaches `gone` — `walk.covers` excludes it — so the
+            # loop above never sees it, though it still carries
+            # `missing_since`. The documented meaning is "rows hidden by the
+            # grace at the end of this scan", and that is a fact about the
+            # table, not about what this scan's own split touched.
+            missing = int(
+                connection.execute(
+                    "SELECT count(*) AS n FROM issues WHERE missing_since IS NOT NULL"
+                ).fetchone()["n"]
+            )
             titles.drop_empty(connection)
             if walk.complete:
                 # A library row is only forgotten when the scan saw the whole
@@ -681,8 +785,34 @@ class Scanner:
             removed=removed,
             errors=errors,
             hashed=hashed,
+            missing=missing,
             message=message,
         )
+
+    @staticmethod
+    def _marker_still_there(root: Path) -> bool:
+        """Whether the marker can be confirmed present, for the refusal check.
+
+        A root that cannot even be listed answers ``True`` here — "not
+        proven gone" — so that an unreadable root falls through to the
+        walk's own handling (nothing removed, an error counted) instead of
+        being misread as an unmounted share.
+        """
+        try:
+            return (root / MARKER_FILE).is_file()
+        except OSError:
+            return True
+
+    @staticmethod
+    def _refuse_unmounted(scan_id: int, root: Path, connection: sqlite3.Connection) -> ScanResult:
+        """Refuse a scan whose root has lost the marker it was remembered by."""
+        count = int(connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"])
+        message = (
+            f"the library root {root} has no {MARKER_FILE} marker — is the "
+            f"share mounted? {count} issue(s) left untouched"
+        )
+        log.warning("scan %d: %s", scan_id, message)
+        return ScanResult(scan_id=scan_id, status="error", message=message)
 
     def _incomplete(self, scan_id: int, walk: Walk, kept: int) -> str | None:
         """Explain a walk that could not see everything, or ``None`` when it did."""
@@ -759,6 +889,7 @@ class Scanner:
                 removed=result.removed,
                 errors=result.errors + failed,
                 hashed=result.hashed,
+                missing=result.missing,
                 covers_done=done,
                 covers_failed=failed,
                 covers_total=total,
@@ -813,18 +944,25 @@ class Scanner:
     # ---------------------------------------------------------------- helpers
 
     def _pending_covers(self, connection: sqlite3.Connection) -> list[tuple[str, str]]:
-        """Issues needing a cover: never rendered, or rendered and since lost."""
+        """Issues needing a cover: never rendered, or rendered and since lost.
+
+        A missing row is skipped either way: its file is not there to open,
+        and a row that will come back must not be stamped ``cover_status =
+        'error'`` for a scan or two while it is hidden.
+        """
         cache_root = self.settings.cache_path
         pending = [
             (str(row["id"]), str(row["rel_path"]))
             for row in connection.execute(
-                "SELECT id, rel_path FROM issues WHERE cover_status = 'pending' ORDER BY rel_path"
+                "SELECT id, rel_path FROM issues WHERE cover_status = 'pending' "
+                "AND missing_since IS NULL ORDER BY rel_path"
             )
         ]
         pending += [
             (str(row["id"]), str(row["rel_path"]))
             for row in connection.execute(
-                "SELECT id, rel_path FROM issues WHERE cover_status = 'ok' ORDER BY rel_path"
+                "SELECT id, rel_path FROM issues WHERE cover_status = 'ok' "
+                "AND missing_since IS NULL ORDER BY rel_path"
             )
             if not has_cover(cache_root, str(row["id"]))
         ]
@@ -934,9 +1072,13 @@ class Scanner:
 
         # Everything but the id and the three bookkeeping columns at the end:
         # `added_at` is when the issue joined the catalogue and never moves.
+        # `missing_since` is cleared unconditionally: every path that reaches
+        # this update — a touch, a reparse, a row moved back onto by pass two
+        # — means the file is here now, whatever it was a scan ago.
         assignments = ", ".join(f"{column} = ?" for column in UPDATABLE_COLUMNS)
         connection.execute(
-            f"UPDATE issues SET {assignments}, updated_at = ?, last_seen_scan = ? WHERE id = ?",
+            f"UPDATE issues SET {assignments}, missing_since = NULL, "
+            "updated_at = ?, last_seen_scan = ? WHERE id = ?",
             (*values[1:-3], now, scan_id, identifier),
         )
 
@@ -1001,11 +1143,25 @@ class Scanner:
 
     @staticmethod
     def _drop_empty_libraries(connection: sqlite3.Connection, config: PaperstandConfig) -> None:
-        """Forget libraries that the configuration no longer describes."""
+        """Forget libraries the configuration no longer describes, once they are empty.
+
+        A library missing from ``config.libraries`` — a ``paperstand.yml``
+        entry removed, or, with no configuration file, its whole top-level
+        folder gone — is dropped only once it has no issue rows left of its
+        own. Its rows were marked missing by this same scan, or an earlier
+        one, and must be left to expire through the grace like any other
+        missing row; dropping the library any sooner would cascade
+        (``ON DELETE CASCADE``) its titles and issues away immediately,
+        bypassing the grace and orphaning their cache files. The library
+        goes, in its turn, on the scan whose removals leave it with nothing.
+        """
         keep = {library_id(library.name) for library in config.libraries}
         stale = [
             str(row["id"])
-            for row in connection.execute("SELECT id FROM libraries")
+            for row in connection.execute(
+                "SELECT id FROM libraries "
+                "WHERE NOT EXISTS (SELECT 1 FROM issues WHERE library_id = libraries.id)"
+            )
             if str(row["id"]) not in keep
         ]
         connection.executemany(
@@ -1044,17 +1200,25 @@ class Scanner:
         every stored pointer is flattened here onto the row that is not
         itself a duplicate of anything — a reader, or an API response, is
         never left to follow a chain.
+
+        A missing row (``missing_since IS NOT NULL``) takes no part in either
+        level: it is neither a winner nor a loser, so it never enters
+        ``hash_groups`` or ``key_groups`` below. It still passes through the
+        final flattening loop, which is what clears a `duplicate_of` it
+        carried into missing — it is regrouped like any other row once it
+        returns and `missing_since` is cleared.
         """
         rows = connection.execute(
             "SELECT i.id, i.title_id, i.issue_date, i.issue_number, i.variant, "
-            "i.has_dedup_suffix, i.size, i.duplicate_of, i.content_hash, t.issue_key "
+            "i.has_dedup_suffix, i.size, i.duplicate_of, i.content_hash, "
+            "i.missing_since, t.issue_key "
             "FROM issues i JOIN titles t ON t.id = i.title_id ORDER BY i.id"
         ).fetchall()
         by_id = {str(row["id"]): row for row in rows}
 
         hash_groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
         for row in rows:
-            if row["content_hash"] is not None:
+            if row["content_hash"] is not None and row["missing_since"] is None:
                 hash_groups[str(row["content_hash"])].append(row)
 
         hash_pairs: list[tuple[str, str]] = []
@@ -1074,6 +1238,8 @@ class Scanner:
             identifier = str(row["id"])
             if identifier in losers:
                 continue  # already resolved at the content level
+            if row["missing_since"] is not None:
+                continue  # neither a winner nor a loser while it is missing
             key = _duplicate_key(
                 str(row["title_id"]),
                 row["issue_date"],
@@ -1168,8 +1334,8 @@ class Scanner:
             with self.database.transaction() as connection:
                 connection.execute(
                     "UPDATE scans SET finished_at = ?, status = ?, files_seen = ?, added = ?, "
-                    "updated = ?, removed = ?, covers_done = ?, errors = ?, message = ? "
-                    "WHERE id = ?",
+                    "updated = ?, removed = ?, covers_done = ?, errors = ?, missing = ?, "
+                    "message = ? WHERE id = ?",
                     (
                         utc_now(),
                         result.status,
@@ -1179,6 +1345,7 @@ class Scanner:
                         result.removed,
                         result.covers_done,
                         result.errors,
+                        result.missing,
                         result.message,
                         result.scan_id,
                     ),

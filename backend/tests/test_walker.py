@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from paperstand.config import PaperstandConfig, load_config
-from paperstand.scanner.walker import Walk, top_level_folders, walk_library
+from paperstand.scanner.walker import MARKER_FILE, Walk, top_level_folders, walk_library
 from tests.conftest import SampleLibrary, write_sample_config
 
 
@@ -114,6 +114,50 @@ def test_a_missing_root_yields_nothing(tmp_path: Path) -> None:
 
     assert list(walk_library(tmp_path / "absent", config)) == []
     assert top_level_folders(tmp_path / "absent") == []
+
+
+# ------------------------------------------------------------- the root marker
+
+
+def test_a_missing_root_has_no_marker(tmp_path: Path) -> None:
+    config = PaperstandConfig.model_validate({"libraries": [{"name": "All", "path": "."}]})
+
+    assert Walk(tmp_path / "absent", config).marker is False
+
+
+def test_a_root_with_no_marker_file_is_unprotected(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    config = PaperstandConfig.model_validate({"libraries": [{"name": "All", "path": "."}]})
+
+    assert Walk(root, config).marker is False
+
+
+def test_the_marker_is_seen_as_soon_as_the_walk_is_built(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    root.mkdir()
+    (root / MARKER_FILE).write_text("anything at all, or nothing", encoding="utf-8")
+    config = PaperstandConfig.model_validate({"libraries": [{"name": "All", "path": "."}]})
+
+    walk = Walk(root, config)
+
+    assert walk.marker is True
+    # Known before the walk is ever iterated — not a side effect of it.
+    assert list(walk) == []
+
+
+def test_a_directory_named_like_the_marker_is_not_one(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    root = tmp_path / "library"
+    (root / MARKER_FILE).mkdir(parents=True)
+    config = PaperstandConfig.model_validate({"libraries": [{"name": "All", "path": "."}]})
+
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        walk = Walk(root, config)
+
+    assert walk.marker is False
+    assert any(MARKER_FILE in record.message for record in caplog.records)
 
 
 def test_top_level_folders_lists_directories_only(sample_library: SampleLibrary) -> None:

@@ -13,6 +13,7 @@ from paperstand.config import Settings
 from paperstand.db import (
     SCHEMA_V1,
     SCHEMA_V2,
+    SCHEMA_V3,
     SCHEMA_VERSION,
     Database,
     DatabaseError,
@@ -22,6 +23,7 @@ from paperstand.db import (
     migrate,
     open_database,
     read_content_hashes,
+    read_meta,
     set_meta,
     title_id,
     user_version,
@@ -392,6 +394,106 @@ def test_schema_3_accepts_a_content_hash(tmp_path: Path) -> None:
     database.close()
 
 
+# -------------------------------------------------------------- schema 4 migration
+
+
+def _populated_schema_3(path: Path) -> None:
+    """A schema-3 database, with one row in every table the migration touches
+    or must leave alone — the pattern of :func:`_populated_schema_2`, one
+    version further along."""
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.executescript(SCHEMA_V1)
+        connection.executescript(SCHEMA_V2)
+        connection.executescript(SCHEMA_V3)
+        connection.execute("PRAGMA user_version = 3")
+        with connection:
+            connection.execute(
+                "INSERT INTO libraries VALUES ('l', 'Newspapers', 'Newspapers', 'newspaper', "
+                "'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
+                "VALUES ('t', 'l', 'Corriere del Ponte', 'corriere del ponte', 'newspaper', "
+                "'config', ?)",
+                (utc_now(),),
+            )
+            connection.execute(
+                "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, "
+                "mtime_ns, date_precision, date_source, derived_title, label, matched_rule, "
+                "added_at, updated_at) VALUES ('i', 'l', 't', 'Newspapers/a.pdf', 'a.pdf', 1, 1, "
+                "'day', 'filename', 'Corriere del Ponte', '', 'D1', ?, ?)",
+                (utc_now(), utc_now()),
+            )
+            connection.execute("INSERT INTO reading_progress VALUES ('i', 12, 40, ?)", (utc_now(),))
+            connection.execute(
+                "INSERT INTO scans (started_at, status) VALUES (?, 'ok')", (utc_now(),)
+            )
+    finally:
+        connection.close()
+
+
+def test_a_schema_3_database_migrates_to_schema_4_keeping_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_3(path)
+
+    database = open_database(path)
+    connection = database.connection
+
+    assert user_version(connection) == SCHEMA_VERSION
+    assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM titles").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM scans").fetchone()["n"] == 1
+
+    # The new columns exist and carry no value, or their default, for a row
+    # the migration did not touch.
+    issue = connection.execute("SELECT missing_since FROM issues WHERE id = 'i'").fetchone()
+    assert issue["missing_since"] is None
+    scan = connection.execute("SELECT missing FROM scans").fetchone()
+    assert scan["missing"] == 0
+
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+def test_schema_4_keeps_the_issues_missing_index(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_3(path)
+    database = open_database(path)
+
+    index_names = {
+        str(row["name"])
+        for row in database.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'issues'"
+        )
+    }
+
+    assert "issues_missing" in index_names
+    database.close()
+
+
+def test_schema_4_accepts_a_missing_since_and_a_missing_count(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_3(path)
+    database = open_database(path)
+    connection = database.connection
+
+    with connection:
+        connection.execute("UPDATE issues SET missing_since = ? WHERE id = 'i'", (utc_now(),))
+        connection.execute("UPDATE scans SET missing = 1")
+
+    issue = connection.execute("SELECT missing_since FROM issues WHERE id = 'i'").fetchone()
+    assert issue["missing_since"] is not None
+    scan = connection.execute("SELECT missing FROM scans").fetchone()
+    assert scan["missing"] == 1
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
 def test_closing_twice_is_harmless(tmp_path: Path) -> None:
     database = Database(tmp_path / "paperstand.db")
     database.connection.execute("SELECT 1")
@@ -437,3 +539,32 @@ def test_read_content_hashes_on_a_populated_schema_3_database(
     assert expected, "the scanned sample library produced no hashed row to check"
 
     assert read_content_hashes(catalogue_settings.db_path) == expected
+
+
+# --------------------------------------------------------------------- read_meta
+
+
+def test_read_meta_on_an_absent_file_returns_none(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        assert read_meta(tmp_path / "absent.db", "library_marker") is None
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_read_meta_on_an_unset_key_returns_none(tmp_path: Path) -> None:
+    database = open_database(tmp_path / "paperstand.db")
+    database.close()
+
+    assert read_meta(tmp_path / "paperstand.db", "library_marker") is None
+
+
+def test_read_meta_reads_back_what_set_meta_wrote(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    database = open_database(path)
+    with database.transaction() as connection:
+        set_meta(connection, "library_marker", "1")
+    database.close()
+
+    assert read_meta(path, "library_marker") == "1"

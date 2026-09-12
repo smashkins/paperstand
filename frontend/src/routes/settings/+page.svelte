@@ -25,6 +25,12 @@
 	let scan = $state<ScanStatus | null>(null);
 	/** The last finished scan's row, the only place the timestamps live. */
 	let lastRun = $state<ScanRecord | null>(null);
+	/**
+	 * The root marker's state: `null` reads as "not set up" until `/api/health`
+	 * has actually answered, exactly like `lastRun` reads as "no scan yet" in
+	 * the same window — both settle within one round trip.
+	 */
+	let libraryMarker = $state<boolean | null>(null);
 	let scanMessage = $state<string | null>(null);
 	let starting = $state(false);
 
@@ -38,7 +44,10 @@
 			.catch(() => {});
 		data.health
 			.then((health) => {
-				if (live) lastRun = health.last_scan;
+				if (live) {
+					lastRun = health.last_scan;
+					libraryMarker = health.library_marker;
+				}
 			})
 			.catch(() => {});
 		return () => {
@@ -54,8 +63,13 @@
 			try {
 				const status = await api.scanStatus();
 				scan = status;
-				// The scan has just landed, so its row now carries a finish time.
-				if (!status.running) lastRun = (await api.health()).last_scan;
+				// The scan has just landed, so its row now carries a finish time,
+				// and the marker may have changed along with it.
+				if (!status.running) {
+					const health = await api.health();
+					lastRun = health.last_scan;
+					libraryMarker = health.library_marker;
+				}
 			} catch {
 				// A blip is not worth showing: the next tick tries again.
 			}
@@ -128,6 +142,16 @@
 {:then stats}
 	<section class="grid gap-4">
 		<h2 class="opsz-title font-serif text-2xl font-semibold">{m.settings_libraries()}</h2>
+		<p class="text-[13px] text-muted">
+			<span class="text-xs tracking-[0.06em] text-muted uppercase">{m.marker_label()}:</span>
+			{#if libraryMarker === true}
+				{m.marker_protecting()}
+			{:else if libraryMarker === false}
+				{m.marker_missing()}
+			{:else}
+				{m.marker_not_set_up()}
+			{/if}
+		</p>
 		{#if stats.libraries.length === 0}
 			<p class="text-muted">{m.libraries_none()}</p>
 		{:else}
@@ -190,7 +214,8 @@
 							files: formatNumber(current.files_seen, locale.intl),
 							added: formatNumber(current.added, locale.intl),
 							updated: formatNumber(current.updated, locale.intl),
-							removed: formatNumber(current.removed, locale.intl)
+							removed: formatNumber(current.removed, locale.intl),
+							missing: formatNumber(current.missing, locale.intl)
 						})}
 					</span>
 					{#if current.errors}
@@ -227,13 +252,17 @@
 								files: formatNumber(summary.files_seen, locale.intl),
 								added: formatNumber(summary.added, locale.intl),
 								updated: formatNumber(summary.updated, locale.intl),
-								removed: formatNumber(summary.removed, locale.intl)
+								removed: formatNumber(summary.removed, locale.intl),
+								missing: formatNumber(summary.missing, locale.intl)
 							})}
 						</span>
 						{#if summary.errors}
 							<span class="tabular text-accent-text">
 								{m.scan_errors({ count: formatNumber(summary.errors, locale.intl) })}
 							</span>
+						{/if}
+						{#if summary.message}
+							<span class="text-muted">{summary.message}</span>
 						{/if}
 					{:else if !lastRun}
 						<span class="text-muted">{m.scan_never()}</span>
@@ -249,8 +278,8 @@
 
 	<section class="grid gap-4">
 		<h2 class="opsz-title font-serif text-2xl font-semibold">{m.settings_storage()}</h2>
-		<dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-			{#each [{ label: m.stat_titles(), value: formatNumber(stats.title_count, locale.intl) }, { label: m.stat_issues(), value: formatNumber(stats.issue_count, locale.intl) }, { label: m.stat_duplicates(), value: formatNumber(stats.duplicate_count, locale.intl) }, { label: m.stat_covers(), value: formatSize(stats.covers_bytes, locale.intl) }, { label: m.stat_pages(), value: formatSize(stats.pages_bytes, locale.intl) }, { label: m.stat_db(), value: formatSize(stats.db_bytes, locale.intl) }] as stat (stat.label)}
+		<dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+			{#each [{ label: m.stat_titles(), value: formatNumber(stats.title_count, locale.intl) }, { label: m.stat_issues(), value: formatNumber(stats.issue_count, locale.intl) }, { label: m.stat_duplicates(), value: formatNumber(stats.duplicate_count, locale.intl) }, { label: m.stat_missing(), value: formatNumber(stats.missing_count, locale.intl) }, { label: m.stat_covers(), value: formatSize(stats.covers_bytes, locale.intl) }, { label: m.stat_pages(), value: formatSize(stats.pages_bytes, locale.intl) }, { label: m.stat_db(), value: formatSize(stats.db_bytes, locale.intl) }] as stat (stat.label)}
 				<div class="rounded-cover border border-hairline bg-surface px-4 py-3">
 					<dt class="text-xs tracking-[0.06em] text-muted uppercase">{stat.label}</dt>
 					<dd class="tabular opsz-text mt-1 font-serif text-xl font-semibold">{stat.value}</dd>
