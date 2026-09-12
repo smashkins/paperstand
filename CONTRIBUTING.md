@@ -14,13 +14,15 @@ get it running, what the checks are and what a change is expected to look like.
 - **Examples use fictional publications**, listed in
   [`docs/sample-library.md`](docs/sample-library.md), and never a real title or a real
   place. Each one exists for a parsing edge case; reuse them rather than inventing a name.
-- The library is read-only. Nothing Paperstand does may write inside `/library`; everything
-  it writes goes under `/data`.
+- **The server never writes inside `/library`**; it is mounted read-only. The organizer is
+  the only writer, and only to add: it moves files in from its inbox, never overwrites,
+  never modifies or deletes a file already there, and never changes a PDF's bytes.
+  Everything Paperstand produces goes under `/data`.
 - **No naming rule lives in code.** File name parsing is driven by the declarative profiles
   in `backend/paperstand/parsing/profiles/`. A shape the parser cannot read is a change to
   a profile, not an `if` in the engine.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) —
-  see below. Commits made with the help of a coding agent carry a `Co-Authored-By` trailer.
+  see below — and carry no trailers.
 
 ## Development setup
 
@@ -122,10 +124,11 @@ build(docker): pin uv and trim the runtime image
 | `style` | Formatting only, no behaviour |
 | `chore` | Anything else |
 
-Scopes are the parts of the system: `api`, `scanner`, `parser`, `reader`, `storefront`,
-`opds`, `docker`. Add a body when the *why* is not obvious from the summary, and a
-`BREAKING CHANGE:` footer when an upgrade needs a hand — a renamed setting, a moved volume,
-a cache that has to be thrown away.
+Scopes are the parts of the system: `api`, `scanner`, `parser`, `organizer`, `render`,
+`reader`, `storefront`, `maintenance`, `opds`, `docker`; a `docs`, `ci` or `chore` commit
+may name the thing it touches instead (`readme`, `dependabot`, `release`). Add a body when
+the *why* is not obvious from the summary, and a `BREAKING CHANGE:` footer when an upgrade
+needs a hand — a renamed setting, a moved volume, a cache that has to be thrown away.
 
 ## Pull requests
 
@@ -143,6 +146,8 @@ before and after.
 | [`docs/folder-layout.md`](docs/folder-layout.md) | The library layouts and file names that are understood |
 | [`docs/parser-profiles.md`](docs/parser-profiles.md) | The profile format, rule by rule |
 | [`docs/opds.md`](docs/opds.md) | The feed tree, tested clients, reverse proxies |
+| [`docs/organizer.md`](docs/organizer.md) | The canonical layout, `organize` and `organize-plan`, what the organizer never does |
+| [`docs/maintenance.md`](docs/maintenance.md) | The maintenance page, the organizer report, series gaps, the scan trigger |
 | [`docs/sample-library.md`](docs/sample-library.md) | The fictional publications, and the edge case each one covers |
 | [`CHANGELOG.md`](CHANGELOG.md) | One entry per user-visible change |
 
