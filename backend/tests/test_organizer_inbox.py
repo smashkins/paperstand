@@ -41,6 +41,8 @@ from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 from paperstand.scanner.walker import MARKER_FILE
 from paperstand.schemas import OrganizerMove
+from tests.conftest import sample_issue_id
+from tests.test_api_files import clone_issue
 from tests.test_cli_organize import _fingerprint
 
 #: An existing, catalogued library file: copying it verbatim into the inbox
@@ -493,6 +495,30 @@ def test_a_catalogued_file_still_on_disk_is_still_a_duplicate(
     """The existing behaviour, pinned down again next to the removed case
     above: a catalogued file still there, unchanged, still makes a fresh
     byte-identical copy a duplicate."""
+    _copy(
+        catalogue_settings.library / CORRIERE_16,
+        inbox / "Corriere_del_Ponte_-_16_Marzo_2026.pdf",
+    )
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [Duplicate("Corriere_del_Ponte_-_16_Marzo_2026.pdf", CORRIERE_16)]
+
+
+def test_a_stale_first_by_path_hash_does_not_hide_a_surviving_duplicate(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """Two catalogue rows can share a content hash — a duplicate the scanner
+    has not caught up with yet. When the lexicographically-first one has
+    since been removed from disk but another catalogued path with the same
+    bytes is still there, a fresh copy of those bytes must still be parked
+    as a duplicate — naming the surviving path — rather than imported as
+    though the whole hash were stale."""
+    source_id = sample_issue_id(catalogue_settings.library, CORRIERE_16)
+    ghost_rel_path = "AAA_ghost_-_removed_since_the_last_scan.pdf"
+    assert ghost_rel_path < CORRIERE_16, "the ghost path must sort first for this to test anything"
+    clone_issue(catalogue_settings.db_path, source_id, ghost_rel_path, "0000ghost0000000")
+
     _copy(
         catalogue_settings.library / CORRIERE_16,
         inbox / "Corriere_del_Ponte_-_16_Marzo_2026.pdf",

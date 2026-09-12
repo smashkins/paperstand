@@ -31,6 +31,7 @@ from paperstand.db import (
     utc_now,
 )
 from paperstand.parsing.normalize import slugify
+from tests.test_api_files import clone_issue
 
 TABLES = {
     "libraries",
@@ -530,16 +531,37 @@ def test_read_content_hashes_on_a_populated_schema_3_database(
     catalogue_settings: Settings,
 ) -> None:
     database = open_database(catalogue_settings.db_path)
-    expected = {
-        str(row["content_hash"]): str(row["rel_path"])
-        for row in database.connection.execute(
-            "SELECT content_hash, rel_path FROM issues WHERE content_hash IS NOT NULL"
-        )
-    }
+    rows = database.connection.execute(
+        "SELECT content_hash, rel_path FROM issues WHERE content_hash IS NOT NULL ORDER BY rel_path"
+    ).fetchall()
     database.close()
-    assert expected, "the scanned sample library produced no hashed row to check"
+    assert rows, "the scanned sample library produced no hashed row to check"
+    expected: dict[str, list[str]] = {}
+    for row in rows:
+        expected.setdefault(str(row["content_hash"]), []).append(str(row["rel_path"]))
 
     assert read_content_hashes(catalogue_settings.db_path) == expected
+
+
+def test_read_content_hashes_keeps_every_path_sharing_a_hash(
+    catalogue_settings: Settings,
+) -> None:
+    """A hash shared by two catalogued rows keeps every path that carries
+    it, ordered by ``rel_path`` — the organizer needs every one of them, not
+    just the first, to tell a genuinely stale duplicate from one that only
+    lost its first-by-path row."""
+    database = open_database(catalogue_settings.db_path)
+    row = database.connection.execute(
+        "SELECT id, rel_path, content_hash FROM issues WHERE content_hash IS NOT NULL LIMIT 1"
+    ).fetchone()
+    database.close()
+    source_id, rel_path, digest = row["id"], row["rel_path"], row["content_hash"]
+    ghost_rel_path = f"AAA_ghost_of_{Path(rel_path).name}"
+    clone_issue(catalogue_settings.db_path, source_id, ghost_rel_path, "0000ghost0000000")
+
+    hashes = read_content_hashes(catalogue_settings.db_path)
+
+    assert hashes[str(digest)] == sorted([ghost_rel_path, str(rel_path)])
 
 
 # ----------------------------------------------------------- read_rel_path_hashes
