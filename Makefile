@@ -44,7 +44,10 @@ dev-web: ## Run the SvelteKit dev server (proxies /api to $(API_PORT))
 test: test-api test-web ## Run every test suite
 
 test-api: ## Run the backend test suite
-	$(BACKEND) pytest
+	# `cd` first, not `$(BACKEND)`: pytest reads backend/pyproject.toml (its
+	# parallelism, its markers) by searching upward from where it starts, and
+	# `uv run --project` alone leaves it starting from the repository root.
+	cd backend && $(UV) run pytest
 
 test-web: ## Run the frontend test suite
 	cd frontend && npm test

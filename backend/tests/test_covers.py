@@ -27,6 +27,10 @@ from tests.conftest import SampleLibrary
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
+#: Every test in this module calls `render_cover` itself: the rasteriser is
+#: what is under test, so the fast stub in `conftest.py` never belongs here.
+pytestmark = pytest.mark.real_covers
+
 
 def test_rendering_produces_two_jpegs_of_the_expected_widths(
     sample_library: SampleLibrary, tmp_path: Path

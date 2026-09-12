@@ -28,6 +28,7 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "types-PyYAML>=6.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [build-system]
@@ -70,4 +71,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -n auto"
+markers = [
+    "real_covers: render real covers and thumbnails instead of the test stub",
+]

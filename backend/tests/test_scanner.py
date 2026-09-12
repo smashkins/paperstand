@@ -98,7 +98,13 @@ def scan_settings(sample_library: SampleLibrary, data_dir: Path) -> Settings:
 def scanned(
     tmp_path_factory: pytest.TempPathFactory, sample_source: SampleLibrary
 ) -> tuple[Settings, ScanResult, SampleLibrary]:
-    """One full scan of an untouched sample library, shared by the read-only tests."""
+    """One full scan of an untouched sample library, shared by the read-only tests.
+
+    Module-scoped fixtures are set up before function-scoped ones, so this
+    scan runs before `conftest.py`'s `_fast_covers` autouse fixture ever
+    patches anything: the rendering here is always real, whether or not the
+    test that requested it is marked `real_covers`.
+    """
     base = tmp_path_factory.mktemp("scanned")
     root = base / "library"
     shutil.copytree(sample_source.root, root)
@@ -220,6 +226,7 @@ def test_every_issue_gets_a_cover_and_a_thumbnail(
         assert has_cover(settings.cache_path, str(row["id"]))
 
 
+@pytest.mark.real_covers
 def test_the_cover_images_are_jpegs_of_the_documented_widths(
     scanned: tuple[Settings, ScanResult, SampleLibrary],
 ) -> None:
