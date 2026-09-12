@@ -37,7 +37,7 @@ from paperstand.parsing.normalize import slugify
 log = get_logger(__name__)
 
 #: Version of the schema this build of Paperstand writes.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: How long a writer waits for a lock before giving up, in milliseconds.
 BUSY_TIMEOUT_MS = 10_000
@@ -184,8 +184,22 @@ CREATE INDEX issues_hash ON issues (content_hash);
 COMMIT;
 """
 
+# `missing_since` is the `started_at` of the scan that first failed to find
+# the file behind a row; `NULL` means present. It is what lets a scan hide a
+# vanished issue for a grace period instead of deleting it on the spot, the
+# way `content_hash` let a moved file keep its identity. `scans.missing`
+# counts how many rows are missing — new or still within grace — at the end
+# of a scan, a number `removed` alone cannot report.
+SCHEMA_V4 = """
+BEGIN;
+ALTER TABLE issues ADD COLUMN missing_since TEXT;
+CREATE INDEX issues_missing ON issues (missing_since);
+ALTER TABLE scans ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
+COMMIT;
+"""
+
 #: One entry per schema version, in order. Append; never edit a released one.
-MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3)
+MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
 
 
 class DatabaseError(RuntimeError):

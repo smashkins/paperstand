@@ -295,18 +295,24 @@ def test_a_second_scan_changes_nothing_and_is_quick(scan_settings: Settings) -> 
 
 
 def test_deleting_a_file_removes_its_row_and_its_cache(
-    scan_settings: Settings, sample_library: SampleLibrary
+    sample_library: SampleLibrary, data_dir: Path
 ) -> None:
-    scan_once(scan_settings)
+    """With the grace off, a vanished file is removed on the very next scan —
+    today's pre-P1.5 behaviour, still available through
+    ``PAPERSTAND_MISSING_GRACE_DAYS=0``."""
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=0)
+    write_sample_config(settings.config_path)
+    scan_once(settings)
     identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
-    assert has_cover(scan_settings.cache_path, identifier)
+    assert has_cover(settings.cache_path, identifier)
     sample_library.path(A_NEWSPAPER).unlink()
 
-    result = scan_once(scan_settings)
+    result = scan_once(settings)
 
     assert result.removed == 1
-    assert A_NEWSPAPER not in rel_paths(scan_settings)
-    assert not has_cover(scan_settings.cache_path, identifier)
+    assert result.missing == 0
+    assert A_NEWSPAPER not in rel_paths(settings)
+    assert not has_cover(settings.cache_path, identifier)
 
 
 def test_a_changed_file_is_a_replacement_with_a_new_id_and_no_progress(
@@ -856,6 +862,231 @@ def test_a_missing_library_does_not_empty_the_catalogue(
     assert result.status == "ok"
     assert (result.files_seen, result.removed) == (0, 0)
     assert len(rel_paths(scan_settings)) == first.added
+
+
+# --------------------------------------------------------------- missing with grace
+
+
+def test_a_vanished_file_is_marked_missing_not_removed(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    set_progress(settings, identifier, 3)
+    pages = page_cache_dir(settings.cache_path, identifier)
+    pages.mkdir(parents=True, exist_ok=True)
+    (pages / "1-900.webp").write_bytes(b"cached page")
+
+    sample_library.path(A_NEWSPAPER).unlink()
+    result = scan_once(settings)
+
+    assert result.missing == 1
+    assert result.removed == 0
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is not None
+    assert row["rel_path"] == A_NEWSPAPER
+    assert has_cover(settings.cache_path, identifier)
+    assert (pages / "1-900.webp").is_file()
+    assert progress_of(settings, identifier) == 3
+
+
+def test_restoring_a_missing_file_at_the_same_path_clears_it_without_rendering(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    target = sample_library.path(A_NEWSPAPER)
+    aside = data_dir / "aside.pdf"
+    shutil.move(str(target), aside)
+    scan_once(settings)
+    assert (
+        query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+            "missing_since"
+        ]
+        is not None
+    )
+    cover, _ = cover_paths(settings.cache_path, identifier)
+    cover_mtime = cover.stat().st_mtime_ns
+
+    shutil.move(str(aside), target)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while a missing file was only restored")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.missing == 0
+    assert result.removed == 0
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is None
+    assert row["rel_path"] == A_NEWSPAPER
+    assert cover.stat().st_mtime_ns == cover_mtime
+
+
+def test_restoring_a_missing_file_elsewhere_clears_it_at_the_new_path(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    target = sample_library.path(A_NEWSPAPER)
+    aside = data_dir / "aside.pdf"
+    shutil.move(str(target), aside)
+    scan_once(settings)
+    cover, _ = cover_paths(settings.cache_path, identifier)
+    cover_mtime = cover.stat().st_mtime_ns
+
+    new_path = sample_library.path("Zines/restored-elsewhere.pdf")
+    shutil.move(str(aside), new_path)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a cover was rendered while a missing file only moved")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.missing == 0
+    assert (result.added, result.removed) == (0, 0)
+    row = query(settings, "SELECT missing_since, rel_path FROM issues WHERE id = ?", (identifier,))[
+        0
+    ]
+    assert row["missing_since"] is None
+    assert row["rel_path"] == "Zines/restored-elsewhere.pdf"
+    assert cover.stat().st_mtime_ns == cover_mtime
+
+
+def test_a_second_scan_within_the_grace_leaves_a_missing_row_untouched(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = prepare(sample_library.root, data_dir)  # the default 7-day grace
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    sample_library.path(A_NEWSPAPER).unlink()
+    first = scan_once(settings)
+    before = query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+        "missing_since"
+    ]
+
+    second = scan_once(settings)
+
+    assert first.missing == 1
+    assert second.missing == 1
+    assert second.removed == 0
+    after = query(settings, "SELECT missing_since FROM issues WHERE id = ?", (identifier,))[0][
+        "missing_since"
+    ]
+    assert after == before
+    assert has_cover(settings.cache_path, identifier)
+
+
+def test_a_missing_row_past_its_grace_is_removed_and_progress_migrates_to_a_survivor(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=3)
+    write_sample_config(settings.config_path)
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_id = f"{identifier}-2"
+    set_progress(settings, identifier, 6)
+
+    original.unlink()
+    scan_once(settings)  # marks it missing
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "UPDATE issues SET missing_since = '2000-01-01T00:00:00+00:00' WHERE id = ?",
+                (identifier,),
+            )
+    finally:
+        connection.close()
+
+    result = scan_once(settings)
+
+    assert result.removed == 1
+    assert result.missing == 0
+    assert not query(settings, "SELECT id FROM issues WHERE id = ?", (identifier,))
+    assert not has_cover(settings.cache_path, identifier)
+    assert progress_of(settings, copy_id) == 6
+    assert progress_of(settings, identifier) is None
+
+
+def test_a_missing_row_keeps_no_duplicate_pointer_and_is_excluded_from_grouping(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """Deleting the plain issue frees the dedup-suffixed copy that shared its
+    content hash: the missing row is dropped from the grouping outright,
+    rather than the copy becoming its duplicate or the other way round."""
+    settings = prepare(sample_library.root, data_dir)
+    original = sample_library.path(A_NEWSPAPER)
+    copy_rel = "Zines/elsewhere.pdf"
+    shutil.copyfile(original, sample_library.path(copy_rel))
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    copy_id = f"{identifier}-2"
+    before = query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (copy_id,))[0]
+    assert before["duplicate_of"] == identifier
+
+    original.unlink()
+    scan_once(settings)
+
+    winner_row = query(
+        settings, "SELECT duplicate_of, missing_since FROM issues WHERE id = ?", (identifier,)
+    )[0]
+    copy_row = query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (copy_id,))[0]
+    assert winner_row["missing_since"] is not None
+    assert winner_row["duplicate_of"] is None
+    assert copy_row["duplicate_of"] is None
+
+
+def test_the_slow_phase_never_opens_a_missing_rows_file(
+    sample_library: SampleLibrary, data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = prepare(sample_library.root, data_dir)
+    scan_once(settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+    cover, thumb = cover_paths(settings.cache_path, identifier)
+    sample_library.path(A_NEWSPAPER).unlink()
+    scan_once(settings)  # marks it missing; the cache is left exactly as it was
+    cover.unlink()
+    thumb.unlink()
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("a missing row's file was opened by the slow phase")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    result = scan_once(settings)
+
+    assert result.covers_done == 0
+    row = query(settings, "SELECT cover_status FROM issues WHERE id = ?", (identifier,))[0]
+    assert row["cover_status"] == "ok"
+
+
+def test_a_title_whose_issues_are_all_missing_survives_drop_empty(tmp_path: Path) -> None:
+    root = tmp_path / "library"
+    folder = root / "Zines" / "Solo Title"
+    folder.mkdir(parents=True)
+    (folder / "Solo Title - 2026-01-01.pdf").write_bytes(b"%PDF-1.7\n" + b"x" * 300)
+    settings = quiet_settings(root, tmp_path / "data")
+    scan_once(settings)
+    title = query(settings, "SELECT id FROM titles WHERE name = 'Solo Title'")[0]
+
+    (folder / "Solo Title - 2026-01-01.pdf").unlink()
+    result = scan_once(settings)
+
+    assert result.missing == 1
+    assert query(settings, "SELECT id FROM titles WHERE id = ?", (title["id"],))
+    assert query(settings, "SELECT id FROM issues WHERE title_id = ?", (title["id"],))
 
 
 # ------------------------------------------------- an incomplete walk deletes nothing

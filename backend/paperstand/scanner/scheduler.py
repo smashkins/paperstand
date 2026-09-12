@@ -235,6 +235,7 @@ def scan_summary(result: ScanResult | None) -> dict[str, Any] | None:
         "removed": result.removed,
         "covers_done": result.covers_done,
         "errors": result.errors,
+        "missing": result.missing,
         "message": result.message,
         "duration": round(result.duration, 3),
     }
@@ -262,6 +263,7 @@ def progress_summary(progress: ScanProgress | None) -> dict[str, Any] | None:
         "removed": progress.removed,
         "errors": progress.errors,
         "hashed": progress.hashed,
+        "missing": progress.missing,
         "covers_done": progress.covers_done,
         "covers_failed": progress.covers_failed,
         "covers_total": progress.covers_total,

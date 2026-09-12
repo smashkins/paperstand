@@ -227,3 +227,20 @@ def test_inbox_defaults_to_inbox(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_inbox_honours_its_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PAPERSTAND_INBOX", "/mnt/inbox")
     assert Settings().inbox == Path("/mnt/inbox")
+
+
+def test_missing_grace_days_defaults_to_a_week(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PAPERSTAND_MISSING_GRACE_DAYS", raising=False)
+    assert Settings().missing_grace_days == 7
+
+
+def test_missing_grace_days_honours_its_environment_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERSTAND_MISSING_GRACE_DAYS", "14")
+    assert Settings().missing_grace_days == 14
+
+
+def test_a_negative_missing_grace_is_clamped_to_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERSTAND_MISSING_GRACE_DAYS", "-3")
+    assert Settings().missing_grace_days == 0
