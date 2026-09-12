@@ -101,6 +101,11 @@ class Issue(BaseModel):
     grace period (``PAPERSTAND_MISSING_GRACE_DAYS``) elapses and the row is
     forgotten. Reachable through ``GET /api/issues?missing=true`` and at its
     own detail URL throughout."""
+    cover_error: str | None = None
+    """The renderer's own message when it could not open this file at all;
+    ``null`` while ``cover_status`` is ``pending`` or ``ok``. May name the
+    file's path under the library root. Reachable through
+    ``GET /api/issues?unreadable=true``."""
     progress: Progress | None = None
 
 

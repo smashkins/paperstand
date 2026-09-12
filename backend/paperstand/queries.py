@@ -33,6 +33,7 @@ from urllib.parse import quote
 
 from paperstand.cache import COVER_VERSION, PAGE_VERSION
 from paperstand.db import utc_now
+from paperstand.gaps import SeriesRow
 from paperstand.schemas import (
     Aspect,
     Calendar,
@@ -44,6 +45,7 @@ from paperstand.schemas import (
     Title,
     TitleDetail,
     TitleSort,
+    UnsortedBucket,
     YearCount,
 )
 
@@ -71,6 +73,7 @@ ISSUE_COLUMNS = """
     i.matched_rule AS matched_rule,
     i.duplicate_of AS duplicate_of,
     i.missing_since AS missing_since,
+    i.cover_error AS cover_error,
     i.page_count AS page_count,
     i.page_w AS page_w,
     i.page_h AS page_h,
@@ -186,6 +189,7 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         added_at=str(row["added_at"]),
         is_duplicate=row["duplicate_of"] is not None,
         missing_since=row["missing_since"],
+        cover_error=row["cover_error"],
         progress=progress,
     )
 
@@ -367,6 +371,33 @@ def title_calendar(
     return Calendar(year=chosen, years=years, days=days)
 
 
+def series_rows(connection: sqlite3.Connection, title_id: str) -> list[SeriesRow]:
+    """Every non-duplicate row of one title, for :mod:`paperstand.gaps`.
+
+    Missing issues are included on purpose — a gap is a date or number the
+    series never had a row for at all, and a missing issue already occupies
+    its own place in it. The *Unsorted* bucket is never analysed this way;
+    the caller skips titles with ``source = 'unsorted'`` before calling this.
+    """
+    rows = connection.execute(
+        """
+        SELECT issue_date, date_precision, issue_number, volume
+        FROM issues
+        WHERE title_id = :title_id AND duplicate_of IS NULL
+        """,
+        {"title_id": title_id},
+    ).fetchall()
+    return [
+        SeriesRow(
+            issue_date=row["issue_date"],
+            date_precision=str(row["date_precision"]),
+            issue_number=(int(row["issue_number"]) if row["issue_number"] is not None else None),
+            volume=(int(row["volume"]) if row["volume"] is not None else None),
+        )
+        for row in rows
+    ]
+
+
 # ------------------------------------------------------------------- issues
 
 
@@ -380,6 +411,7 @@ def _issue_where(
     year: int | None,
     include_duplicates: bool,
     missing: bool = False,
+    unreadable: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     where: list[str] = []
     params: dict[str, Any] = {}
@@ -388,6 +420,12 @@ def _issue_where(
         # missing. The duplicate rule plays no part — a missing row's
         # `duplicate_of` is already cleared the moment it goes missing.
         where.append("i.missing_since IS NOT NULL")
+    elif unreadable:
+        # The other maintenance filter: on top of `VISIBLE`, since a missing
+        # row's cover status is frozen until it returns and is already
+        # listed through `missing` — the two never overlap.
+        where.append(VISIBLE)
+        where.append("i.cover_status = 'error'")
     elif include_duplicates:
         where.append("i.missing_since IS NULL")
     else:
@@ -428,12 +466,14 @@ def list_issues(
     offset: int = 0,
     include_duplicates: bool = False,
     missing: bool = False,
+    unreadable: bool = False,
 ) -> tuple[list[Issue], int]:
     """A page of issues and the total the same filters match.
 
-    ``missing`` is the maintenance filter: with it, ``sort`` is
-    ignored and the page comes back most-recently-gone first, since "how
-    long has this been missing" is the only ordering that view needs.
+    ``missing`` and ``unreadable`` are the maintenance filters: with either,
+    ``sort`` is ignored and the page comes back newest first — "how long has
+    this been missing" and "when did this arrive" are the only orderings
+    those views need.
     """
     clause, params = _issue_where(
         title=title,
@@ -444,6 +484,7 @@ def list_issues(
         year=year,
         include_duplicates=include_duplicates,
         missing=missing,
+        unreadable=unreadable,
     )
     total = int(
         connection.execute(
@@ -451,7 +492,12 @@ def list_issues(
             params,
         ).fetchone()["total"]
     )
-    order = "i.missing_since DESC, i.id DESC" if missing else ISSUE_ORDER[sort]
+    if missing:
+        order = "i.missing_since DESC, i.id DESC"
+    elif unreadable:
+        order = "i.added_at DESC, i.id DESC"
+    else:
+        order = ISSUE_ORDER[sort]
     rows = connection.execute(
         f"{ISSUE_SELECT} {clause} ORDER BY {order} LIMIT :limit OFFSET :offset",
         {**params, "limit": limit, "offset": offset},
@@ -625,6 +671,48 @@ def unsorted_issues(
         {"limit": limit, "offset": offset},
     ).fetchall()
     return [issue_from_row(row) for row in rows], count_unsorted(connection)
+
+
+def unsorted_buckets(connection: sqlite3.Connection) -> list[UnsortedBucket]:
+    """How many files the parser could not place, per library's own bucket.
+
+    A different thing from the maintenance view's other ``unsorted`` — the
+    organizer's own inbox folder — this is the catalogue's own *Unsorted*
+    title, one per library that has one.
+    """
+    rows = connection.execute(
+        f"""
+        SELECT t.id AS title_id, l.id AS library_id, l.name AS library_name,
+               count(*) AS count
+        FROM issues i
+        JOIN titles t ON t.id = i.title_id
+        JOIN libraries l ON l.id = i.library_id
+        {UNSORTED_WHERE}
+        GROUP BY t.id
+        ORDER BY l.name COLLATE NOCASE
+        """
+    ).fetchall()
+    return [
+        UnsortedBucket(
+            title_id=str(row["title_id"]),
+            library_id=str(row["library_id"]),
+            library_name=str(row["library_name"]),
+            count=int(row["count"]),
+        )
+        for row in rows
+    ]
+
+
+def count_unreadable(connection: sqlite3.Connection) -> int:
+    """How many issues the renderer could not open at all.
+
+    On top of ``VISIBLE``: a missing row's ``cover_status`` is frozen from
+    before it vanished and is counted through ``missing_count`` instead.
+    """
+    row = connection.execute(
+        f"SELECT count(*) AS total FROM issues i WHERE {VISIBLE} AND i.cover_status = 'error'"
+    ).fetchone()
+    return int(row["total"])
 
 
 def like_pattern(text: str) -> str:
