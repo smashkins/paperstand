@@ -136,6 +136,31 @@ def test_coarser_rows_are_ignored() -> None:
     assert date_gaps(rows, "monthly") == ["2026-02"]
 
 
+def test_daily_main_and_supplement_on_the_same_day_is_no_gap() -> None:
+    """Two qualifying rows, but a single covered period: no span, no gap."""
+    rows = [
+        _row(issue_date="2026-03-01"),
+        _row(issue_date="2026-03-01"),  # the Weekend supplement, same date
+    ]
+    assert date_gaps(rows, "daily") == []
+
+
+def test_weekly_two_rows_in_the_same_week_is_no_gap() -> None:
+    rows = [
+        _row(issue_date="2026-03-02"),  # Monday, 2026-W10
+        _row(issue_date="2026-03-05"),  # Thursday, same ISO week
+    ]
+    assert date_gaps(rows, "weekly") == []
+
+
+def test_monthly_two_rows_in_the_same_month_is_no_gap() -> None:
+    rows = [
+        _row(issue_date="2026-03-01", date_precision="month"),
+        _row(issue_date="2026-03-15", date_precision="day"),
+    ]
+    assert date_gaps(rows, "monthly") == []
+
+
 def test_irregular_and_undeclared_never_produce_date_gaps() -> None:
     rows = [_row(issue_date="2026-01-01"), _row(issue_date="2026-06-01")]
     assert date_gaps(rows, "irregular") == []

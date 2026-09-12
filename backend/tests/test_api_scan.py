@@ -373,6 +373,50 @@ def test_a_stale_trigger_at_start_is_consumed_once(sample_settings: Settings) ->
     assert last.scan_id == first.scan_id
 
 
+def test_a_failed_start_leaves_the_trigger_for_the_next_poll(
+    sample_settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``scanner.begin`` raising must not drop the requested scan.
+
+    The trigger stays put across every failed attempt; once ``begin`` is
+    allowed to succeed, the very next poll — still serving the same
+    trigger file — starts and completes the scan.
+    """
+    database = open_database(sample_settings.db_path)
+    scheduler = ScanScheduler(sample_settings, database)
+    scheduler.poll = 0.05
+    trigger = sample_settings.scan_trigger_path
+    trigger.parent.mkdir(parents=True, exist_ok=True)
+    trigger.touch()
+
+    real_begin = scheduler.scanner.begin
+    allow = threading.Event()
+    attempts = {"count": 0}
+
+    def failing_begin() -> int:
+        attempts["count"] += 1
+        if not allow.is_set():
+            raise RuntimeError("the database is unusable")
+        return real_begin()
+
+    monkeypatch.setattr(scheduler.scanner, "begin", failing_begin)
+
+    try:
+        scheduler.start()
+        # Several poll cycles, each failing to start a scan.
+        assert wait_until(lambda: attempts["count"] >= 3)
+        assert scheduler.last is None
+        assert trigger.exists()  # never unlinked by a failed begin()
+
+        allow.set()
+        assert wait_until(lambda: scheduler.last is not None)
+        scheduler.stop()
+    finally:
+        database.close()
+
+    assert not trigger.exists()  # the eventual successful start consumes it
+
+
 def test_a_requested_scan_resets_the_periodic_clock(sample_settings: Settings) -> None:
     """A requested scan pushes the periodic one back a full interval from when
     it finished — never fires against the interval's original mark, which a

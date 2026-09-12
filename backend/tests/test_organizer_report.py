@@ -64,6 +64,21 @@ def test_inventory_lists_a_file_without_a_sidecar_and_one_in_a_sub_folder(
     assert [entry.folder for entry in entries] == ["unsorted", "unsorted", "duplicates"]
 
 
+def test_inventory_lists_an_uppercase_pdf_extension(tmp_path: Path) -> None:
+    inbox = tmp_path / "inbox"
+    (inbox / "unsorted").mkdir(parents=True)
+    (inbox / "unsorted" / "Something.PDF").write_bytes(b"four")
+    (inbox / "unsorted" / "Something.PDF.txt").write_text(
+        "no declared title matches\n", encoding="utf-8"
+    )
+
+    entries = inventory(inbox)
+
+    by_name = {(entry.folder, entry.name): entry for entry in entries}
+    assert by_name[("unsorted", "Something.PDF")].reason == "no declared title matches"
+    assert by_name[("unsorted", "Something.PDF")].size == 4
+
+
 def test_inventory_ignores_a_sidecar_left_without_its_pdf(tmp_path: Path) -> None:
     inbox = tmp_path / "inbox"
     (inbox / "unsorted").mkdir(parents=True)

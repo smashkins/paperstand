@@ -262,28 +262,31 @@ class ScanScheduler:
         """Try to start a scan for ``reason``; ``True`` only when one actually ran.
 
         ``consume`` — the scan trigger file, when this call is for it — is
-        unlinked only once ``_busy`` is held and only just before
-        ``scanner.begin()``. The order is the whole point: a touch that lands
-        while a scan is running is not consumed, so it waits for the next
-        wake-up and gets a scan of its own; a touch that lands after the
-        unlink and before the walk reaches its folder still gets a second
-        scan, which finds nothing to do and costs a fast phase. Nothing is
-        ever lost, at worst one scan is redundant.
+        unlinked only once ``_busy`` is held and ``scanner.begin()`` has
+        succeeded, and only just before the scan's walk starts. The order is
+        the whole point: a touch that lands while a scan is running is not
+        consumed, so it waits for the next wake-up and gets a scan of its
+        own; a touch that lands after the unlink and before the walk reaches
+        its folder still gets a second scan, which finds nothing to do and
+        costs a fast phase; and a ``begin()`` that raises leaves the trigger
+        in place, so a failed start is retried on the next poll instead of
+        the request being dropped. Nothing is ever lost, at worst one scan
+        is redundant.
         """
         if not self._busy.acquire(blocking=False):
             log.info("skipping the %s scan: one is already running", reason)
             return False
-        if consume is not None:
-            try:
-                consume.unlink(missing_ok=True)
-            except OSError as error:  # pragma: no cover - an unwritable data dir
-                log.warning("could not remove the scan trigger at %s: %s", consume, error)
         try:
             scan_id = self.scanner.begin()
         except Exception:  # pragma: no cover - the database is unusable
             log.exception("the %s scan could not be started", reason)
             self._busy.release()
             return False
+        if consume is not None:
+            try:
+                consume.unlink(missing_ok=True)
+            except OSError as error:  # pragma: no cover - an unwritable data dir
+                log.warning("could not remove the scan trigger at %s: %s", consume, error)
         self._current = scan_id
         self._progress = self._seed_progress(scan_id)
         log.info("starting the %s scan (%d)", reason, scan_id)

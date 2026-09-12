@@ -122,16 +122,34 @@ def _next_period(day: dt.date, frequency: Frequency) -> dt.date:
     return day.replace(month=day.month + 1, day=1)
 
 
+def _period_start(day: dt.date, frequency: Frequency) -> dt.date:
+    """The first day of ``day``'s own period, so two dates in the same period
+    round to the same, directly comparable, value."""
+    if frequency == "daily":
+        return day
+    if frequency == "weekly":
+        return day - dt.timedelta(days=day.isoweekday() - 1)
+    return day.replace(day=1)
+
+
 def date_gaps(rows: list[SeriesRow], frequency: Frequency | None) -> list[str]:
     """Periods with no issue at all, between the earliest and the latest, newest first.
 
     Only for ``daily``, ``weekly`` and ``monthly`` — ``irregular`` and an
-    undeclared title always answer ``[]`` — and only once there are at least
-    two qualifying rows to bracket a span with. Periods are ISO labels:
-    ``YYYY-MM-DD`` for a daily, ``YYYY-Www`` (``date.isocalendar()``) for a
-    weekly, ``YYYY-MM`` for a monthly. A variant or a supplement sharing its
-    date with the plain issue never creates an expectation of its own — it
-    is just one more row covering the same period.
+    undeclared title always answer ``[]`` — and only once the qualifying rows
+    span at least two distinct periods. Periods are ISO labels: ``YYYY-MM-DD``
+    for a daily, ``YYYY-Www`` (``date.isocalendar()``) for a weekly,
+    ``YYYY-MM`` for a monthly. A variant or a supplement sharing its date — or
+    just its cadence period, such as two issues in the same ISO week — with
+    another row never creates an expectation of its own: it is just one more
+    row covering the same period, and a title with only one covered period
+    has no span to find a hole in.
+
+    The loop below walks period starts, comparing them as dates rather than
+    labels: dates order linearly and ``_next_period`` always moves strictly
+    forward, so ``cursor`` is guaranteed to reach ``latest_start`` — and stop
+    — after a bounded number of steps, unlike a label, which can recur (two
+    dates a year apart can share a ``weekly`` or ``monthly`` label).
     """
     if frequency not in _DATED_FREQUENCIES:
         return []
@@ -139,16 +157,16 @@ def date_gaps(rows: list[SeriesRow], frequency: Frequency | None) -> list[str]:
     if len(dates) < 2:
         return []
     covered = {_period_label(day, frequency) for day in dates}
-    earliest, latest = min(dates), max(dates)
-    latest_label = _period_label(latest, frequency)
+    if len(covered) < 2:
+        return []
+    earliest_start = _period_start(min(dates), frequency)
+    latest_start = _period_start(max(dates), frequency)
 
     gaps: list[str] = []
-    cursor = earliest
-    while True:
+    cursor = earliest_start
+    while cursor < latest_start:
         cursor = _next_period(cursor, frequency)
         label = _period_label(cursor, frequency)
-        if label == latest_label:
-            break
         if label not in covered:
             gaps.append(label)
     gaps.reverse()

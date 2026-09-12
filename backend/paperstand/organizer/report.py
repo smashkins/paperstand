@@ -46,8 +46,8 @@ def _park_folder(inbox: Path, folder: Literal["unsorted", "duplicates"]) -> list
     if not root.is_dir():
         return []
     entries: list[OrganizerParked] = []
-    for pdf in root.rglob("*.pdf"):
-        if not pdf.is_file():
+    for pdf in root.rglob("*"):
+        if not pdf.is_file() or pdf.suffix.lower() != ".pdf":
             continue
         info = pdf.stat()
         entries.append(

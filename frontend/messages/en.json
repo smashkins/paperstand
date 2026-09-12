@@ -87,6 +87,7 @@
 	"marker_missing": "Missing. The last scan was refused — is the share mounted?",
 
 	"scan_rescan": "Rescan now",
+	"scan_scanning": "Scanning…",
 	"scan_running": "A scan is running",
 	"scan_idle": "Idle",
 	"scan_never": "No scan has finished yet.",

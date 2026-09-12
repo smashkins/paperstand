@@ -87,6 +87,7 @@
 	"marker_missing": "Assente. L'ultima scansione è stata rifiutata — la condivisione è montata?",
 
 	"scan_rescan": "Scansiona ora",
+	"scan_scanning": "Scansione in corso…",
 	"scan_running": "Scansione in corso",
 	"scan_idle": "Inattiva",
 	"scan_never": "Nessuna scansione completata finora.",

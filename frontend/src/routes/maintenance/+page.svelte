@@ -1,6 +1,14 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { NumberGap, TitleGaps, UnsortedBucket } from '$lib/api/client';
+	import {
+		api,
+		quiet,
+		type IssuePage,
+		type MaintenanceSummary,
+		type NumberGap,
+		type TitleGaps,
+		type UnsortedBucket
+	} from '$lib/api/client';
 	import { requestScan } from '$lib/api/scan';
 	import {
 		coverAspect,
@@ -26,18 +34,36 @@
 
 	let { data }: PageProps = $props();
 
+	/** Mirrors `+page.ts`'s own limit: a maintenance page, not a shelf. */
+	const LIST_LIMIT = 200;
+
+	// Each source starts as the promise `load` handed in. A rescan this page
+	// started (or found already running) replaces it with a fresh one once
+	// the scan finishes — otherwise every section here would read stale
+	// until a full reload.
+	let refreshedSummary = $state<Promise<MaintenanceSummary> | undefined>(undefined);
+	let refreshedGaps = $state<Promise<TitleGaps[]> | undefined>(undefined);
+	let refreshedMissing = $state<Promise<IssuePage> | undefined>(undefined);
+	let refreshedUnreadable = $state<Promise<IssuePage> | undefined>(undefined);
+
+	const summaryData = $derived(refreshedSummary ?? data.summary);
+	const gapsData = $derived(refreshedGaps ?? data.gaps);
+	const missingData = $derived(refreshedMissing ?? data.missing);
+	const unreadableData = $derived(refreshedUnreadable ?? data.unreadable);
+
 	let scanMessage = $state<string | null>(null);
 	let starting = $state(false);
+	let scanning = $state(false);
 
 	// The Missing section's "forgotten in N days" needs `missing_grace_days`
 	// from the summary; the two settle together so the number is never wrong.
-	const missingSection = $derived(Promise.all([data.missing, data.summary]));
+	const missingSection = $derived(Promise.all([missingData, summaryData]));
 
 	// The page's own summary sets the shared badge, so the number a person
 	// just looked at and the one in the top bar never disagree.
 	$effect(() => {
 		let live = true;
-		data.summary
+		summaryData
 			.then((summary) => {
 				if (live) attention.set(summary.attention);
 			})
@@ -47,17 +73,46 @@
 		};
 	});
 
+	/** Every section, fetched again now that a scan this page waited on has finished. */
+	function refreshAll(): void {
+		refreshedSummary = quiet(api.maintenance());
+		refreshedGaps = quiet(api.maintenanceGaps({}));
+		refreshedMissing = quiet(api.issues({ missing: true, limit: LIST_LIMIT }));
+		refreshedUnreadable = quiet(api.issues({ unreadable: true, limit: LIST_LIMIT }));
+	}
+
+	// While `scanning` is set — a scan this page started, or found already
+	// running — poll its status every two seconds, exactly as Settings does.
+	// Once it stops running, every section here is stale by definition, so
+	// all four are fetched again and the shared badge is refreshed with them.
+	$effect(() => {
+		if (!scanning) return;
+		const timer = setInterval(async () => {
+			try {
+				const status = await api.scanStatus();
+				if (!status.running) {
+					scanning = false;
+					refreshAll();
+					attention.refresh();
+				}
+			} catch {
+				// A blip is not worth stopping the poll over: the next tick retries.
+			}
+		}, 2000);
+		return () => clearInterval(timer);
+	});
+
 	async function rescan() {
 		starting = true;
 		scanMessage = null;
 		try {
 			const result = await requestScan();
 			scanMessage = result === 'started' ? m.scan_started() : m.scan_already_running();
+			scanning = true;
 		} catch {
 			scanMessage = m.scan_failed();
 		} finally {
 			starting = false;
-			attention.refresh();
 		}
 	}
 
@@ -111,9 +166,9 @@
 </div>
 
 <div class="flex flex-wrap items-center gap-3">
-	<Button variant="primary" onclick={rescan} disabled={starting}>
+	<Button variant="primary" onclick={rescan} disabled={starting || scanning}>
 		<Icon name="refresh" size={14} />
-		{m.scan_rescan()}
+		{scanning ? m.scan_scanning() : m.scan_rescan()}
 	</Button>
 	{#if scanMessage}
 		<p class="text-[13px] text-muted" role="status">{scanMessage}</p>
@@ -191,7 +246,7 @@
 </section>
 
 <section class="grid gap-4">
-	{#await data.unreadable}
+	{#await unreadableData}
 		<h2 class="opsz-title font-serif text-2xl font-semibold">
 			{m.maintenance_unreadable_heading()}
 		</h2>
@@ -227,7 +282,7 @@
 </section>
 
 <section class="grid gap-4">
-	{#await data.summary}
+	{#await summaryData}
 		<h2 class="opsz-title font-serif text-2xl font-semibold">{m.maintenance_inbox_heading()}</h2>
 		<Skeleton width="100%" height="140px" />
 	{:then summary}
@@ -351,7 +406,7 @@
 </section>
 
 <section class="grid gap-4">
-	{#await data.gaps}
+	{#await gapsData}
 		<h2 class="opsz-title font-serif text-2xl font-semibold">{m.maintenance_gaps_heading()}</h2>
 		<Skeleton width="100%" height="140px" />
 	{:then gaps}
