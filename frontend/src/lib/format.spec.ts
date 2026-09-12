@@ -7,6 +7,7 @@ import {
 	formatDateTime,
 	formatElapsed,
 	formatWhen,
+	formatGapPeriod,
 	formatIssueDate,
 	formatIssueLabel,
 	formatNumber,
@@ -320,5 +321,24 @@ describe('formatElapsed', () => {
 	it('treats negative or non-finite input as zero', () => {
 		expect(formatElapsed(-5)).toBe('0:00');
 		expect(formatElapsed(Number.NaN)).toBe('0:00');
+	});
+});
+
+describe('formatGapPeriod', () => {
+	it('renders a day as a short date', () => {
+		expect(formatGapPeriod('2026-03-03', 'en-GB')).toBe('3 Mar 2026');
+	});
+
+	it('renders an ISO week', () => {
+		expect(formatGapPeriod('2026-W02', 'en-GB')).toBe('Week 2, 2026');
+	});
+
+	it('renders a month and year', () => {
+		expect(formatGapPeriod('2026-02', 'en-GB')).toBe('February 2026');
+	});
+
+	it('follows the active locale', () => {
+		expect(formatGapPeriod('2026-02', 'it-IT')).toBe('febbraio 2026');
+		expect(formatGapPeriod('2026-W02', 'it-IT')).toBe('Settimana 2, 2026');
 	});
 });

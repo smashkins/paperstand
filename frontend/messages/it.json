@@ -7,6 +7,7 @@
 	"nav_newspapers": "Quotidiani",
 	"nav_magazines": "Riviste",
 	"nav_settings": "Impostazioni",
+	"nav_maintenance": "Manutenzione",
 	"nav_main": "Navigazione principale",
 	"skip_to_content": "Vai al contenuto",
 
@@ -163,5 +164,55 @@
 
 	"not_found_title": "Pagina non trovata",
 	"not_found_body": "Questa pagina non fa parte di Paperstand.",
-	"back_home": "Torna a Oggi"
+	"back_home": "Torna a Oggi",
+
+	"gap_week": "Settimana {week}, {year}",
+	"frequency_daily": "Quotidiana",
+	"frequency_weekly": "Settimanale",
+	"frequency_monthly": "Mensile",
+	"frequency_irregular": "Irregolare",
+
+	"maintenance_title": "Manutenzione",
+	"maintenance_lede": "Tutto ciò che la scansione e l'organizzatore non sono riusciti a sistemare da soli, in una sola pagina.",
+	"maintenance_badge_aria_one": "{count} elemento richiede attenzione",
+	"maintenance_badge_aria_other": "{count} elementi richiedono attenzione",
+
+	"maintenance_missing_heading": "Mancanti",
+	"maintenance_missing_note": "Rimetti il file in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",
+	"maintenance_missing_empty": "Nessun file mancante.",
+	"maintenance_missing_since": "Mancante da {when}",
+	"maintenance_forgotten_next_scan": "Sarà dimenticato alla prossima scansione",
+	"maintenance_forgotten_days_one": "Sarà dimenticato tra {count} giorno",
+	"maintenance_forgotten_days_other": "Sarà dimenticato tra {count} giorni",
+
+	"maintenance_unreadable_heading": "Illeggibili",
+	"maintenance_unreadable_empty": "Tutti i file si sono aperti.",
+
+	"maintenance_inbox_heading": "Posta in arrivo",
+	"maintenance_inbox_never_run": "L'organizzatore non è ancora stato eseguito qui.",
+	"maintenance_inbox_note": "I file in unsorted/ proseguono non appena la loro testata viene dichiarata; i file in duplicates/ si possono eliminare senza rischi.",
+	"maintenance_inbox_last": "Ultima esecuzione {when}",
+	"maintenance_mode_apply": "applicazione",
+	"maintenance_mode_dry_run": "prova a vuoto",
+	"maintenance_inbox_summary": "{moved} spostati · {duplicate} duplicati · {unsorted} non ordinati · {skipped} saltati · {failed} falliti",
+	"maintenance_inbox_refused": "Questa esecuzione è stata rifiutata: mancava il marcatore della radice della libreria.",
+	"maintenance_inbox_unsorted_table": "unsorted/",
+	"maintenance_inbox_duplicates_table": "duplicates/",
+	"maintenance_inbox_parked_empty": "Niente parcheggiato qui.",
+	"maintenance_column_reason": "Motivo",
+	"maintenance_column_size": "Dimensione",
+	"maintenance_column_modified": "Modificato",
+	"maintenance_unsorted_bucket_one": "{count} file che il parser non è riuscito a collocare, in {library}",
+	"maintenance_unsorted_bucket_other": "{count} file che il parser non è riuscito a collocare, in {library}",
+
+	"maintenance_gaps_heading": "Buchi",
+	"maintenance_gaps_empty": "Nessuna testata ha un buco al momento.",
+	"maintenance_last_issue": "Ultima uscita {when}",
+	"maintenance_overdue_days_one": "In ritardo di {count} giorno",
+	"maintenance_overdue_days_other": "In ritardo di {count} giorni",
+	"maintenance_date_gaps_one": "{count} data mancante",
+	"maintenance_date_gaps_other": "{count} date mancanti",
+	"maintenance_number_gaps_one": "{count} numero mancante",
+	"maintenance_number_gaps_other": "{count} numeri mancanti",
+	"maintenance_gaps_more": "+{count} altri"
 }

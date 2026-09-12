@@ -93,6 +93,32 @@ describe('api', () => {
 		const fetch = vi.fn(async () => new Response(null, { status: 204 }));
 		await expect(api.deleteProgress('abc', { fetch })).resolves.toBeUndefined();
 	});
+
+	it('asks issues for the missing and unreadable maintenance filters', async () => {
+		const fetch = stubFetch({ items: [], total: 0 });
+		await api.issues({ missing: true }, { fetch });
+		expect(calledUrl(fetch)).toBe('/api/issues?missing=true');
+
+		const secondFetch = stubFetch({ items: [], total: 0 });
+		await api.issues({ unreadable: true }, { fetch: secondFetch });
+		expect(calledUrl(secondFetch)).toBe('/api/issues?unreadable=true');
+	});
+
+	it('asks for the maintenance summary with no parameters', async () => {
+		const fetch = stubFetch({ attention: 0 });
+		await api.maintenance({ fetch });
+		expect(calledUrl(fetch)).toBe('/api/maintenance');
+	});
+
+	it('asks for the gaps report, with and without a today override', async () => {
+		const fetch = stubFetch([]);
+		await api.maintenanceGaps({}, { fetch });
+		expect(calledUrl(fetch)).toBe('/api/maintenance/gaps');
+
+		const secondFetch = stubFetch([]);
+		await api.maintenanceGaps({ today: '2026-04-16' }, { fetch: secondFetch });
+		expect(calledUrl(secondFetch)).toBe('/api/maintenance/gaps?today=2026-04-16');
+	});
 });
 
 describe('ApiError', () => {

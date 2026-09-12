@@ -272,6 +272,30 @@ export function formatElapsed(seconds: number): string {
 	return `${minutes}:${String(secs).padStart(2, '0')}`;
 }
 
+/**
+ * One label from `GET /api/maintenance/gaps`'s `date_gaps`, rendered for a chip.
+ *
+ * The backend hands back one of three shapes, told apart by their own
+ * pattern rather than by which cadence asked for them: `YYYY-MM-DD` as a
+ * short date, `YYYY-Www` (ISO week) as "week 35, 2026", `YYYY-MM` as the
+ * month name and year.
+ */
+export function formatGapPeriod(label: string, locale = 'en'): string {
+	const week = /^(\d{4})-W(\d{2})$/.exec(label);
+	if (week) {
+		const [, year, weekNumber] = week;
+		return m.gap_week(
+			{ week: formatNumber(Number(weekNumber), locale), year },
+			{ locale: messageLocale(locale) }
+		);
+	}
+	const month = /^(\d{4})-(\d{2})$/.exec(label);
+	if (month) {
+		return formatIssueDate(`${label}-01`, locale, { month: 'long', year: 'numeric' });
+	}
+	return formatShortDate(label, locale);
+}
+
 /** Capitalise the first letter, which Italian month and weekday names need. */
 export function capitalise(value: string): string {
 	if (!value) return value;

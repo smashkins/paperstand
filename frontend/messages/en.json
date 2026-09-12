@@ -7,6 +7,7 @@
 	"nav_newspapers": "Newspapers",
 	"nav_magazines": "Magazines",
 	"nav_settings": "Settings",
+	"nav_maintenance": "Maintenance",
 	"nav_main": "Main navigation",
 	"skip_to_content": "Skip to content",
 
@@ -163,5 +164,55 @@
 
 	"not_found_title": "Not found",
 	"not_found_body": "That page is not part of Paperstand.",
-	"back_home": "Back to Today"
+	"back_home": "Back to Today",
+
+	"gap_week": "Week {week}, {year}",
+	"frequency_daily": "Daily",
+	"frequency_weekly": "Weekly",
+	"frequency_monthly": "Monthly",
+	"frequency_irregular": "Irregular",
+
+	"maintenance_title": "Maintenance",
+	"maintenance_lede": "Everything scanning and the organizer could not settle on their own, gathered on one page.",
+	"maintenance_badge_aria_one": "{count} item needs attention",
+	"maintenance_badge_aria_other": "{count} items need attention",
+
+	"maintenance_missing_heading": "Missing",
+	"maintenance_missing_note": "Put the file back anywhere in the library, then rescan — it reappears where it was.",
+	"maintenance_missing_empty": "Nothing has gone missing.",
+	"maintenance_missing_since": "Missing since {when}",
+	"maintenance_forgotten_next_scan": "Forgotten on the next scan",
+	"maintenance_forgotten_days_one": "Forgotten in {count} day",
+	"maintenance_forgotten_days_other": "Forgotten in {count} days",
+
+	"maintenance_unreadable_heading": "Unreadable",
+	"maintenance_unreadable_empty": "Every file opened.",
+
+	"maintenance_inbox_heading": "Inbox",
+	"maintenance_inbox_never_run": "The organizer has not run here yet.",
+	"maintenance_inbox_note": "Files in unsorted/ move on once their title is declared; files in duplicates/ are safe to delete.",
+	"maintenance_inbox_last": "Last run {when}",
+	"maintenance_mode_apply": "apply",
+	"maintenance_mode_dry_run": "dry run",
+	"maintenance_inbox_summary": "{moved} moved · {duplicate} duplicate · {unsorted} unsorted · {skipped} skipped · {failed} failed",
+	"maintenance_inbox_refused": "This run was refused: the library's root marker was missing.",
+	"maintenance_inbox_unsorted_table": "unsorted/",
+	"maintenance_inbox_duplicates_table": "duplicates/",
+	"maintenance_inbox_parked_empty": "Nothing parked here.",
+	"maintenance_column_reason": "Reason",
+	"maintenance_column_size": "Size",
+	"maintenance_column_modified": "Modified",
+	"maintenance_unsorted_bucket_one": "{count} file the parser could not place, in {library}",
+	"maintenance_unsorted_bucket_other": "{count} files the parser could not place, in {library}",
+
+	"maintenance_gaps_heading": "Gaps",
+	"maintenance_gaps_empty": "No title has a gap right now.",
+	"maintenance_last_issue": "Last issue {when}",
+	"maintenance_overdue_days_one": "Overdue by {count} day",
+	"maintenance_overdue_days_other": "Overdue by {count} days",
+	"maintenance_date_gaps_one": "{count} missing date",
+	"maintenance_date_gaps_other": "{count} missing dates",
+	"maintenance_number_gaps_one": "{count} missing number",
+	"maintenance_number_gaps_other": "{count} missing numbers",
+	"maintenance_gaps_more": "+{count} more"
 }

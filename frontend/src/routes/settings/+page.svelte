@@ -1,8 +1,11 @@
 <script lang="ts">
-	import { ApiError, api, type ScanRecord, type ScanStatus } from '$lib/api/client';
+	import { resolve } from '$app/paths';
+	import { api, type ScanRecord, type ScanStatus } from '$lib/api/client';
+	import { requestScan } from '$lib/api/scan';
 	import { formatDateTime, formatElapsed, formatNumber, formatSize } from '$lib/format';
 	import { m } from '$lib/paraglide/messages.js';
 	import { locales, type Locale } from '$lib/paraglide/runtime';
+	import { attention } from '$lib/stores/attention.svelte';
 	import { locale } from '$lib/stores/locale.svelte';
 	import {
 		IMAGE_MODES,
@@ -64,11 +67,13 @@
 				const status = await api.scanStatus();
 				scan = status;
 				// The scan has just landed, so its row now carries a finish time,
-				// and the marker may have changed along with it.
+				// and the marker may have changed along with it — and so may the
+				// maintenance badge, so the top bar and Maintenance stay current.
 				if (!status.running) {
 					const health = await api.health();
 					lastRun = health.last_scan;
 					libraryMarker = health.library_marker;
+					attention.refresh();
 				}
 			} catch {
 				// A blip is not worth showing: the next tick tries again.
@@ -81,16 +86,11 @@
 		starting = true;
 		scanMessage = null;
 		try {
-			await api.scan();
-			scanMessage = m.scan_started();
+			const result = await requestScan();
+			scanMessage = result === 'started' ? m.scan_started() : m.scan_already_running();
 			scan = await api.scanStatus();
-		} catch (error) {
-			if (error instanceof ApiError && error.status === 409) {
-				scanMessage = m.scan_already_running();
-				scan = await api.scanStatus().catch(() => scan);
-			} else {
-				scanMessage = m.scan_failed();
-			}
+		} catch {
+			scanMessage = m.scan_failed();
 		} finally {
 			starting = false;
 		}
@@ -135,6 +135,17 @@
 <h1 class="opsz-title font-serif text-[clamp(28px,4vw,40px)] font-semibold tracking-[-0.02em]">
 	{m.settings_title()}
 </h1>
+
+<a
+	href={resolve('/maintenance')}
+	class="flex items-center gap-3 rounded-cover border border-hairline bg-surface px-4 py-3 transition-colors hover:border-accent"
+>
+	<Icon name="maintenance" size={16} />
+	<span class="font-medium">{m.nav_maintenance()}</span>
+	{#if attention.count !== null}
+		<span class="tabular ml-auto text-muted">{formatNumber(attention.count, locale.intl)}</span>
+	{/if}
+</a>
 
 {#await data.stats}
 	<Skeleton width="100%" height="200px" />

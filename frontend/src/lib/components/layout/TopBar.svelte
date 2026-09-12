@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { pluralise } from '$lib/format';
 	import { m } from '$lib/paraglide/messages.js';
 	import { locales, type Locale } from '$lib/paraglide/runtime';
+	import { attention } from '$lib/stores/attention.svelte';
 	import { locale } from '$lib/stores/locale.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -24,6 +26,23 @@
 		if (href === '/') return page.url.pathname === '/';
 		return page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
 	}
+
+	// One request per page load of the app, not per navigation: the maintenance
+	// page and Settings refresh the same store on their own after that.
+	$effect(() => {
+		attention.refresh();
+	});
+
+	const maintenanceLabel = $derived(
+		attention.count && attention.count > 0
+			? pluralise(
+					attention.count,
+					locale.intl,
+					m.maintenance_badge_aria_one,
+					m.maintenance_badge_aria_other
+				)
+			: m.nav_maintenance()
+	);
 </script>
 
 <header
@@ -95,6 +114,24 @@
 				<Icon name="theme" size={14} />
 				<span class="hidden md:inline">{m.theme_label()}</span>
 			</button>
+
+			<a
+				href={resolve('/maintenance')}
+				class="relative hidden h-[30px] items-center rounded-cover border border-hairline bg-surface px-2.5 transition-colors hover:border-accent sm:inline-flex"
+				class:border-accent={isActive('/maintenance')}
+				aria-label={maintenanceLabel}
+				title={m.nav_maintenance()}
+			>
+				<Icon name="maintenance" size={14} />
+				{#if attention.count !== null && attention.count > 0}
+					<span
+						class="tabular absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-ink"
+						aria-hidden="true"
+					>
+						{attention.count > 99 ? '99+' : attention.count}
+					</span>
+				{/if}
+			</a>
 
 			<a
 				href={resolve('/settings')}
