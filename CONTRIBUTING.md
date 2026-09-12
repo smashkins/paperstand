@@ -64,6 +64,11 @@ driven from the repository root through the `Makefile`.
 `make lint` and `make test` must be green before anything is committed; CI runs the same
 commands, plus `npm run build` and a build of the container image.
 
+The backend suite runs its tests in parallel and, unless a test is marked
+`@pytest.mark.real_covers`, stands in a small placeholder image for a scan's cover and
+thumbnail so that only the tests that actually look at a rendered cover pay for one; run
+`uv run pytest -n 0` from `backend/` for a plain, serial pass with output in test order.
+
 Three of them catch mistakes that are easy to make and hard to see:
 
 - **`make gen-api`.** `frontend/src/lib/api/openapi.json` and the TypeScript client

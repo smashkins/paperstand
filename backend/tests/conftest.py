@@ -24,13 +24,16 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import pymupdf
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from paperstand.config import Settings
 from paperstand.db import issue_id
 from paperstand.main import create_app
+from paperstand.scanner.covers import TEXT_LIMIT, CoverError, CoverResult, cover_paths
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 
@@ -41,6 +44,71 @@ EXAMPLE_CONFIG = REPO_ROOT / "paperstand.example.yml"
 #: Fixed "today", so that the generated library never moves under the tests.
 SAMPLE_TODAY = dt.date(2026, 3, 17)
 SAMPLE_DAYS = 14
+
+
+# ------------------------------------------------------------- fast covers
+#
+# A scan of the sample library spends most of a second turning each page into
+# a 900 px cover and a 300 px thumbnail — real rasterisation, a resize and a
+# JPEG encode, twice per issue. Most tests that run a scan never look at the
+# rendered pixels; they check that a scan happened, what it counted, or what
+# it wrote to the database. For those, `_fast_render_cover` below keeps every
+# real number `render_cover` would have reported — page count, page size,
+# first page text, and every way a document can be unreadable — and swaps in
+# a trivial placeholder image for the two files it writes, which is what
+# actually costs the time. A test that inspects the rendered cover or
+# thumbnail itself opts back into the real renderer with
+# `@pytest.mark.real_covers` (module-level `pytestmark` works too).
+
+
+def _write_placeholder_jpeg(path: Path) -> None:
+    """A tiny, valid JPEG at ``path`` — enough for `has_cover`, not for pixels."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.new("RGB", (2, 2), color=(128, 128, 128)) as placeholder:
+        placeholder.save(path, format="JPEG")
+
+
+def _fast_render_cover(
+    pdf_path: Path, identifier: str, cache_root: Path
+) -> CoverResult | CoverError:
+    """Stand-in for `paperstand.scanner.covers.render_cover`, minus the pixels."""
+    try:
+        with pymupdf.open(pdf_path) as document:
+            if document.needs_pass:
+                return CoverError(message="the document is encrypted")
+            page_count = document.page_count
+            if page_count < 1:
+                return CoverError(message="the document has no pages")
+            page = document.load_page(0)
+            rect = page.rect
+            text = page.get_text("text")[:TEXT_LIMIT]
+    except Exception as error:  # matches render_cover: never raises
+        return CoverError(message=f"{type(error).__name__}: {error}")
+
+    cover, thumbnail = cover_paths(cache_root, identifier)
+    _write_placeholder_jpeg(cover)
+    _write_placeholder_jpeg(thumbnail)
+    return CoverResult(
+        page_count=page_count,
+        page_w=float(rect.width),
+        page_h=float(rect.height),
+        first_page_text=text,
+        cover=cover,
+        thumbnail=thumbnail,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _fast_covers(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the scanner's `render_cover` with the stub above, by default.
+
+    Patched on `paperstand.scanner.scanner`, the only place a scan of the
+    sample library calls it from — never on `paperstand.scanner.covers`
+    itself, so a test that imports and calls `render_cover` directly (as
+    `test_covers.py` does) always exercises the real renderer, marker or not.
+    """
+    if request.node.get_closest_marker("real_covers") is None:
+        monkeypatch.setattr("paperstand.scanner.scanner.render_cover", _fast_render_cover)
 
 
 @dataclass(frozen=True)
@@ -188,6 +256,10 @@ def scanned_data(sample_source: SampleLibrary, tmp_path_factory: pytest.TempPath
     every id — and every unchanged row — in this catalogue is exactly as valid
     against each test's private copy of the library as it was against the
     original.
+
+    Session-scoped fixtures are set up before function-scoped ones, so this
+    scan always runs before ``_fast_covers`` below has patched anything: every
+    cover and thumbnail under this ``/data`` is a real render.
     """
     data = tmp_path_factory.mktemp("scanned") / "data"
     data.mkdir(parents=True)

@@ -50,6 +50,7 @@ def image_of(content: bytes) -> Image.Image:
 # ------------------------------------------------------------------- covers
 
 
+@pytest.mark.real_covers
 @pytest.mark.parametrize(("name", "width"), [("cover", 900), ("thumb", 300)])
 def test_the_cached_images_are_served(
     catalogue_client: TestClient, issue_id_: str, name: str, width: int
@@ -104,6 +105,7 @@ def test_a_matching_validator_is_a_304(catalogue_client: TestClient, issue_id_: 
     assert response.content == b""
 
 
+@pytest.mark.real_covers
 def test_a_lost_cover_is_rendered_on_demand(
     catalogue_client: TestClient, catalogue_settings: Settings, issue_id_: str
 ) -> None:
