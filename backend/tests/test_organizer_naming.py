@@ -89,7 +89,7 @@ def test_a_numbered_magazine_gets_no_zero_padding() -> None:
 
 
 def test_volume_and_issue_the_number_is_the_issue_not_the_volume() -> None:
-    """Amendment 2 (P1.1): the *old* volume-and-issue patterns capture `v2024`
+    """Amendment 2: the *old* volume-and-issue patterns capture `v2024`
     as the year, not as `ParsedIssue.volume` — only the canonical grammar's own
     `volume` group does that (see the tests below)."""
     plan = plan_issue(

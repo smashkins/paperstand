@@ -1654,7 +1654,7 @@
 		},
 		"/api/issues": {
 			"get": {
-				"description": "A filtered, sorted page of issues, with the total behind it.\n\n``missing`` shows only what every other filter hides for having gone\nmissing — the maintenance view (P1.6) will use it; it is ``false``\neverywhere else, including the default list.",
+				"description": "A filtered, sorted page of issues, with the total behind it.\n\n``missing`` shows only what every other filter hides for having gone\nmissing — a maintenance view will use it; it is ``false``\neverywhere else, including the default list.",
 				"operationId": "list_issues_api_issues_get",
 				"parameters": [
 					{

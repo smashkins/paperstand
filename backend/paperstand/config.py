@@ -80,7 +80,7 @@ class Settings(BaseSettings):
 
     missing_grace_days: int = 7
     """How long a catalogued issue whose file has vanished is kept, hidden,
-    before its row is forgotten. ``0`` restores the pre-P1.5 behaviour: gone
+    before its row is forgotten. ``0`` restores the earlier behaviour: gone
     the first scan that does not find it. A negative value is clamped to
     zero rather than rejected — there is no sane reading of "keep it for
     minus three days"."""

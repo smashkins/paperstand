@@ -49,7 +49,7 @@ def create_router(database: Database | None) -> APIRouter:
         """A filtered, sorted page of issues, with the total behind it.
 
         ``missing`` shows only what every other filter hides for having gone
-        missing — the maintenance view (P1.6) will use it; it is ``false``
+        missing — a maintenance view will use it; it is ``false``
         everywhere else, including the default list.
         """
         items, total = queries.list_issues(

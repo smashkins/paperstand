@@ -230,7 +230,7 @@ its reading position all stay exactly as they were. If the same bytes turn up ag
 `PAPERSTAND_MISSING_GRACE_DAYS` (seven, by default) has passed — at the same path or anywhere
 else in the library — the mark is cleared and nothing is re-rendered; past that many days, the
 row is removed the way it always was, handing its reading position to a same-hash survivor
-first if one exists. Setting the grace to `0` restores the pre-P1.5 behaviour of removing a
+first if one exists. Setting the grace to `0` restores the earlier behaviour of removing a
 vanished file on the very first scan that does not find it. This is the one exception a
 **replacement** does not get: a path that now holds *different* bytes is a new issue from the
 moment it is seen, immediately, whatever the grace is set to — grace is for a file that

@@ -107,7 +107,7 @@ REAL_TITLE = "t.source <> 'unsorted'"
 #: Whether an issue belongs on a shelf a reader browses: not a duplicate, and
 #: not missing. Every list, count and calendar in this module applies it —
 #: `issue_row`/`get_issue` are the deliberate exception, since a bookmarked
-#: detail URL and the maintenance view (P1.6) both need to reach a row this
+#: detail URL and a maintenance view both need to reach a row this
 #: hides. Assumes the issues table is aliased ``i``.
 VISIBLE = "i.duplicate_of IS NULL AND i.missing_since IS NULL"
 
@@ -431,7 +431,7 @@ def list_issues(
 ) -> tuple[list[Issue], int]:
     """A page of issues and the total the same filters match.
 
-    ``missing`` is the maintenance filter (P1.6): with it, ``sort`` is
+    ``missing`` is the maintenance filter: with it, ``sort`` is
     ignored and the page comes back most-recently-gone first, since "how
     long has this been missing" is the only ordering that view needs.
     """

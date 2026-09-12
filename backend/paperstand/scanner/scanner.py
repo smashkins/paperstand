@@ -238,7 +238,7 @@ class Scanner:
 
         Also where the cache layout is brought up to date — two cheap
         ``listdir``s — so that a version bump, or an upgrade from the
-        pre-P1.5 unversioned layout, is caught before the slow phase or an
+        earlier unversioned layout, is caught before the slow phase or an
         image request ever reads through ``covers_root``/``pages_root``.
         """
         ensure_layout(self.settings.cache_path)

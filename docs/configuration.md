@@ -41,7 +41,7 @@ keeping them together is what makes "delete `/data` and rescan" a complete reset
 | --- | --- | --- |
 | `PAPERSTAND_SCAN_ON_START` | `true` | Scan once at start-up. Set it to `false` on a very large library if you would rather trigger the first scan yourself. |
 | `PAPERSTAND_SCAN_INTERVAL` | `900` | Seconds between automatic scans. `0` switches the schedule off; *Rescan now* in Settings and `POST /api/scan` still work. |
-| `PAPERSTAND_MISSING_GRACE_DAYS` | `7` | How long a catalogued issue whose file has vanished is kept, hidden, before its row is forgotten. `0` restores the pre-P1.5 behaviour: gone on the very first scan that does not find it. A negative value is clamped to `0`. |
+| `PAPERSTAND_MISSING_GRACE_DAYS` | `7` | How long a catalogued issue whose file has vanished is kept, hidden, before its row is forgotten. `0` restores the earlier behaviour: gone on the very first scan that does not find it. A negative value is clamped to `0`. |
 | `PAPERSTAND_COVER_WORKERS` | `2` | Threads rendering covers during the slow phase of a scan. |
 
 A scan has two phases. The fast one walks the library, parses the names and writes the
@@ -117,8 +117,8 @@ The version, not the file's modification time, is what an image's URL carries as
 touch of a PDF changes neither the URL nor the `immutable` response a browser already cached.
 Bumping the version is the whole of a cache invalidation: at the next start-up, the previous
 version's directory is deleted outright, covers are rendered again by the next scan's slow
-phase and pages as they are next asked for. The one-time move from a Paperstand older than
-P1.5, which had no version directory at all, is a plain rename of every existing file into
+phase and pages as they are next asked for. The one-time move from a Paperstand that
+had no version directory at all is a plain rename of every existing file into
 `v1/` — nothing is re-rendered for that alone.
 
 Deleting `<data>/cache` by hand is safe at any time, running or not. Covers come back on

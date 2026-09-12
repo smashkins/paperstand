@@ -510,8 +510,8 @@ CONFIGURED: tuple[Expected, ...] = (
         rule="pattern[0] title:config",
     ),
     # A variant with no `publication.yml` to declare it against: undeclared,
-    # not rejected — an undeclared supplement is still catalogued (P1.2 design
-    # decision 2), only its rule tail says so.
+    # not rejected — an undeclared supplement is still catalogued (a design
+    # decision), only its rule tail says so.
     Expected(
         rel_path="Magazines/Confini/Confini - 2026 - n8 - Speciale.pdf",
         title="Confini",

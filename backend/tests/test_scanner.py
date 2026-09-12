@@ -299,7 +299,7 @@ def test_deleting_a_file_removes_its_row_and_its_cache(
     sample_library: SampleLibrary, data_dir: Path
 ) -> None:
     """With the grace off, a vanished file is removed on the very next scan —
-    today's pre-P1.5 behaviour, still available through
+    the earlier behaviour, still available through
     ``PAPERSTAND_MISSING_GRACE_DAYS=0``."""
     settings = quiet_settings(sample_library.root, data_dir, missing_grace_days=0)
     write_sample_config(settings.config_path)
@@ -1200,7 +1200,7 @@ def test_a_legacy_cache_layout_is_migrated_before_the_next_scan_renders(
     cover_bytes = cover.read_bytes()
     thumb_bytes = thumb.read_bytes()
 
-    # Recreate the pre-P1.5, unversioned layout from the same bytes, and
+    # Recreate the earlier, unversioned layout from the same bytes, and
     # throw away the versioned copy so only the legacy one is left to serve.
     legacy_folder = scan_settings.cache_path / "covers" / identifier[:2]
     legacy_folder.mkdir(parents=True)

@@ -75,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modification time, so a touch of a PDF changes neither the URL nor the
   ETag. Bumping the version, the whole of a cache invalidation, deletes the
   previous version's directory and lets the next scan or request re-render;
-  a cache in the pre-P1.5, unversioned layout is moved into `v1/` in place at
+  a cache in the earlier, unversioned layout is moved into `v1/` in place at
   start-up, file by file, without re-rendering anything.
 
 - `organize-plan` now plans an undeclared configured title inside its own
