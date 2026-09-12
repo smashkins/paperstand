@@ -91,10 +91,11 @@ uv run --project backend python -m paperstand organize --inbox ./inbox --library
 
 These are not style preferences; a change that breaks one of them is wrong.
 
-1. **The server never writes inside `/library`**; it is mounted read-only. The organizer is
-   the only writer, and only to add: it moves files in from its inbox, never overwrites,
-   never modifies or deletes a file already there, and never changes a PDF's bytes.
-   Everything Paperstand produces goes under `/data`.
+1. **The server never writes inside `/library`**; it is mounted read-only. The organizer
+   is the only writer: it adds files from its inbox and, only when explicitly asked
+   (`migrate --apply`), moves a file already there to its canonical place. It never
+   overwrites, never deletes a file, and never changes a PDF's bytes. Everything
+   Paperstand produces goes under `/data`.
 2. **No naming rule lives in Python.** File name parsing is driven by the declarative
    profiles in `backend/paperstand/parsing/profiles/`. A shape the parser cannot read is a
    change to a profile, or a new profile — never an `if` in the engine.

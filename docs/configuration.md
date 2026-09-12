@@ -110,6 +110,19 @@ Every run — apply or dry run — writes what it did to `<data>/organizer/last-
 the main service reads back on `GET /api/maintenance`; see
 [The run report and the scan trigger](organizer.md#the-run-report-and-the-scan-trigger).
 
+`paperstand migrate` — [`organizer.md#migrate`](organizer.md#migrate) — reads the same
+variables but is not a service on a loop: it renames and moves a file already inside the
+library to its canonical place, run once, watched, through the same profile:
+
+```bash
+docker compose --profile organizer run --rm organizer migrate --apply
+```
+
+Every applied run that moves at least one file writes its own report under
+`<data>/organizer/migrations/`, one file per run, named after the run's own start time and
+never overwritten — unlike `last-run.json` above, which only ever holds the organizer's most
+recent pass.
+
 ### Rendering and the page cache
 
 | Variable | Default | What it does |

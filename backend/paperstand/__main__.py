@@ -126,6 +126,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="repeat every N seconds until SIGTERM/SIGINT (default: run once)",
     )
+
+    migrate_command = subparsers.add_parser(
+        "migrate",
+        help="rename and move files already in the library to the canonical layout",
+    )
+    migrate_command.add_argument(
+        "--library",
+        type=Path,
+        default=None,
+        help="library root to migrate (default: PAPERSTAND_LIBRARY)",
+    )
+    migrate_command.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="directory holding the database and the caches (default: PAPERSTAND_DATA)",
+    )
+    migrate_command.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="paperstand.yml to use (default: <data>/paperstand.yml)",
+    )
+    migrate_command.add_argument(
+        "--apply",
+        action="store_true",
+        help="actually move files (default: print the report and touch nothing)",
+    )
+    migrate_command.add_argument(
+        "--keep-empty-folders",
+        action="store_true",
+        help="never remove a folder a move left empty",
+    )
     return parser
 
 
@@ -231,6 +264,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             apply=args.apply,
             settle=args.settle,
             every=args.every,
+        )
+    if args.command == "migrate":
+        from paperstand.cli.migrate import migrate
+
+        overrides = {
+            key: value
+            for key, value in (("library", args.library), ("data", args.data))
+            if value is not None
+        }
+        settings = get_settings()
+        if overrides:
+            settings = Settings(**{**settings.model_dump(), **overrides})
+        return migrate(
+            settings.library,
+            settings.data,
+            args.config,
+            apply=args.apply,
+            prune_empty=not args.keep_empty_folders,
         )
     parser.print_help()
     return 1

@@ -24,6 +24,7 @@ from paperstand.db import (
     open_database,
     read_content_hashes,
     read_meta,
+    read_rel_path_hashes,
     set_meta,
     title_id,
     user_version,
@@ -539,6 +540,66 @@ def test_read_content_hashes_on_a_populated_schema_3_database(
     assert expected, "the scanned sample library produced no hashed row to check"
 
     assert read_content_hashes(catalogue_settings.db_path) == expected
+
+
+# ----------------------------------------------------------- read_rel_path_hashes
+
+
+def test_read_rel_path_hashes_on_an_absent_file_returns_empty(tmp_path: Path) -> None:
+    assert read_rel_path_hashes(tmp_path / "absent.db") == {}
+
+
+def test_read_rel_path_hashes_on_a_schema_2_database_returns_none(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_2(path)
+
+    with caplog.at_level(logging.WARNING, logger="paperstand"):
+        assert read_rel_path_hashes(path) is None
+    warnings = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_read_rel_path_hashes_on_a_populated_catalogue_returns_every_row_hashed_and_not(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "paperstand.db"
+    database = open_database(path)
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO libraries VALUES ('l', 'Newspapers', 'Newspapers', 'newspaper', "
+            "'config', ?)",
+            (utc_now(),),
+        )
+        connection.execute(
+            "INSERT INTO titles (id, library_id, name, sort_name, kind, source, created_at) "
+            "VALUES ('t', 'l', 'Corriere del Ponte', 'corriere del ponte', 'newspaper', "
+            "'config', ?)",
+            (utc_now(),),
+        )
+        connection.execute(
+            "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, "
+            "mtime_ns, date_precision, date_source, derived_title, label, matched_rule, "
+            "content_hash, added_at, updated_at) VALUES ('i1', 'l', 't', 'Newspapers/a.pdf', "
+            "'a.pdf', 1, 1, 'day', 'filename', 'Corriere del Ponte', '', 'D1', "
+            "'deadbeef', ?, ?)",
+            (utc_now(), utc_now()),
+        )
+        connection.execute(
+            "INSERT INTO issues (id, library_id, title_id, rel_path, filename, size, "
+            "mtime_ns, date_precision, date_source, derived_title, label, matched_rule, "
+            "content_hash, added_at, updated_at) VALUES ('i2', 'l', 't', 'Newspapers/b.pdf', "
+            "'b.pdf', 1, 1, 'day', 'filename', 'Corriere del Ponte', '', 'D1', "
+            "NULL, ?, ?)",
+            (utc_now(), utc_now()),
+        )
+    database.close()
+
+    assert read_rel_path_hashes(path) == {
+        "Newspapers/a.pdf": "deadbeef",
+        "Newspapers/b.pdf": None,
+    }
 
 
 # --------------------------------------------------------------------- read_meta

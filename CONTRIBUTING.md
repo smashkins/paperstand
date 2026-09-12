@@ -14,10 +14,11 @@ get it running, what the checks are and what a change is expected to look like.
 - **Examples use fictional publications**, listed in
   [`docs/sample-library.md`](docs/sample-library.md), and never a real title or a real
   place. Each one exists for a parsing edge case; reuse them rather than inventing a name.
-- **The server never writes inside `/library`**; it is mounted read-only. The organizer is
-  the only writer, and only to add: it moves files in from its inbox, never overwrites,
-  never modifies or deletes a file already there, and never changes a PDF's bytes.
-  Everything Paperstand produces goes under `/data`.
+- **The server never writes inside `/library`**; it is mounted read-only. The organizer
+  is the only writer: it adds files from its inbox and, only when explicitly asked
+  (`migrate --apply`), moves a file already there to its canonical place. It never
+  overwrites, never deletes a file, and never changes a PDF's bytes. Everything
+  Paperstand produces goes under `/data`.
 - **No naming rule lives in code.** File name parsing is driven by the declarative profiles
   in `backend/paperstand/parsing/profiles/`. A shape the parser cannot read is a change to
   a profile, not an `if` in the engine.

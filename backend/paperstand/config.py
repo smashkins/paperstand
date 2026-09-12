@@ -130,6 +130,11 @@ class Settings(BaseSettings):
         return self.data / ORGANIZER_REPORT
 
     @property
+    def migration_reports_path(self) -> Path:
+        """Folder holding one report per ``migrate --apply`` run that moved a file."""
+        return self.data / MIGRATION_REPORTS
+
+    @property
     def scan_trigger_path(self) -> Path:
         """Path of the trigger file the scheduler polls for.
 
@@ -143,6 +148,9 @@ class Settings(BaseSettings):
 
 #: Where the organizer writes what its last run did, relative to ``data``.
 ORGANIZER_REPORT = "organizer/last-run.json"
+
+#: Folder holding one timestamped report per ``migrate --apply`` run, relative to ``data``.
+MIGRATION_REPORTS = "organizer/migrations"
 
 #: The scheduler's poll trigger, relative to ``data``.
 SCAN_TRIGGER = "scan.request"

@@ -173,3 +173,22 @@ jobs:
 
           echo "$output"
           echo "$output" | grep -q "inbox root:"
+
+      # Proves the entrypoint passes `migrate` through too: an empty library,
+      # no catalogue yet, a dry run, and the header line the command always
+      # prints.
+      - name: Smoke test the migrate command
+        run: |
+          set -euo pipefail
+          library="$(mktemp -d)"
+          data="$(mktemp -d)"
+          chmod 777 "$library" "$data"
+
+          output="$(docker run --rm \
+            -e PUID=1234 -e PGID=1000 \
+            --mount "type=bind,src=$library,dst=/library" \
+            --mount "type=bind,src=$data,dst=/data" \
+            paperstand:ci migrate)"
+
+          echo "$output"
+          echo "$output" | grep -q "library root:"

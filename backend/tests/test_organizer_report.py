@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from paperstand.organizer.report import inventory, read_run, write_run
-from paperstand.schemas import OrganizerMove, OrganizerParked, OrganizerRun
+from paperstand.schemas import MigrationRun, OrganizerMove, OrganizerParked, OrganizerRun
 
 
 def _run(**overrides: object) -> OrganizerRun:
@@ -88,6 +88,31 @@ def test_inventory_ignores_a_sidecar_left_without_its_pdf(tmp_path: Path) -> Non
 
 
 # ------------------------------------------------------------- write / read
+
+
+def test_write_run_is_generic_over_any_model(tmp_path: Path) -> None:
+    """``write_run`` also writes a :class:`MigrationRun`, not just an ``OrganizerRun``."""
+    path = tmp_path / "organizer" / "migrations" / "20260912T080000Z.json"
+    run = MigrationRun(
+        started_at="2026-09-12T08:00:00+00:00",
+        finished_at="2026-09-12T08:00:01+00:00",
+        library="/library",
+        moved=1,
+        in_place=0,
+        unsorted=0,
+        collision=0,
+        duplicate=0,
+        failed=0,
+        moves=[OrganizerMove(source="a.pdf", destination="Title/2026/Title - 2026-09-12.pdf")],
+        collisions=[],
+        left_in_place=[],
+        removed_folders=[],
+        scan_requested=True,
+    )
+
+    write_run(path, run)
+
+    assert MigrationRun.model_validate_json(path.read_text("utf-8")) == run
 
 
 def test_write_then_read_round_trips(tmp_path: Path) -> None:

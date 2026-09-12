@@ -86,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a third way to ask for a scan, next to *Rescan now* and `POST /api/scan`,
   that needs no server URL. `paperstand organize --apply` touches it after a
   run that moved at least one file.
+- `paperstand migrate`: renames and moves a file already inside the library
+  to the canonical layout, in place — the same plan `organize-plan` prints,
+  performed rather than previewed. `--apply` moves every unambiguous file
+  with the same atomic mover as `organize`, leaves a collision group
+  untouched, removes a folder its own moves left empty
+  (`--keep-empty-folders` to keep them), refuses before touching anything if
+  the catalogue has not caught up with a movable file's content hash yet,
+  and writes its own report to
+  `<data>/organizer/migrations/<started_at>.json`, one file per applied run,
+  never overwritten. See [`organizer.md`](docs/organizer.md#migrate).
 
 ### Changed
 

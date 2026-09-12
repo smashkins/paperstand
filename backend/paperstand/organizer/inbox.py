@@ -47,6 +47,8 @@ __all__ = [
     "Outcome",
     "Parked",
     "Skipped",
+    "marker_missing",
+    "occupant_matches",
     "organize_forever",
     "organize_once",
 ]
@@ -249,7 +251,7 @@ def _run(
     print(f"{'catalogue:':<14} {catalogue_line}", file=out)
     print(f"{'mode:':<14} {mode}", file=out)
 
-    if _marker_missing(library, db_path):
+    if marker_missing(library, db_path):
         # The files would land on the host directory behind the mount,
         # invisible to the share, in both modes — a dry run's destinations
         # would be exactly as wrong as `--apply`'s moves.
@@ -290,12 +292,14 @@ def _run(
     print(_summary_line(report.outcomes, apply=apply), file=out)
 
 
-def _marker_missing(library: Path, db_path: Path) -> bool:
+def marker_missing(library: Path, db_path: Path) -> bool:
     """Whether the library's root marker is remembered but not there.
 
     The organizer must refuse an unmounted root exactly as a scan does: a
     file landed on the host directory behind a failed mount is invisible to
-    the share, and there is no undoing that once it has moved.
+    the share, and there is no undoing that once it has moved. Shared with
+    :mod:`paperstand.organizer.migration`, which refuses on exactly the same
+    rule before it ever renames a file already in the library.
     """
     return read_meta(db_path, "library_marker") == "1" and not (library / MARKER_FILE).is_file()
 
@@ -514,6 +518,17 @@ def _forget_old_sidecar(found: LibraryFile, source: Path) -> None:
         remove_sidecar(source)
 
 
+def occupant_matches(destination: Path, digest: str) -> bool:
+    """Whether ``destination`` already holds a file whose content hash is ``digest``.
+
+    Shared between this module's own ``DestinationOccupied`` handling — in
+    both :func:`_apply_move` and its dry-run twin — and
+    :mod:`paperstand.organizer.migration`'s occupant check, which asks
+    exactly the same question of a file already sitting in the library.
+    """
+    return content_hash(destination) == digest
+
+
 def _dry_run_move(
     found: LibraryFile, destination: Path, destination_rel: str, digest: str
 ) -> Outcome:
@@ -523,7 +538,7 @@ def _dry_run_move(
     hashed, so the dry run reports exactly what ``--apply`` would.
     """
     if destination.exists():
-        if content_hash(destination) == digest:
+        if occupant_matches(destination, digest):
             return Duplicate(found.rel_path, destination_rel)
         reason = f"destination {destination_rel} exists with different content"
         return Parked(found.rel_path, reason)
@@ -548,7 +563,7 @@ def _apply_move(
     except FileNotFoundError:
         raise
     except DestinationOccupied:
-        if content_hash(destination) == digest:
+        if occupant_matches(destination, digest):
             park(source, inbox / DUPLICATES_FOLDER, f"duplicate of {destination_rel}")
             _forget_old_sidecar(found, source)
             return Duplicate(found.rel_path, destination_rel)
