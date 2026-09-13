@@ -177,6 +177,7 @@
 	"maintenance_lede": "Tutto ciò che la scansione e l'organizzatore non sono riusciti a sistemare da soli, in una sola pagina.",
 	"maintenance_badge_aria_one": "{count} elemento richiede attenzione",
 	"maintenance_badge_aria_other": "{count} elementi richiedono attenzione",
+	"maintenance_see_all": "Vedi tutti",
 
 	"maintenance_missing_heading": "Mancanti",
 	"maintenance_missing_note": "Rimetti il file in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",

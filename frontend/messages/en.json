@@ -177,6 +177,7 @@
 	"maintenance_lede": "Everything scanning and the organizer could not settle on their own, gathered on one page.",
 	"maintenance_badge_aria_one": "{count} item needs attention",
 	"maintenance_badge_aria_other": "{count} items need attention",
+	"maintenance_see_all": "See all",
 
 	"maintenance_missing_heading": "Missing",
 	"maintenance_missing_note": "Put the file back anywhere in the library, then rescan — it reappears where it was.",
