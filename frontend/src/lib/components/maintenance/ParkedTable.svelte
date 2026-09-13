@@ -35,7 +35,7 @@
 					{#each rows as file (file.name)}
 						<tr class="border-b border-hairline last:border-b-0">
 							<td class="px-3 py-2 font-mono text-xs break-all">{file.name}</td>
-							<td class="px-3 py-2 text-muted">{file.reason ?? ''}</td>
+							<td class="px-3 py-2 wrap-anywhere text-muted">{file.reason ?? ''}</td>
 							<td class="tabular px-3 py-2 text-right text-muted">
 								{formatSize(file.size, locale.intl)}
 							</td>

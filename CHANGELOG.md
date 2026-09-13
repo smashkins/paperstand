@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- In the organizer's parked-file tables, the file name column is no longer squeezed by the
+  reason next to it. A long `duplicate of …` path had no place to break, so it took the
+  width and left the name a narrow strip five lines tall; it now wraps like the rest.
+
 ## [0.4.2] - 2026-09-13
 
 ### Fixed
