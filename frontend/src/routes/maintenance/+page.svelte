@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
-	import type { ResolvedPathname } from '$app/types';
 	import {
 		api,
 		quiet,
@@ -121,15 +120,6 @@
 		apply: m.maintenance_mode_apply,
 		'dry-run': m.maintenance_mode_dry_run
 	};
-
-	/**
-	 * A detail route M12.2 still has to add: not part of `resolve()`'s route
-	 * table yet, so it cannot go through `resolve()` itself. Every path this
-	 * is used with is one of the four `/maintenance/*` routes that task adds.
-	 */
-	function plannedRoute(path: string): ResolvedPathname {
-		return path as ResolvedPathname;
-	}
 </script>
 
 <svelte:head><title>{m.maintenance_title()} · {m.app_name()}</title></svelte:head>
@@ -159,7 +149,7 @@
 		<SectionHeader
 			heading={m.maintenance_missing_heading()}
 			count={formatNumber(missing.total, locale.intl)}
-			moreHref={missing.total > OVERVIEW_LIMIT ? plannedRoute('/maintenance/missing') : undefined}
+			moreHref={missing.total > OVERVIEW_LIMIT ? resolve('/maintenance/missing') : undefined}
 			moreLabel={m.maintenance_see_all()}
 		/>
 		<p class="text-[13px] text-muted">{m.maintenance_missing_note()}</p>
@@ -185,9 +175,7 @@
 		<SectionHeader
 			heading={m.maintenance_unreadable_heading()}
 			count={formatNumber(unreadable.total, locale.intl)}
-			moreHref={unreadable.total > OVERVIEW_LIMIT
-				? plannedRoute('/maintenance/unreadable')
-				: undefined}
+			moreHref={unreadable.total > OVERVIEW_LIMIT ? resolve('/maintenance/unreadable') : undefined}
 			moreLabel={m.maintenance_see_all()}
 		/>
 		{#if unreadable.items.length === 0}
@@ -216,7 +204,7 @@
 		<SectionHeader
 			heading={m.maintenance_inbox_heading()}
 			moreHref={unsortedParked.length > OVERVIEW_LIMIT || duplicateParked.length > OVERVIEW_LIMIT
-				? plannedRoute('/maintenance/inbox')
+				? resolve('/maintenance/inbox')
 				: undefined}
 			moreLabel={m.maintenance_see_all()}
 		/>
@@ -283,7 +271,7 @@
 		<SectionHeader
 			heading={m.maintenance_gaps_heading()}
 			count={formatNumber(gaps.length, locale.intl)}
-			moreHref={gaps.length > OVERVIEW_LIMIT ? plannedRoute('/maintenance/gaps') : undefined}
+			moreHref={gaps.length > OVERVIEW_LIMIT ? resolve('/maintenance/gaps') : undefined}
 			moreLabel={m.maintenance_see_all()}
 		/>
 		<p class="text-[13px] text-muted">{m.maintenance_gaps_note()}</p>

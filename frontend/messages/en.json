@@ -178,6 +178,7 @@
 	"maintenance_badge_aria_one": "{count} item needs attention",
 	"maintenance_badge_aria_other": "{count} items need attention",
 	"maintenance_see_all": "See all",
+	"maintenance_back": "Back to Maintenance",
 
 	"maintenance_missing_heading": "Files gone missing",
 	"maintenance_missing_note": "A file listed here was catalogued and is no longer on disk. Put it back anywhere in the library, then rescan — it reappears where it was.",

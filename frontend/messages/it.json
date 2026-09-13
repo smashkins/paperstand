@@ -178,6 +178,7 @@
 	"maintenance_badge_aria_one": "{count} elemento richiede attenzione",
 	"maintenance_badge_aria_other": "{count} elementi richiedono attenzione",
 	"maintenance_see_all": "Vedi tutti",
+	"maintenance_back": "Torna a Manutenzione",
 
 	"maintenance_missing_heading": "File spariti",
 	"maintenance_missing_note": "Un file elencato qui era stato catalogato e non si trova più sul disco. Rimettilo in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",
