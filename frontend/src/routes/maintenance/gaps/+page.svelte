@@ -26,7 +26,7 @@
 	{m.maintenance_back()}
 </a>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#await data.gaps}
 		<SectionHeader heading={m.maintenance_gaps_heading()} />
 		<Skeleton width="100%" height="140px" />

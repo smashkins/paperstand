@@ -141,7 +141,7 @@
 	{/if}
 </div>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#await missingSection}
 		<SectionHeader heading={m.maintenance_missing_heading()} />
 		<Skeleton width="100%" height="88px" />
@@ -167,7 +167,7 @@
 	{/await}
 </section>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#await unreadableData}
 		<SectionHeader heading={m.maintenance_unreadable_heading()} />
 		<Skeleton width="100%" height="88px" />
@@ -192,7 +192,7 @@
 	{/await}
 </section>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#await summaryData}
 		<SectionHeader heading={m.maintenance_inbox_heading()} />
 		<Skeleton width="100%" height="140px" />
@@ -263,7 +263,7 @@
 	{/await}
 </section>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#await gapsData}
 		<SectionHeader heading={m.maintenance_gaps_heading()} />
 		<Skeleton width="100%" height="140px" />

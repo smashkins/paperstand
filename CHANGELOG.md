@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The maintenance sections no longer stretch wider than a phone screen, which pushed each
+  section's *See all* link off the right edge where it could not be reached. A parked-file
+  table scrolls on its own again, and a long file name or renderer error in the unreadable
+  list wraps instead of widening the page.
+
 ## [0.4.0] - 2026-09-13
 
 The maintenance page stops being one long scroll. Each of its four categories shows its

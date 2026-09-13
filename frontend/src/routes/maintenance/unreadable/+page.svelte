@@ -64,7 +64,7 @@
 	{m.maintenance_back()}
 </a>
 
-<section class="grid gap-4">
+<section class="grid min-w-0 gap-4">
 	{#if error !== null}
 		<ErrorState {error} />
 	{:else if run === null}
