@@ -286,6 +286,7 @@
 			moreHref={gaps.length > OVERVIEW_LIMIT ? plannedRoute('/maintenance/gaps') : undefined}
 			moreLabel={m.maintenance_see_all()}
 		/>
+		<p class="text-[13px] text-muted">{m.maintenance_gaps_note()}</p>
 		{#if gaps.length === 0}
 			<p class="text-muted">{m.maintenance_gaps_empty()}</p>
 		{:else}

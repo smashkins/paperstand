@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The maintenance page now shows five items per section, with a "See all"
+  link once a section holds more: `/maintenance/missing`,
+  `/maintenance/unreadable`, `/maintenance/inbox` and `/maintenance/gaps`
+  are the four full lists behind those links. "Missing" is now "Files gone
+  missing" and "Gaps" is now "Gaps in a series", so the two read as the
+  different things they are.
+
 ## [0.3.0] - 2026-09-12
 
 The library becomes a place Paperstand can tidy. An issue is now identified by its bytes
