@@ -177,9 +177,11 @@
 	"maintenance_lede": "Tutto ciò che la scansione e l'organizzatore non sono riusciti a sistemare da soli, in una sola pagina.",
 	"maintenance_badge_aria_one": "{count} elemento richiede attenzione",
 	"maintenance_badge_aria_other": "{count} elementi richiedono attenzione",
+	"maintenance_see_all": "Vedi tutti",
+	"maintenance_back": "Torna a Manutenzione",
 
-	"maintenance_missing_heading": "Mancanti",
-	"maintenance_missing_note": "Rimetti il file in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",
+	"maintenance_missing_heading": "File spariti",
+	"maintenance_missing_note": "Un file elencato qui era stato catalogato e non si trova più sul disco. Rimettilo in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",
 	"maintenance_missing_empty": "Nessun file mancante.",
 	"maintenance_missing_since": "Mancante da {when}",
 	"maintenance_forgotten_next_scan": "Sarà dimenticato alla prossima scansione",
@@ -206,7 +208,8 @@
 	"maintenance_unsorted_bucket_one": "{count} file che il parser non è riuscito a collocare, in {library}",
 	"maintenance_unsorted_bucket_other": "{count} file che il parser non è riuscito a collocare, in {library}",
 
-	"maintenance_gaps_heading": "Buchi",
+	"maintenance_gaps_heading": "Buchi nella serie",
+	"maintenance_gaps_note": "Queste uscite non sono mai state nella libreria: qui non c'è nulla di rotto.",
 	"maintenance_gaps_empty": "Nessuna testata ha un buco al momento.",
 	"maintenance_last_issue": "Ultima uscita {when}",
 	"maintenance_overdue_days_one": "In ritardo di {count} giorno",
