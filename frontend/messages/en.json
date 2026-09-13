@@ -203,8 +203,6 @@
 	"maintenance_inbox_duplicates_table": "duplicates/",
 	"maintenance_inbox_parked_empty": "Nothing parked here.",
 	"maintenance_column_reason": "Reason",
-	"maintenance_column_size": "Size",
-	"maintenance_column_modified": "Modified",
 	"maintenance_unsorted_bucket_one": "{count} file the parser could not place, in {library}",
 	"maintenance_unsorted_bucket_other": "{count} files the parser could not place, in {library}",
 

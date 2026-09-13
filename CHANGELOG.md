@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The organizer's parked-file tables show the name and the reason only. The size and the
+  modification time are gone: their headings were the widest thing in the row and neither
+  answers the question the table is for. Both are still in the run's own report under
+  `<data>/organizer/`. The table now fits a phone screen without scrolling sideways.
+
 ## [0.4.3] - 2026-09-13
 
 ### Fixed
