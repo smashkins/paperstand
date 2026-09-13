@@ -16,7 +16,7 @@
 	<span class="font-medium break-all">{issue.filename}</span>
 	<span class="font-mono text-xs break-all text-muted">{issue.rel_path}</span>
 	{#if issue.cover_error}
-		<span class="break-words text-accent-text">{issue.cover_error}</span>
+		<span class="wrap-anywhere text-accent-text">{issue.cover_error}</span>
 	{/if}
 	<span class="tabular text-muted">
 		{m.added_at({ when: formatWhen(issue.added_at, locale.intl) })}

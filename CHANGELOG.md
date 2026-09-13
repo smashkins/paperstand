@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A long renderer error in the unreadable list no longer pushes its row past the right edge
+  of a phone screen, where the text was cut off. The message now wraps inside the card.
+
 ## [0.4.1] - 2026-09-13
 
 ### Fixed
