@@ -8,6 +8,7 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorState from '$lib/components/ui/ErrorState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
+	import InlineError from '$lib/components/ui/InlineError.svelte';
 	import MissingRow from '$lib/components/maintenance/MissingRow.svelte';
 	import SectionHeader from '$lib/components/ui/SectionHeader.svelte';
 	import Skeleton from '$lib/components/ui/Skeleton.svelte';
@@ -19,6 +20,7 @@
 	let graceDays = $state<number | null>(null);
 	let error = $state<unknown>(null);
 	let busy = $state(false);
+	let loadMoreError = $state<unknown>(null);
 
 	// `graceDays` and the first page settle together, so the "forgotten in N
 	// days" figure below is never shown against the wrong grace period —
@@ -30,6 +32,9 @@
 				if (!live) return;
 				run = missing;
 				graceDays = summary.missing_grace_days;
+				// A successful retry replaces the stale error from the attempt
+				// that failed — otherwise the page would keep showing it forever.
+				error = null;
 			})
 			.catch((reason) => {
 				if (live) error = reason;
@@ -57,6 +62,9 @@
 		busy = true;
 		try {
 			run = await loadMoreIssues({ missing: true }, run);
+			loadMoreError = null;
+		} catch (reason) {
+			loadMoreError = reason;
 		} finally {
 			busy = false;
 		}
@@ -95,7 +103,9 @@
 					<MissingRow {issue} graceDays={graceDays ?? 0} />
 				{/each}
 			</ul>
-			{#if hasMoreIssues(run)}
+			{#if loadMoreError !== null}
+				<InlineError error={loadMoreError} onretry={loadMore} retrying={busy} />
+			{:else if hasMoreIssues(run)}
 				<div class="flex flex-wrap items-center gap-3">
 					<Button variant="secondary" onclick={loadMore} disabled={busy}>{m.load_more()}</Button>
 					<span class="tabular text-[13px] text-muted">
