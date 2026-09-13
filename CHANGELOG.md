@@ -7,14 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-13
+
+The maintenance page stops being one long scroll. Each of its four categories shows its
+five most relevant rows and a link to a page of its own that carries the whole list, so a
+library with hundreds of unreadable files opens as fast as one with none. *Missing* and
+*Gaps* are renamed, because the two were being read as the same thing: one is a file that
+was catalogued and is no longer on disk, the other an issue that was never in the library.
+
+### Added
+
+- Four pages behind the maintenance overview, one per category, each listing everything
+  the overview shows five of: `/maintenance/missing`, `/maintenance/unreadable`,
+  `/maintenance/inbox` and `/maintenance/gaps`. The two issue lists page to the end with
+  *Load more*.
+
 ### Changed
 
-- The maintenance page now shows five items per section, with a "See all"
-  link once a section holds more: `/maintenance/missing`,
-  `/maintenance/unreadable`, `/maintenance/inbox` and `/maintenance/gaps`
-  are the four full lists behind those links. "Missing" is now "Files gone
-  missing" and "Gaps" is now "Gaps in a series", so the two read as the
-  different things they are.
+- The maintenance overview shows at most five rows per category, with its real total next
+  to the heading and a *See all* link once there are more. It asks the API for five rows
+  instead of two hundred.
+- *Missing* is now *Files gone missing* and *Gaps* is now *Gaps in a series*, each with a
+  line saying what it means, so the two stop reading as the same thing.
 
 ## [0.3.0] - 2026-09-12
 
@@ -362,7 +376,8 @@ Italian, an in-browser reader, and an OPDS 1.2 feed for mobile reading apps.
 - Serving Paperstand under a sub-path is not supported.
 
 
-[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/smashkins/paperstand/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/smashkins/paperstand/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/smashkins/paperstand/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/smashkins/paperstand/compare/v0.1.0...v0.2.0
