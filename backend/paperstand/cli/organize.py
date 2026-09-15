@@ -136,6 +136,7 @@ def organize(
     *,
     apply: bool = False,
     settle: float = 60.0,
+    prune_empty: bool = True,
     every: float | None = None,
     out: TextIO | None = None,
 ) -> int:
@@ -145,6 +146,10 @@ def organize(
     ``--apply`` would print, and nothing is written. ``every``, when given,
     repeats the run on that interval — re-reading the configuration each
     time — until SIGTERM or SIGINT; without it, the run happens once.
+
+    ``prune_empty`` removes the inbox folders each run emptied, and only
+    those; ``--keep-empty-folders`` turns it off, exactly as it does for
+    ``migrate``. Neither ever touches a file.
 
     Exit codes: ``2`` for a usage error (``inbox`` or ``library`` is not a
     directory, one is inside the other, or an explicit ``--config`` does not
@@ -191,6 +196,7 @@ def organize(
             db_path=data_root / "paperstand.db",
             apply=apply,
             settle=settle,
+            prune_empty=prune_empty,
             out=stream,
             report_path=data_root / ORGANIZER_REPORT,
             trigger_path=data_root / SCAN_TRIGGER,

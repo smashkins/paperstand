@@ -15,7 +15,9 @@ inbox would otherwise both try to claim the same destination.
 from __future__ import annotations
 
 import datetime as dt
+import errno
 import fcntl
+import os
 import sqlite3
 import threading
 import time
@@ -60,6 +62,11 @@ LOCK_NAME = ".organizer.lock"
 #: The two folders a file is parked into; never a source for `duplicates/`.
 UNSORTED_FOLDER = "unsorted"
 DUPLICATES_FOLDER = "duplicates"
+
+#: Errno values a folder removal fails on silently: it still holds something
+#: (a non-PDF file, a PDF that has not settled yet, a stray `.part`), or it is
+#: not a directory at all (a symlink — ``rmdir`` always refuses one).
+_PRUNE_SILENT_ERRNOS: tuple[int, ...] = (errno.ENOTEMPTY, errno.EEXIST, errno.ENOTDIR)
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +155,7 @@ def organize_once(
     db_path: Path,
     apply: bool,
     settle: float,
+    prune_empty: bool = True,
     now: float | None = None,
     out: TextIO,
     report_path: Path | None = None,
@@ -163,6 +171,10 @@ def organize_once(
     ``apply`` decides whether anything is actually moved; the report is the
     same either way. ``now``, when given, stands in for the current time, so
     that the settle check is deterministic in a test.
+
+    ``prune_empty`` removes the inbox folders this run emptied, and only
+    those — see :func:`_prune_empty_folders`. It is read in apply mode only:
+    a dry run never removes anything, folders included.
 
     ``report_path`` and ``trigger_path`` are both ``None`` by default, so
     every earlier caller and test is unchanged. When ``report_path`` is
@@ -189,6 +201,7 @@ def organize_once(
             db_path,
             apply=apply,
             settle=settle,
+            prune_empty=prune_empty,
             now=started_at,
             out=out,
             report=report,
@@ -235,6 +248,7 @@ def _run(
     *,
     apply: bool,
     settle: float,
+    prune_empty: bool,
     now: float,
     out: TextIO,
     report: OrganizeReport,
@@ -288,8 +302,16 @@ def _run(
         report.outcomes.append(outcome)
         print(_report_line(outcome), file=out)
 
+    removed_folders: list[str] = []
+    if apply and prune_empty:
+        removed_folders = _prune_empty_folders(inbox, report.outcomes)
+    if removed_folders:
+        print(file=out)
+        for rel_path in removed_folders:
+            print(f"removed empty folder: {rel_path}", file=out)
+
     print(file=out)
-    print(_summary_line(report.outcomes, apply=apply), file=out)
+    print(_summary_line(report.outcomes, apply=apply, removed=len(removed_folders)), file=out)
 
 
 def marker_missing(library: Path, db_path: Path) -> bool:
@@ -587,6 +609,71 @@ def _apply_move(
     return Moved(found.rel_path, destination_rel)
 
 
+# ---------------------------------------------------------- empty folders
+
+
+def _prune_empty_folders(inbox: Path, outcomes: list[Outcome]) -> list[str]:
+    """Remove every inbox folder this run emptied, deepest first.
+
+    A file leaves the folder it arrived in three ways — moved into the
+    library, parked under ``duplicates/``, parked under ``unsorted/`` — and
+    all three leave that folder behind for good, since nothing else in the
+    pipeline ever looks at a folder: the walk yields files, and a resolution
+    reads a file's own name, never a folder of the inbox. Something dropping
+    a PDF into a folder of its own therefore leaves one behind on every
+    single import.
+
+    Starts from the immediate parent of every source that actually left,
+    climbs one ancestor at a time, and stops at the inbox root or at either
+    parked folder — never removed, both because the run's own report reads
+    them back and because a file re-parked onto itself has ``unsorted/`` as
+    its own parent — and at the first failure in each chain, which ends that
+    chain silently rather than raising.
+
+    Never recursive, and never a file: only ``os.rmdir``, which refuses
+    anything but an empty directory. A folder still holding something — a
+    cover, a `.nfo`, a PDF that has not settled yet, a `.part` left by an
+    interrupted copy — fails with ``ENOTEMPTY`` and stays exactly where it
+    is, and so does one something re-created between the move and this call.
+    The organizer still never deletes a file.
+    """
+    stop_at = {
+        inbox.resolve(),
+        (inbox / UNSORTED_FOLDER).resolve(),
+        (inbox / DUPLICATES_FOLDER).resolve(),
+    }
+
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for outcome in outcomes:
+        if not isinstance(outcome, Moved | Duplicate | Parked):
+            continue
+        parent = (inbox / outcome.source).parent
+        if parent not in seen:
+            seen.add(parent)
+            candidates.append(parent)
+    candidates.sort(key=lambda path: len(path.parts), reverse=True)
+
+    removed: list[str] = []
+    removed_set: set[Path] = set()
+    for start in candidates:
+        current = start
+        while current not in removed_set and current.resolve() not in stop_at:
+            try:
+                os.rmdir(current)
+            except FileNotFoundError:
+                break
+            except OSError as error:
+                if error.errno not in _PRUNE_SILENT_ERRNOS:
+                    log.warning("could not remove empty folder %s: %s", current, error)
+                break
+            removed_set.add(current)
+            removed.append(current.relative_to(inbox).as_posix())
+            log.info("removed the empty folder %s", current)
+            current = current.parent
+    return removed
+
+
 # --------------------------------------------------------------- the report
 
 
@@ -602,7 +689,7 @@ def _report_line(outcome: Outcome) -> str:
     return f"{outcome.source} -> failed: {outcome.error}"
 
 
-def _summary_line(outcomes: list[Outcome], *, apply: bool) -> str:
+def _summary_line(outcomes: list[Outcome], *, apply: bool, removed: int) -> str:
     moved = sum(1 for outcome in outcomes if isinstance(outcome, Moved))
     duplicate = sum(1 for outcome in outcomes if isinstance(outcome, Duplicate))
     unsorted = sum(1 for outcome in outcomes if isinstance(outcome, Parked))
@@ -612,7 +699,7 @@ def _summary_line(outcomes: list[Outcome], *, apply: bool) -> str:
     failed = sum(1 for outcome in outcomes if isinstance(outcome, Failed))
     return (
         f"{moved} moved, {duplicate} duplicate, {unsorted} unsorted, "
-        f"{skipped} skipped, {failed} failed"
+        f"{skipped} skipped, {failed} failed, {removed} empty folder(s) removed"
     )
 
 

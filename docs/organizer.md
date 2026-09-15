@@ -71,6 +71,22 @@ enough to make it move out on the very next run. A file that is still unsorted i
 exactly where it is — its sidecar is rewritten only if the reason actually changed. Nothing
 under `duplicates/` is ever read again.
 
+### Empty folders in the inbox
+
+A file leaves the folder it arrived in whichever outcome it reaches — moved into the library,
+parked under `duplicates/`, parked under `unsorted/` — and an apply run removes the folders
+it emptied that way, and only those: starting at the file's immediate parent and climbing one
+ancestor at a time, removing each with `rmdir` for as long as it is empty, and stopping at
+the inbox root, at `unsorted/` and `duplicates/`, which are never removed, and at the first
+folder along the way that still holds something, which ends that chain without being reported
+as an error. Something writing each issue into a folder of its own would otherwise leave one
+behind on every single import; `--keep-empty-folders` turns the removal off.
+
+The removal is never recursive and never touches a file: `rmdir` refuses anything but an
+already-empty folder, so a cover, a stray `.part` from an interrupted copy, a PDF still
+inside its `--settle` window, or a file written between the move and the removal all keep
+their folder exactly where it is. Rule 1's "never deletes a file" holds unchanged.
+
 ### Sidecars
 
 Every parked file gets a one-line sidecar next to it, `<name>.pdf.txt`, holding the reason
