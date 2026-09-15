@@ -1,6 +1,6 @@
 [project]
 name = "paperstand"
-version = "0.4.4"
+version = "0.5.0"
 description = "Self-hosted reader for collections of PDF periodicals"
 requires-python = ">=3.12"
 license = { text = "MIT" }

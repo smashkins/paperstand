@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-15
+
 ### Changed
 
 - `paperstand organize --apply` now removes the inbox folders a run emptied, and only those.
@@ -15,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the file's own parent with `rmdir` alone, stops at the inbox root and at `unsorted/` and
   `duplicates/`, and leaves any folder still holding something exactly where it is;
   `--keep-empty-folders` turns it off, as it already did for `migrate`. No file is ever
-  deleted.
+  deleted. The removal never leaves the inbox: a walk descends into a symlinked folder while
+  it points inside, so every candidate is resolved first and removed by its resolved path,
+  and the symlink itself is never removed either.
 
 ## [0.4.4] - 2026-09-13
 
@@ -419,7 +423,8 @@ Italian, an in-browser reader, and an OPDS 1.2 feed for mobile reading apps.
 - Serving Paperstand under a sub-path is not supported.
 
 
-[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.4.4...HEAD
+[Unreleased]: https://github.com/smashkins/paperstand/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/smashkins/paperstand/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/smashkins/paperstand/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/smashkins/paperstand/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/smashkins/paperstand/compare/v0.4.1...v0.4.2
