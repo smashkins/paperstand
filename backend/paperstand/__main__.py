@@ -121,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds a file must sit untouched before it is considered (default: 60)",
     )
     organize_command.add_argument(
+        "--keep-empty-folders",
+        action="store_true",
+        help="never remove an inbox folder a move left empty",
+    )
+    organize_command.add_argument(
         "--every",
         type=float,
         default=None,
@@ -263,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.config,
             apply=args.apply,
             settle=args.settle,
+            prune_empty=not args.keep_empty_folders,
             every=args.every,
         )
     if args.command == "migrate":

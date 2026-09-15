@@ -116,6 +116,7 @@ def _run(
     *,
     apply: bool,
     settle: float = 0,
+    prune_empty: bool = True,
     now: float | None = None,
     out: io.StringIO | None = None,
     report_path: Path | None = None,
@@ -129,6 +130,7 @@ def _run(
         db_path=settings.db_path,
         apply=apply,
         settle=settle,
+        prune_empty=prune_empty,
         now=now,
         out=stream,
         report_path=report_path,
@@ -560,6 +562,136 @@ def test_a_destination_escaping_the_library_is_parked_unsorted(
     assert report.outcomes == [Parked("Il_Mattutino_2026-03-21.pdf", reason)]
     assert (inbox / "unsorted" / "Il_Mattutino_2026-03-21.pdf").is_file()
     assert not (catalogue_settings.library.parent / "outside").exists()
+
+
+# ----------------------------------------------------------- empty folders
+
+
+def test_the_folder_a_moved_file_came_from_is_removed(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """The case the inbox actually sees: something drops each issue into a
+    folder of its own, and every import used to leave that folder behind."""
+    _write_pdf(inbox / "Il Mattutino" / "2026-03-21" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    report, text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Moved("Il Mattutino/2026-03-21/Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)
+    ]
+    assert not (inbox / "Il Mattutino").exists()
+    assert "removed empty folder: Il Mattutino/2026-03-21" in text
+    assert "removed empty folder: Il Mattutino" in text
+    assert "2 empty folder(s) removed" in text
+
+
+def test_a_parked_file_empties_its_folder_too(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """Unsorted and duplicate leave the source folder just as empty as a
+    move into the library does; all three are pruned."""
+    _write_pdf(inbox / "unresolvable" / ZONDA_HERALD, "unresolvable")
+    _copy(
+        catalogue_settings.library / CORRIERE_16,
+        inbox / "again" / "Corriere_del_Ponte_16_Marzo_2026.pdf",
+    )
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert {type(outcome) for outcome in report.outcomes} == {Parked, Duplicate}
+    assert not (inbox / "unresolvable").exists()
+    assert not (inbox / "again").exists()
+    assert (inbox / "unsorted" / ZONDA_HERALD).is_file()
+    assert (inbox / "duplicates" / "Corriere_del_Ponte_16_Marzo_2026.pdf").is_file()
+
+
+def test_the_inbox_root_and_both_parked_folders_are_never_removed(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """A file parked earlier, then declared and moved out, empties
+    ``unsorted/`` — which still has to be there for the next run."""
+    _write_pdf(inbox / "unsorted" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    (inbox / "duplicates").mkdir()
+
+    report, _text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Moved("unsorted/Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)
+    ]
+    assert (inbox / "unsorted").is_dir()
+    assert (inbox / "duplicates").is_dir()
+    assert inbox.is_dir()
+
+
+def test_a_folder_still_holding_anything_is_left_alone(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """``rmdir`` only ever removes an empty folder: a sibling of any kind —
+    here a cover left next to the issue — keeps the whole chain."""
+    folder = inbox / "Il Mattutino" / "2026-03-21"
+    _write_pdf(folder / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    (folder / "cover.jpg").write_bytes(b"not a pdf")
+
+    _report, text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert (folder / "cover.jpg").is_file()
+    assert (inbox / "Il Mattutino").is_dir()
+    assert "removed empty folder" not in text
+    assert "0 empty folder(s) removed" in text
+
+
+def test_a_dry_run_removes_no_folder(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    _write_pdf(inbox / "Il Mattutino" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    _report, text = _run(inbox, catalogue_settings, config, apply=False)
+
+    assert (inbox / "Il Mattutino").is_dir()
+    assert "removed empty folder" not in text
+    assert "empty folder(s) removed" not in text
+
+
+def test_keeping_empty_folders_leaves_the_folder_where_it_is(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    source = inbox / "Il Mattutino" / "Il_Mattutino_2026-03-21.pdf"
+    _write_pdf(source, "fresh")
+
+    _report, text = _run(inbox, catalogue_settings, config, apply=True, prune_empty=False)
+
+    assert not source.exists()
+    assert (inbox / "Il Mattutino").is_dir()
+    assert "removed empty folder" not in text
+    assert "0 empty folder(s) removed" in text
+
+
+def test_a_folder_that_cannot_be_removed_is_logged_and_the_run_continues(
+    inbox: Path,
+    catalogue_settings: Settings,
+    config: PaperstandConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unexpected errno — a read-only inbox, say — warns once and leaves
+    the folder; the move itself has already happened and still counts."""
+    _write_pdf(inbox / "Il Mattutino" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+
+    def refuse(path: object) -> None:
+        raise OSError(errno.EACCES, "permission denied")
+
+    monkeypatch.setattr("paperstand.organizer.inbox.os.rmdir", refuse)
+
+    with caplog.at_level(logging.WARNING):
+        report, text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert report.outcomes == [
+        Moved("Il Mattutino/Il_Mattutino_2026-03-21.pdf", IL_MATTUTINO_DESTINATION)
+    ]
+    assert (catalogue_settings.library / IL_MATTUTINO_DESTINATION).is_file()
+    assert (inbox / "Il Mattutino").is_dir()
+    assert "1 moved" in text and "0 empty folder(s) removed" in text
+    assert "could not remove empty folder" in caplog.text
 
 
 # ---------------------------------------------------------------------- lock
@@ -1153,3 +1285,29 @@ def test_main_is_wired_to_the_organize_subcommand(
     assert "inbox root:" in out
     assert "Il_Mattutino_2026-03-21.pdf ->" in out
     assert "1 to move, 0 duplicate, 0 unsorted, 0 skipped" in out
+
+
+def test_main_passes_keep_empty_folders_through_to_the_run(
+    inbox: Path, catalogue_settings: Settings, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The flag is the only way to keep an emptied folder, and it has to
+    survive the whole argv -> `organize` -> `organize_once` chain."""
+    _write_pdf(inbox / "Il Mattutino" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    argv = [
+        "organize",
+        "--inbox",
+        str(inbox),
+        "--library",
+        str(catalogue_settings.library),
+        "--data",
+        str(catalogue_settings.data),
+        "--settle",
+        "0",
+        "--apply",
+        "--keep-empty-folders",
+    ]
+
+    assert main(argv) == 0
+
+    assert (inbox / "Il Mattutino").is_dir()
+    assert "0 empty folder(s) removed" in capsys.readouterr().out

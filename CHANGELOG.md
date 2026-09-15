@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `paperstand organize --apply` now removes the inbox folders a run emptied, and only those.
+  Anything that writes each issue into a folder of its own used to leave that folder behind
+  on every import, until the inbox was a wall of empty directories. The removal climbs from
+  the file's own parent with `rmdir` alone, stops at the inbox root and at `unsorted/` and
+  `duplicates/`, and leaves any folder still holding something exactly where it is;
+  `--keep-empty-folders` turns it off, as it already did for `migrate`. No file is ever
+  deleted.
+
 ## [0.4.4] - 2026-09-13
 
 ### Changed
