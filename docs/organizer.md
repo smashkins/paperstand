@@ -87,6 +87,13 @@ already-empty folder, so a cover, a stray `.part` from an interrupted copy, a PD
 inside its `--settle` window, or a file written between the move and the removal all keep
 their folder exactly where it is. Rule 1's "never deletes a file" holds unchanged.
 
+It also never leaves the inbox. A walk descends into a symlinked folder as long as that
+symlink points inside the inbox, so a file can legitimately arrive through one; every
+candidate is therefore resolved first, must still sit strictly inside the resolved inbox, and
+is removed by that resolved path. Retargeting such a symlink outside the inbox between the
+walk and the removal changes nothing about what is removed, and the symlink itself is never
+removed either — `rmdir` refuses one.
+
 ### Sidecars
 
 Every parked file gets a one-line sidecar next to it, `<name>.pdf.txt`, holding the reason

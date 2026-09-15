@@ -32,6 +32,7 @@ from paperstand.organizer.inbox import (
     OrganizeReport,
     Parked,
     Skipped,
+    _prune_empty_folders,
     organize_forever,
     organize_once,
 )
@@ -638,6 +639,44 @@ def test_a_folder_still_holding_anything_is_left_alone(
     assert (inbox / "Il Mattutino").is_dir()
     assert "removed empty folder" not in text
     assert "0 empty folder(s) removed" in text
+
+
+def test_pruning_never_leaves_the_inbox_through_a_symlink(inbox: Path, tmp_path: Path) -> None:
+    """A symlinked folder retargeted outside the inbox between the walk and
+    the prune must not turn a removal into one outside the inbox.
+
+    The walk descends into a symlinked folder while it points inside, so a
+    source legitimately reaches the prune through one; this is the state
+    that symlink is in by the time the prune runs.
+    """
+    outside = tmp_path / "outside"
+    (outside / "2026-03-21").mkdir(parents=True)
+    (inbox / "Il Mattutino").symlink_to(outside, target_is_directory=True)
+
+    removed = _prune_empty_folders(
+        inbox, [Moved("Il Mattutino/2026-03-21/Il_Mattutino_2026-03-21.pdf", "anywhere.pdf")]
+    )
+
+    assert removed == []
+    assert (outside / "2026-03-21").is_dir()
+    assert outside.is_dir()
+
+
+def test_a_folder_reached_through_a_symlink_is_pruned_at_its_real_place(
+    inbox: Path, catalogue_settings: Settings, config: PaperstandConfig
+) -> None:
+    """A symlink pointing inside the inbox is walked into, so its folders are
+    the run's own to prune — reported by the real path that was removed."""
+    real = inbox / "incoming"
+    _write_pdf(real / "2026-03-21" / "Il_Mattutino_2026-03-21.pdf", "fresh")
+    (inbox / "Il Mattutino").symlink_to(real, target_is_directory=True)
+
+    _report, text = _run(inbox, catalogue_settings, config, apply=True)
+
+    assert (catalogue_settings.library / IL_MATTUTINO_DESTINATION).is_file()
+    assert not (real / "2026-03-21").exists()
+    assert "removed empty folder: incoming/2026-03-21" in text
+    assert (inbox / "Il Mattutino").is_symlink()
 
 
 def test_a_dry_run_removes_no_folder(

@@ -636,9 +636,20 @@ def _prune_empty_folders(inbox: Path, outcomes: list[Outcome]) -> list[str]:
     interrupted copy — fails with ``ENOTEMPTY`` and stays exactly where it
     is, and so does one something re-created between the move and this call.
     The organizer still never deletes a file.
+
+    Every candidate is resolved up front and must stay strictly inside the
+    resolved inbox, and it is that resolved, symlink-free path that is both
+    checked and removed. The walk descends into a symlinked folder as long
+    as it points inside the inbox at the time (see
+    :class:`~paperstand.scanner.walker.Walk`), so a source can legitimately
+    reach here through one; retargeting that symlink outside the inbox
+    between the walk and this call must not turn a removal into one outside
+    the tree the organizer is allowed to touch, and climbing the resolved
+    path rather than the symlinked one is what rules that out.
     """
+    inbox_root = inbox.resolve()
     stop_at = {
-        inbox.resolve(),
+        inbox_root,
         (inbox / UNSORTED_FOLDER).resolve(),
         (inbox / DUPLICATES_FOLDER).resolve(),
     }
@@ -648,7 +659,7 @@ def _prune_empty_folders(inbox: Path, outcomes: list[Outcome]) -> list[str]:
     for outcome in outcomes:
         if not isinstance(outcome, Moved | Duplicate | Parked):
             continue
-        parent = (inbox / outcome.source).parent
+        parent = (inbox / outcome.source).parent.resolve()
         if parent not in seen:
             seen.add(parent)
             candidates.append(parent)
@@ -658,7 +669,9 @@ def _prune_empty_folders(inbox: Path, outcomes: list[Outcome]) -> list[str]:
     removed_set: set[Path] = set()
     for start in candidates:
         current = start
-        while current not in removed_set and current.resolve() not in stop_at:
+        while (
+            current not in removed_set and current not in stop_at and inbox_root in current.parents
+        ):
             try:
                 os.rmdir(current)
             except FileNotFoundError:
@@ -668,7 +681,7 @@ def _prune_empty_folders(inbox: Path, outcomes: list[Outcome]) -> list[str]:
                     log.warning("could not remove empty folder %s: %s", current, error)
                 break
             removed_set.add(current)
-            removed.append(current.relative_to(inbox).as_posix())
+            removed.append(current.relative_to(inbox_root).as_posix())
             log.info("removed the empty folder %s", current)
             current = current.parent
     return removed
