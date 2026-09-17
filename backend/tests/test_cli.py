@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from paperstand.cli.parse import (
     resolve_library_root,
 )
 from paperstand.config import config_from_folders
+from paperstand.db import utc_now
 from tests.conftest import SampleLibrary, write_sample_config
 from tests.fixtures.filenames import IGNORED_PATHS, example_config_path
 
@@ -210,3 +212,65 @@ def test_the_scan_command_reports_its_counters(
 
     assert main(["scan", "--library", str(sample_library.root), "--data", str(data)]) == 0
     assert "added        0" in capsys.readouterr().out
+
+
+def test_retry_covers_resets_the_error_row_and_touches_the_trigger(
+    sample_library: SampleLibrary, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "scan-data"
+    write_sample_config(data / "paperstand.yml")
+    assert main(["scan", "--library", str(sample_library.root), "--data", str(data)]) == 0
+    capsys.readouterr()
+
+    connection = sqlite3.connect(data / "paperstand.db")
+    try:
+        error_id, missing_id = (
+            str(row[0]) for row in connection.execute("SELECT id FROM issues LIMIT 2")
+        )
+        connection.execute(
+            "UPDATE issues SET cover_status = 'error', cover_error = 'broken' WHERE id = ?",
+            (error_id,),
+        )
+        # A missing row also carries an `error` stamp from before it vanished —
+        # its file is not there to retry, so this one must be left alone.
+        connection.execute(
+            "UPDATE issues SET cover_status = 'error', cover_error = 'broken', "
+            "missing_since = ? WHERE id = ?",
+            (utc_now(), missing_id),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    trigger = data / "scan.request"
+    assert not trigger.exists()
+
+    assert main(["retry-covers", "--data", str(data)]) == 0
+    out = capsys.readouterr().out
+    assert "1 issue(s) reset to pending" in out
+    assert f"scan requested: {trigger}" in out
+    assert trigger.is_file()
+
+    connection = sqlite3.connect(data / "paperstand.db")
+    connection.row_factory = sqlite3.Row
+    try:
+        reset_row = connection.execute(
+            "SELECT cover_status, cover_error FROM issues WHERE id = ?", (error_id,)
+        ).fetchone()
+        missing_row = connection.execute(
+            "SELECT cover_status, cover_error FROM issues WHERE id = ?", (missing_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    assert reset_row["cover_status"] == "pending"
+    assert reset_row["cover_error"] is None
+    assert missing_row["cover_status"] == "error"
+    assert missing_row["cover_error"] == "broken"
+
+    # Nothing left to reset: no second trigger, and the first is not recreated.
+    trigger.unlink()
+    assert main(["retry-covers", "--data", str(data)]) == 0
+    out = capsys.readouterr().out
+    assert "0 issue(s) reset to pending" in out
+    assert "scan requested" not in out
+    assert not trigger.exists()
