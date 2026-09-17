@@ -83,20 +83,57 @@ class CoverResult:
 
 @dataclass(frozen=True, slots=True)
 class CoverError:
-    """Why one PDF could not be read."""
+    """Why one PDF could not be read.
+
+    ``retryable`` is the fact ``probe`` and the render each let ``OSError``
+    settle: the environment (permissions, a vanished mount, a full cache), not
+    the bytes, so trying again costs nothing and may simply work. Everything
+    else — not a PDF, truncated, encrypted, no pages — is the bytes, and stays
+    ``False``: a human replaces the file, which is a new hash and a fresh row.
+    """
 
     message: str
+    retryable: bool = False
+
+
+def probe(path: Path) -> None:
+    """Prove ``path`` can actually be read, at the cost of two small reads.
+
+    Opens the file, reads the first KiB, seeks near the end and reads the
+    last KiB. Lets ``OSError`` propagate — on a healthy mount this never
+    raises, so paying for it before every render is what turns "permission
+    denied" or "the mount just vanished" into a fact recorded at the moment
+    it happens, rather than the very same ``FileDataError`` message PyMuPDF
+    gives for a truncated PDF.
+    """
+    with open(path, "rb") as handle:
+        handle.read(1024)
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        handle.seek(max(0, size - 1024))
+        handle.read(1024)
 
 
 def render_cover(pdf_path: Path, identifier: str, cache_root: Path) -> CoverResult | CoverError:
     """Read a PDF and write its cover and thumbnail into the cache.
 
-    Never raises: a file that is not a PDF, is truncated, is encrypted or has no
-    pages comes back as a :class:`CoverError` carrying the reason, which the
+    Never raises. ``probe`` runs first: an ``OSError`` there is retryable —
+    the environment, not the bytes. Past that point an ``OSError`` (writing
+    into the cache: ``mkdir``, ``_save``) is retryable for the same reason;
+    every other exception — the file is not a PDF, is truncated, is encrypted
+    or has no pages — comes back as a durable :class:`CoverError`, which the
     scanner stores in ``cover_error``.
     """
     try:
+        probe(pdf_path)
+    except OSError as error:
+        log.warning("cannot read %s: %s", pdf_path, error)
+        return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
+    try:
         return _render(pdf_path, identifier, cache_root)
+    except OSError as error:
+        log.warning("cannot read %s: %s", pdf_path, error)
+        return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
     except Exception as error:  # one unreadable file must not stop a scan
         log.warning("cannot read %s: %s", pdf_path, error)
         return CoverError(message=f"{type(error).__name__}: {error}")

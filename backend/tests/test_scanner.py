@@ -24,6 +24,7 @@ from PIL import Image
 
 from paperstand.config import Settings
 from paperstand.db import open_database
+from paperstand.scanner import covers
 from paperstand.scanner.covers import (
     CoverError,
     CoverResult,
@@ -864,6 +865,83 @@ def test_a_broken_pdf_costs_one_row_not_the_scan(
     )[0]
     assert row["cover_status"] == "error"
     assert row["cover_error"]
+
+
+def test_an_error_row_is_not_retried_by_a_later_scan(
+    scan_settings: Settings,
+    sample_library: SampleLibrary,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A durable failure costs one row once — not one row on every scan after.
+
+    Scan 1 renders every other issue's cover, so nothing is left pending on
+    scan 2 except the broken row — and that row must not be among them:
+    `render_cover` monkeypatched to fail the test if called at all proves
+    scan 2's covers phase has nothing to do, `covers_total` included.
+    """
+    broken = sample_library.path("Zines/Broken_Mag_March_2026.pdf")
+    broken.write_bytes(b"not a PDF, not even close\n" * 40)
+
+    first = scan_once(scan_settings)
+    assert first.errors == 1
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("an `error` row must not be rendered again")
+
+    monkeypatch.setattr("paperstand.scanner.scanner.render_cover", never)
+    _, snapshots = run_with_progress(scan_settings)
+
+    covers_snapshots = [snap for snap in snapshots if snap.phase == "covers"]
+    assert covers_snapshots == []
+    row = query(
+        scan_settings,
+        "SELECT cover_status FROM issues WHERE rel_path = ?",
+        ("Zines/Broken_Mag_March_2026.pdf",),
+    )[0]
+    assert row["cover_status"] == "error"
+
+
+def test_a_permission_error_is_retried_until_it_clears(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`probe` failing is the environment, not the bytes: the row stays
+    `pending` and the very next scan — patch lifted — renders it."""
+    target = sample_library.path(A_NEWSPAPER)
+    real_probe = covers.probe
+    blocked = True
+
+    def flaky(path: Path) -> None:
+        if blocked and path == target:
+            raise PermissionError("permission denied")
+        real_probe(path)
+
+    monkeypatch.setattr("paperstand.scanner.covers.probe", flaky)
+
+    first = scan_once(scan_settings)
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+
+    assert first.errors == 1
+    row = query(
+        scan_settings,
+        "SELECT cover_status, cover_error, page_count FROM issues WHERE id = ?",
+        (identifier,),
+    )[0]
+    assert row["cover_status"] == "pending"
+    assert row["cover_error"]
+    assert row["page_count"] is None
+
+    blocked = False
+    second = scan_once(scan_settings)
+
+    assert second.errors == 0
+    row = query(
+        scan_settings,
+        "SELECT cover_status, cover_error, page_count FROM issues WHERE id = ?",
+        (identifier,),
+    )[0]
+    assert row["cover_status"] == "ok"
+    assert row["cover_error"] is None
+    assert row["page_count"] is not None
 
 
 def test_an_empty_library_scans_to_nothing(tmp_path: Path) -> None:

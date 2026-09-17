@@ -906,10 +906,14 @@ class Scanner:
             for written, (identifier, outcome) in enumerate(rendered, start=1):
                 if isinstance(outcome, CoverError):
                     failed += 1
+                    # A retryable failure is the environment, not the bytes: leave the
+                    # row `pending` so the next scan opens the file again for free,
+                    # instead of stamping it `error` and never looking at it again.
+                    status = "pending" if outcome.retryable else "error"
                     connection.execute(
-                        "UPDATE issues SET cover_status = 'error', cover_error = ?, "
+                        "UPDATE issues SET cover_status = ?, cover_error = ?, "
                         "updated_at = ? WHERE id = ?",
-                        (outcome.message, utc_now(), identifier),
+                        (status, outcome.message, utc_now(), identifier),
                     )
                 else:
                     done += 1

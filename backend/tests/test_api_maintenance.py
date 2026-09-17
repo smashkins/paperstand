@@ -16,13 +16,20 @@ from tests.conftest import sample_issue_id
 from tests.test_api_catalogue import A_NEWSPAPER, mark_missing
 
 
-def mark_unreadable(db_path: Path, issue_id: str, error: str = "cannot open") -> None:
-    """Mark an issue unreadable, the way a scan would once the file broke."""
+def mark_unreadable(
+    db_path: Path, issue_id: str, error: str = "cannot open", *, retryable: bool = False
+) -> None:
+    """Mark an issue unreadable, the way a scan would once the file broke.
+
+    ``retryable`` mirrors what a retryable :class:`~paperstand.scanner.covers.CoverError`
+    leaves behind — `pending` with a message — as opposed to the durable `error`.
+    """
+    status = "pending" if retryable else "error"
     connection = sqlite3.connect(db_path)
     try:
         connection.execute(
-            "UPDATE issues SET cover_status = 'error', cover_error = ? WHERE id = ?",
-            (error, issue_id),
+            "UPDATE issues SET cover_status = ?, cover_error = ? WHERE id = ?",
+            (status, error, issue_id),
         )
         connection.commit()
     finally:
@@ -145,6 +152,28 @@ def test_unreadable_lists_only_that_row_with_its_error(
     assert payload["total"] == 1
     assert [item["id"] for item in payload["items"]] == [issue_id]
     assert payload["items"][0]["cover_error"] == "PDF is corrupt"
+
+
+def test_unreadable_counts_and_lists_both_kinds(
+    catalogue_client: TestClient, catalogue_settings: Settings
+) -> None:
+    """A durable `error` and a retryable `pending` both count as unreadable."""
+    items = catalogue_client.get(
+        "/api/issues", params={"library": "newspapers", "limit": 5}
+    ).json()["items"]
+    durable_id, retryable_id = items[0]["id"], items[1]["id"]
+    mark_unreadable(catalogue_settings.db_path, durable_id, "PDF is corrupt")
+    mark_unreadable(catalogue_settings.db_path, retryable_id, "cannot open", retryable=True)
+
+    summary = catalogue_client.get("/api/maintenance").json()
+    assert summary["unreadable_count"] == 2
+
+    response = catalogue_client.get("/api/issues", params={"unreadable": True})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert {item["id"] for item in payload["items"]} == {durable_id, retryable_id}
 
 
 def test_unreadable_and_missing_never_overlap(
