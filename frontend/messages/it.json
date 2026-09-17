@@ -181,7 +181,7 @@
 	"maintenance_back": "Torna a Manutenzione",
 
 	"maintenance_missing_heading": "File spariti",
-	"maintenance_missing_note": "Un file elencato qui era stato catalogato e non si trova più sul disco. Rimettilo in un punto qualsiasi della libreria, poi avvia una scansione: ricompare dove si trovava.",
+	"maintenance_missing_note": "Un file elencato qui era stato catalogato e questa scansione non lo ha trovato nella libreria: spostato fuori, cancellato, oppure sotto un nome che la configurazione ora ignora. Rimettilo dove la configurazione guarda, poi avvia una scansione: ricompare dove si trovava.",
 	"maintenance_missing_empty": "Nessun file mancante.",
 	"maintenance_missing_since": "Mancante da {when}",
 	"maintenance_forgotten_next_scan": "Sarà dimenticato alla prossima scansione",

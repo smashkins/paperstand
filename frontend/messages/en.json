@@ -181,7 +181,7 @@
 	"maintenance_back": "Back to Maintenance",
 
 	"maintenance_missing_heading": "Files gone missing",
-	"maintenance_missing_note": "A file listed here was catalogued and is no longer on disk. Put it back anywhere in the library, then rescan — it reappears where it was.",
+	"maintenance_missing_note": "A file listed here was catalogued and this scan did not find it in the library: moved out of it, deleted, or under a name the configuration now ignores. Put it back where the configuration looks, then rescan — it reappears where it was.",
 	"maintenance_missing_empty": "Nothing has gone missing.",
 	"maintenance_missing_since": "Missing since {when}",
 	"maintenance_forgotten_next_scan": "Forgotten on the next scan",
