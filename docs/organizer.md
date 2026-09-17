@@ -215,6 +215,11 @@ trigger runs regardless of whether the periodic timer is on. A dry run writes th
 never the trigger: nothing in the library changed, so there is nothing for a scan to catch up
 on.
 
+`paperstand retry-covers` is a third thing that touches `scan.request`: it touches the file
+exactly when it resets at least one issue from `error` back to `pending`, so the next scan
+retries them without waiting out `PAPERSTAND_SCAN_INTERVAL` — see
+[Maintenance](maintenance.md#unreadable).
+
 ## `migrate`
 
 Where `organize` imports PDFs into the library from a writable inbox, `migrate` works on

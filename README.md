@@ -197,7 +197,10 @@ imports what it recognises into the library, atomically and never overwriting a 
 there. `paperstand migrate` does the same for a file already inside the library: with
 `--apply` it renames and relocates every unambiguous file to its own canonical path, in
 place, leaving anything unsorted, colliding or already there exactly where it is; see
-[`docs/organizer.md`](docs/organizer.md).
+[`docs/organizer.md`](docs/organizer.md). `paperstand retry-covers` puts every issue flagged
+as not a valid PDF back in the queue for the next scan. A replaced file never needs it —
+new bytes are a new issue — it is for a verdict there is reason to doubt; see
+[`docs/maintenance.md`](docs/maintenance.md#unreadable).
 
 ## OPDS
 

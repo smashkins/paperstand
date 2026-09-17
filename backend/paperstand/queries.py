@@ -73,6 +73,7 @@ ISSUE_COLUMNS = """
     i.matched_rule AS matched_rule,
     i.duplicate_of AS duplicate_of,
     i.missing_since AS missing_since,
+    i.cover_status AS cover_status,
     i.cover_error AS cover_error,
     i.page_count AS page_count,
     i.page_w AS page_w,
@@ -113,6 +114,13 @@ REAL_TITLE = "t.source <> 'unsorted'"
 #: detail URL and a maintenance view both need to reach a row this
 #: hides. Assumes the issues table is aliased ``i``.
 VISIBLE = "i.duplicate_of IS NULL AND i.missing_since IS NULL"
+
+#: An issue the renderer gave up on: stamped `error` outright, or left
+#: `pending` with a message after a retryable failure. Assumes the issues
+#: table is aliased ``i``.
+UNREADABLE = (
+    "(i.cover_status = 'error' OR (i.cover_status = 'pending' AND i.cover_error IS NOT NULL))"
+)
 
 
 # --------------------------------------------------------------------- urls
@@ -189,6 +197,7 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         added_at=str(row["added_at"]),
         is_duplicate=row["duplicate_of"] is not None,
         missing_since=row["missing_since"],
+        cover_status=row["cover_status"],
         cover_error=row["cover_error"],
         progress=progress,
     )
@@ -425,7 +434,7 @@ def _issue_where(
         # row's cover status is frozen until it returns and is already
         # listed through `missing` — the two never overlap.
         where.append(VISIBLE)
-        where.append("i.cover_status = 'error'")
+        where.append(UNREADABLE)
     elif include_duplicates:
         where.append("i.missing_since IS NULL")
     else:
@@ -710,7 +719,7 @@ def count_unreadable(connection: sqlite3.Connection) -> int:
     before it vanished and is counted through ``missing_count`` instead.
     """
     row = connection.execute(
-        f"SELECT count(*) AS total FROM issues i WHERE {VISIBLE} AND i.cover_status = 'error'"
+        f"SELECT count(*) AS total FROM issues i WHERE {VISIBLE} AND {UNREADABLE}"
     ).fetchone()
     return int(row["total"])
 

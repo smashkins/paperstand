@@ -31,6 +31,7 @@ IssueKey = Literal["date", "number", "date+number"]
 IssueSort = Literal["date_desc", "date_asc", "added_desc"]
 TitleSort = Literal["name", "latest"]
 ScanPhase = Literal["catalogue", "covers"]
+CoverStatus = Literal["pending", "ok", "error"]
 
 
 class Aspect(BaseModel):
@@ -101,10 +102,22 @@ class Issue(BaseModel):
     grace period (``PAPERSTAND_MISSING_GRACE_DAYS``) elapses and the row is
     forgotten. Reachable through ``GET /api/issues?missing=true`` and at its
     own detail URL throughout."""
+    cover_status: CoverStatus
+    """What the scanner does with this issue's cover next. ``cover_error``
+    says what happened last time; together the two columns are:
+
+    | ``cover_status`` | ``cover_error`` | meaning |
+    | --- | --- | --- |
+    | ``pending`` | ``null`` | never tried |
+    | ``pending`` | set | tried, could not read the file; tried again next scan |
+    | ``ok`` | ``null`` | rendered |
+    | ``error`` | set | tried, read the file, it is not a PDF; a human replaces it |
+    """
     cover_error: str | None = None
-    """The renderer's own message when it could not open this file at all;
-    ``null`` while ``cover_status`` is ``pending`` or ``ok``. May name the
-    file's path under the library root. Reachable through
+    """The renderer's own message from its last attempt on this file; ``null``
+    while ``cover_status`` is ``ok`` or nothing has been tried yet. Set
+    together with ``cover_status`` — read the two columns together. May name
+    the file's path under the library root. Reachable through
     ``GET /api/issues?unreadable=true``."""
     progress: Progress | None = None
 

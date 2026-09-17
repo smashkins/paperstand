@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `paperstand retry-covers` resets every issue flagged as not a valid PDF back to `pending`
+  and touches the scan trigger when it changed at least one row. A replaced file never needs
+  it — new bytes are a new issue, catalogued by the next scan on its own. It is for a verdict
+  there is reason to doubt, such as rows stamped before the fix below told the two cases
+  apart.
+
+### Fixed
+
+- A cover that failed because the server could not read the file — permissions, I/O, a full
+  cache — used to be stamped `error` for good, the same as a file that genuinely is not a
+  PDF. It now stays `pending` and is retried by every scan on its own, and the maintenance
+  page's *Unreadable* list says in words which of the two cases a row is, so a reader knows
+  whether to fix the file's permissions or replace it.
+
 ## [0.5.0] - 2026-09-15
 
 ### Changed

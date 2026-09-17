@@ -493,6 +493,11 @@ export interface components {
 			content_hash?: string | null;
 			/** Cover Error */
 			cover_error?: string | null;
+			/**
+			 * Cover Status
+			 * @enum {string}
+			 */
+			cover_status: 'pending' | 'ok' | 'error';
 			/** Cover Url */
 			cover_url: string;
 			/**
@@ -558,6 +563,11 @@ export interface components {
 			content_hash?: string | null;
 			/** Cover Error */
 			cover_error?: string | null;
+			/**
+			 * Cover Status
+			 * @enum {string}
+			 */
+			cover_status: 'pending' | 'ok' | 'error';
 			/** Cover Url */
 			cover_url: string;
 			/**

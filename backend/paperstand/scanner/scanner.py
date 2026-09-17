@@ -906,10 +906,19 @@ class Scanner:
             for written, (identifier, outcome) in enumerate(rendered, start=1):
                 if isinstance(outcome, CoverError):
                     failed += 1
+                    # A retryable failure is the environment, not the bytes: leave the
+                    # row `pending` so the next scan opens the file again for free,
+                    # instead of stamping it `error` and never looking at it again.
+                    status = "pending" if outcome.retryable else "error"
+                    # A retryable failure that keeps failing runs this every scan; only
+                    # bump `updated_at` when the stored status or message actually
+                    # changes, or an unchanged entry looks modified in the OPDS feed
+                    # on every scan and clients keep re-fetching it for nothing.
                     connection.execute(
-                        "UPDATE issues SET cover_status = 'error', cover_error = ?, "
-                        "updated_at = ? WHERE id = ?",
-                        (outcome.message, utc_now(), identifier),
+                        "UPDATE issues SET updated_at = CASE WHEN cover_status = ? "
+                        "AND cover_error IS ? THEN updated_at ELSE ? END, "
+                        "cover_status = ?, cover_error = ? WHERE id = ?",
+                        (status, outcome.message, utc_now(), status, outcome.message, identifier),
                     )
                 else:
                     done += 1

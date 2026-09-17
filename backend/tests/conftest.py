@@ -33,6 +33,7 @@ from PIL import Image
 from paperstand.config import Settings
 from paperstand.db import issue_id
 from paperstand.main import create_app
+from paperstand.scanner import covers
 from paperstand.scanner.covers import TEXT_LIMIT, CoverError, CoverResult, cover_paths
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
@@ -71,7 +72,17 @@ def _write_placeholder_jpeg(path: Path) -> None:
 def _fast_render_cover(
     pdf_path: Path, identifier: str, cache_root: Path
 ) -> CoverResult | CoverError:
-    """Stand-in for `paperstand.scanner.covers.render_cover`, minus the pixels."""
+    """Stand-in for `paperstand.scanner.covers.render_cover`, minus the pixels.
+
+    Calls `covers.probe` through the module, not by name, so a test that
+    monkeypatches `paperstand.scanner.covers.probe` reaches this stand-in
+    exactly as it would the real `render_cover` — and mirrors the same
+    three-way `except`, so it never drifts from what `render_cover` does.
+    """
+    try:
+        covers.probe(pdf_path)
+    except OSError as error:
+        return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
     try:
         with pymupdf.open(pdf_path) as document:
             if document.needs_pass:
@@ -82,6 +93,8 @@ def _fast_render_cover(
             page = document.load_page(0)
             rect = page.rect
             text = page.get_text("text")[:TEXT_LIMIT]
+    except OSError as error:
+        return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
     except Exception as error:  # matches render_cover: never raises
         return CoverError(message=f"{type(error).__name__}: {error}")
 

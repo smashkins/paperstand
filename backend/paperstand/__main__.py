@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -164,6 +165,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="never remove a folder a move left empty",
     )
+
+    retry_covers_command = subparsers.add_parser(
+        "retry-covers",
+        help="reset every issue the renderer gave up on, so the next scan tries again",
+    )
+    retry_covers_command.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="directory holding the database and the caches (default: PAPERSTAND_DATA)",
+    )
     return parser
 
 
@@ -289,6 +301,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             apply=args.apply,
             prune_empty=not args.keep_empty_folders,
         )
+    if args.command == "retry-covers":
+        from paperstand.cli.retry_covers import retry_covers
+
+        overrides = {key: value for key, value in (("data", args.data),) if value is not None}
+        settings = get_settings()
+        if overrides:
+            settings = Settings(**{**settings.model_dump(), **overrides})
+        return retry_covers(settings.data, sys.stdout)
     parser.print_help()
     return 1
 

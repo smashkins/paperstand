@@ -69,6 +69,9 @@ def test_an_unreadable_file_is_an_error_not_an_exception(tmp_path: Path) -> None
 
     assert isinstance(outcome, CoverError)
     assert outcome.message
+    # The file was read fine — `probe` succeeded — so the bytes are what is
+    # wrong: not retried until they change.
+    assert outcome.retryable is False
     assert not has_cover(tmp_path / "cache", "deadbeefdeadbeef")
 
 
@@ -76,6 +79,37 @@ def test_a_missing_file_is_an_error_not_an_exception(tmp_path: Path) -> None:
     outcome = render_cover(tmp_path / "absent.pdf", "0000000000000000", tmp_path / "cache")
 
     assert isinstance(outcome, CoverError)
+    # `probe` never got to open it: the environment, not the bytes.
+    assert outcome.retryable is True
+
+
+def test_a_directory_passed_as_the_pdf_is_retryable(tmp_path: Path) -> None:
+    """`chmod 000` is ignored by a root container, so it proves nothing there;
+    a directory refuses to open as a file everywhere, root included."""
+    directory = tmp_path / "not_a_file.pdf"
+    directory.mkdir()
+
+    outcome = render_cover(directory, "1234567812345678", tmp_path / "cache")
+
+    assert isinstance(outcome, CoverError)
+    assert outcome.retryable is True
+
+
+def test_a_cache_write_failure_is_retryable(
+    sample_library: SampleLibrary, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_save` fails after the PDF itself was read fine — a full or read-only
+    cache, not a bad file — so this, too, is retried rather than stamped."""
+
+    def raise_oserror(*args: object, **kwargs: object) -> None:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr("paperstand.scanner.covers._save", raise_oserror)
+
+    outcome = render_cover(sample_library.path(A_NEWSPAPER), "cafebabecafebabe", tmp_path / "cache")
+
+    assert isinstance(outcome, CoverError)
+    assert outcome.retryable is True
 
 
 def test_clearing_the_cache_removes_the_images_and_the_pages(

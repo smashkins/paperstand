@@ -169,6 +169,15 @@
 						],
 						"title": "Cover Error"
 					},
+					"cover_status": {
+						"enum": [
+							"pending",
+							"ok",
+							"error"
+						],
+						"title": "Cover Status",
+						"type": "string"
+					},
 					"cover_url": {
 						"title": "Cover Url",
 						"type": "string"
@@ -339,7 +348,8 @@
 					"thumb_url",
 					"file_url",
 					"added_at",
-					"is_duplicate"
+					"is_duplicate",
+					"cover_status"
 				],
 				"title": "Issue",
 				"type": "object"
@@ -382,6 +392,15 @@
 							}
 						],
 						"title": "Cover Error"
+					},
+					"cover_status": {
+						"enum": [
+							"pending",
+							"ok",
+							"error"
+						],
+						"title": "Cover Status",
+						"type": "string"
 					},
 					"cover_url": {
 						"title": "Cover Url",
@@ -588,6 +607,7 @@
 					"file_url",
 					"added_at",
 					"is_duplicate",
+					"cover_status",
 					"derived_title",
 					"matched_rule",
 					"pages_url_template"
