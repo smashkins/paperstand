@@ -7,6 +7,7 @@ typed out by hand.
 
 from __future__ import annotations
 
+import datetime as dt
 import itertools
 import logging
 import os
@@ -942,6 +943,64 @@ def test_a_permission_error_is_retried_until_it_clears(
     assert row["cover_status"] == "ok"
     assert row["cover_error"] is None
     assert row["page_count"] is not None
+
+
+def test_updated_at_does_not_advance_while_a_retryable_failure_persists(
+    scan_settings: Settings, sample_library: SampleLibrary, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`updated_at` backs each OPDS entry's Atom ``<updated>``: a retryable
+    failure that keeps failing must not bump it scan after scan, or an entry
+    that has not actually changed looks freshly modified and a client keeps
+    re-fetching it for nothing. Once the failure clears and the cover
+    renders, the row really has changed and `updated_at` must say so.
+
+    ``utc_now`` is replaced with a strictly increasing sequence instead of
+    read from the wall clock: it is truncated to the second, so two scans
+    that happen to run within the same second could tie by chance and make
+    the final assertion flaky for a reason that has nothing to do with the
+    fix under test.
+    """
+    target = sample_library.path(A_NEWSPAPER)
+    real_probe = covers.probe
+    blocked = True
+
+    def flaky(path: Path) -> None:
+        if blocked and path == target:
+            raise PermissionError("permission denied")
+        real_probe(path)
+
+    monkeypatch.setattr("paperstand.scanner.covers.probe", flaky)
+
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    ticks = itertools.count()
+    monkeypatch.setattr(
+        "paperstand.scanner.scanner.utc_now",
+        lambda: (start + dt.timedelta(seconds=next(ticks))).isoformat(),
+    )
+
+    identifier = sample_issue_id(sample_library.root, A_NEWSPAPER)
+
+    scan_once(scan_settings)
+    row = query(
+        scan_settings, "SELECT cover_status, updated_at FROM issues WHERE id = ?", (identifier,)
+    )[0]
+    assert row["cover_status"] == "pending"
+    first_updated_at = row["updated_at"]
+
+    scan_once(scan_settings)
+    row = query(
+        scan_settings, "SELECT cover_status, updated_at FROM issues WHERE id = ?", (identifier,)
+    )[0]
+    assert row["cover_status"] == "pending"
+    assert row["updated_at"] == first_updated_at
+
+    blocked = False
+    scan_once(scan_settings)
+    row = query(
+        scan_settings, "SELECT cover_status, updated_at FROM issues WHERE id = ?", (identifier,)
+    )[0]
+    assert row["cover_status"] == "ok"
+    assert row["updated_at"] > first_updated_at
 
 
 def test_an_empty_library_scans_to_nothing(tmp_path: Path) -> None:

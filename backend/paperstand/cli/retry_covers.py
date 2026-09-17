@@ -27,18 +27,21 @@ __all__ = ["retry_covers"]
 def retry_covers(data: Path, stream: TextIO) -> int:
     """Reset every durably unreadable issue under ``data`` to ``pending``.
 
-    Never touches a row hidden by ``missing_since``: its file is not there to
-    retry, and the row is reconsidered on its own once it comes back. Prints
-    how many rows were reset and, when that count is more than zero, touches
-    the scan trigger — the next scan is what actually renders them. Always
-    exits ``0``: there is nothing here for a caller to treat as a failure.
+    Resets a row even when ``missing_since`` is set: the scanner's
+    ``_pending_covers`` already skips a missing row until its file comes
+    back, so setting it to ``pending`` here just means it waits quietly
+    instead of sitting stuck at ``error`` — it is rendered on the first scan
+    after the file returns. Prints how many rows were reset and, when that
+    count is more than zero, touches the scan trigger — the next scan is what
+    actually renders them. Always exits ``0``: there is nothing here for a
+    caller to treat as a failure.
     """
     database = open_database(data / "paperstand.db")
     try:
         connection = database.connection
         cursor = connection.execute(
             "UPDATE issues SET cover_status = 'pending', cover_error = NULL "
-            "WHERE cover_status = 'error' AND missing_since IS NULL"
+            "WHERE cover_status = 'error'"
         )
         reset = cursor.rowcount
         connection.commit()

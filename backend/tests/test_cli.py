@@ -232,11 +232,13 @@ def test_retry_covers_resets_the_error_row_and_touches_the_trigger(
             (error_id,),
         )
         # A missing row also carries an `error` stamp from before it vanished —
-        # its file is not there to retry, so this one must be left alone.
+        # it is reset like any other, and simply waits, `pending`, until the
+        # scanner's `_pending_covers` stops skipping it once the file returns.
+        missing_stamp = utc_now()
         connection.execute(
             "UPDATE issues SET cover_status = 'error', cover_error = 'broken', "
             "missing_since = ? WHERE id = ?",
-            (utc_now(), missing_id),
+            (missing_stamp, missing_id),
         )
         connection.commit()
     finally:
@@ -247,7 +249,7 @@ def test_retry_covers_resets_the_error_row_and_touches_the_trigger(
 
     assert main(["retry-covers", "--data", str(data)]) == 0
     out = capsys.readouterr().out
-    assert "1 issue(s) reset to pending" in out
+    assert "2 issue(s) reset to pending" in out
     assert f"scan requested: {trigger}" in out
     assert trigger.is_file()
 
@@ -258,14 +260,16 @@ def test_retry_covers_resets_the_error_row_and_touches_the_trigger(
             "SELECT cover_status, cover_error FROM issues WHERE id = ?", (error_id,)
         ).fetchone()
         missing_row = connection.execute(
-            "SELECT cover_status, cover_error FROM issues WHERE id = ?", (missing_id,)
+            "SELECT cover_status, cover_error, missing_since FROM issues WHERE id = ?",
+            (missing_id,),
         ).fetchone()
     finally:
         connection.close()
     assert reset_row["cover_status"] == "pending"
     assert reset_row["cover_error"] is None
-    assert missing_row["cover_status"] == "error"
-    assert missing_row["cover_error"] == "broken"
+    assert missing_row["cover_status"] == "pending"
+    assert missing_row["cover_error"] is None
+    assert missing_row["missing_since"] == missing_stamp
 
     # Nothing left to reset: no second trigger, and the first is not recreated.
     trigger.unlink()
