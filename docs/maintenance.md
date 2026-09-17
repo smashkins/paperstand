@@ -26,12 +26,21 @@ See [Identity](folder-layout.md#identity) for the full rule.
 
 ## Unreadable
 
-A file the renderer opened and could not make sense of: encrypted, truncated, not really a
-PDF. Each row shows the file name, its path and the renderer's own message, which may name
-the file directly. **What to do:** look at the file itself — a password-protected PDF needs
-its password removed, a truncated one needs to be re-copied. There is nothing to fix from
-inside Paperstand; a corrected file replaces the broken one on the next scan, the same way
-any change would.
+A file the renderer could not get a cover from, in one of two unrelated ways. Each row shows
+the file name, its path, a sentence naming which case it is, and the renderer's own message
+underneath, which may name the file directly.
+
+- **Not a valid PDF** — encrypted, truncated, or not really a PDF at all. **What to do:**
+  look at the file itself — a password-protected PDF needs its password removed, a truncated
+  one needs to be re-copied — and let the corrected file replace the broken one; the next
+  scan catalogues it like any other change. A replaced file never needs a command: new
+  bytes are a new issue. `paperstand retry-covers` is for the verdict itself, when there is
+  reason to doubt it — every row here goes back to pending and a scan is requested, so the
+  renderer looks at the same bytes once more; see
+  [the scan trigger](organizer.md#the-run-report-and-the-scan-trigger).
+- **The server could not read the file** — permissions or an I/O error, not the file's own
+  content. **What to do:** nothing from inside Paperstand; every scan tries the file again on
+  its own, so a permissions fix or a transient disk issue clears the row without any command.
 
 ## Inbox
 

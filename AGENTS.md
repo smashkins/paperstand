@@ -24,7 +24,7 @@ cover-first web interface, an in-browser reader and an OPDS 1.2 feed.
 ```
 backend/paperstand/
   api/         REST routers, one module per resource
-  cli/         parse-report, parse-explain, organize-plan and organize
+  cli/         parse-report, parse-explain, organize-plan, organize, migrate and retry-covers
   opds/        Atom feed builder and the OPDS router
   organizer/   canonical naming, inbox pipeline, never-overwrite mover, run report
   parsing/     the parser: engine, primitives, and profiles/*.yml
