@@ -73,6 +73,7 @@ ISSUE_COLUMNS = """
     i.matched_rule AS matched_rule,
     i.duplicate_of AS duplicate_of,
     i.missing_since AS missing_since,
+    i.cover_status AS cover_status,
     i.cover_error AS cover_error,
     i.page_count AS page_count,
     i.page_w AS page_w,
@@ -196,6 +197,7 @@ def issue_from_row(row: sqlite3.Row) -> Issue:
         added_at=str(row["added_at"]),
         is_duplicate=row["duplicate_of"] is not None,
         missing_since=row["missing_since"],
+        cover_status=row["cover_status"],
         cover_error=row["cover_error"],
         progress=progress,
     )

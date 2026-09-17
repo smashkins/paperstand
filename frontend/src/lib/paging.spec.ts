@@ -19,7 +19,8 @@ function issue(id: string): Issue {
 		thumb_url: '',
 		file_url: '',
 		added_at: '2026-01-01T00:00:00Z',
-		is_duplicate: false
+		is_duplicate: false,
+		cover_status: 'ok'
 	};
 }
 

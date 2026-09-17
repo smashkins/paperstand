@@ -157,7 +157,8 @@ def test_unreadable_lists_only_that_row_with_its_error(
 def test_unreadable_counts_and_lists_both_kinds(
     catalogue_client: TestClient, catalogue_settings: Settings
 ) -> None:
-    """A durable `error` and a retryable `pending` both count as unreadable."""
+    """A durable `error` and a retryable `pending` both count as unreadable —
+    the row itself says which, through `cover_status`."""
     items = catalogue_client.get(
         "/api/issues", params={"library": "newspapers", "limit": 5}
     ).json()["items"]
@@ -173,7 +174,10 @@ def test_unreadable_counts_and_lists_both_kinds(
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 2
-    assert {item["id"] for item in payload["items"]} == {durable_id, retryable_id}
+    rows = {item["id"]: item for item in payload["items"]}
+    assert rows[durable_id]["cover_status"] == "error"
+    assert rows[retryable_id]["cover_status"] == "pending"
+    assert rows[retryable_id]["cover_error"] == "cannot open"
 
 
 def test_unreadable_and_missing_never_overlap(
