@@ -191,7 +191,7 @@
 	"maintenance_unreadable_heading": "Unreadable",
 	"maintenance_unreadable_empty": "Every file opened.",
 	"maintenance_unreadable_reason_error": "Not a valid PDF. Replace the file: the next scan catalogues the new bytes on its own.",
-	"maintenance_unreadable_reason_unavailable": "The server could not read the file — permissions or I/O. It tries again at every scan.",
+	"maintenance_unreadable_reason_unavailable": "The server could not read the file, or could not write its cover into the cache — permissions or I/O; the message below names the path that failed. It tries again at every scan.",
 
 	"maintenance_inbox_heading": "Inbox",
 	"maintenance_inbox_never_run": "The organizer has not run here yet.",

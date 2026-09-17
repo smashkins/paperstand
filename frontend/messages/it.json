@@ -191,7 +191,7 @@
 	"maintenance_unreadable_heading": "Illeggibili",
 	"maintenance_unreadable_empty": "Tutti i file si sono aperti.",
 	"maintenance_unreadable_reason_error": "Non è un PDF valido. Sostituisci il file: la prossima scansione cataloga da sola i byte nuovi.",
-	"maintenance_unreadable_reason_unavailable": "Il server non è riuscito a leggere il file: permessi o I/O. Riprova a ogni scansione.",
+	"maintenance_unreadable_reason_unavailable": "Il server non è riuscito a leggere il file, o a scrivere la copertina nella cache: permessi o I/O, e il messaggio qui sotto nomina il percorso che ha fallito. Riprova a ogni scansione.",
 
 	"maintenance_inbox_heading": "Posta in arrivo",
 	"maintenance_inbox_never_run": "L'organizzatore non è ancora stato eseguito qui.",

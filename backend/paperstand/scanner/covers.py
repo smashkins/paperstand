@@ -131,8 +131,8 @@ def render_cover(pdf_path: Path, identifier: str, cache_root: Path) -> CoverResu
         return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
     try:
         return _render(pdf_path, identifier, cache_root)
-    except OSError as error:
-        log.warning("cannot read %s: %s", pdf_path, error)
+    except OSError as error:  # past the probe this is the cache, and the message names it
+        log.warning("cannot render the cover of %s: %s", pdf_path, error)
         return CoverError(message=f"{type(error).__name__}: {error}", retryable=True)
     except Exception as error:  # one unreadable file must not stop a scan
         log.warning("cannot read %s: %s", pdf_path, error)

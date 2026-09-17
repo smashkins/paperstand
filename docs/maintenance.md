@@ -38,9 +38,11 @@ underneath, which may name the file directly.
   reason to doubt it — every row here goes back to pending and a scan is requested, so the
   renderer looks at the same bytes once more; see
   [the scan trigger](organizer.md#the-run-report-and-the-scan-trigger).
-- **The server could not read the file** — permissions or an I/O error, not the file's own
-  content. **What to do:** nothing from inside Paperstand; every scan tries the file again on
-  its own, so a permissions fix or a transient disk issue clears the row without any command.
+- **The server could not read the file, or could not write its cover** — permissions or an
+  I/O error on the library or on `/data`, not the file's own content; the message underneath
+  names the path that failed. **What to do:** nothing from inside Paperstand; every scan tries
+  again on its own, so a permissions fix or a transient disk issue clears the row without any
+  command.
 
 ## Inbox
 
