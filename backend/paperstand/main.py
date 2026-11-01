@@ -176,18 +176,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # following a scan is for everybody, starting one is not.
     app.include_router(scan_api.create_router(scheduler, authenticator), dependencies=user)
     app.include_router(libraries_api.create_router(settings, database), dependencies=user)
-    app.include_router(titles_api.create_router(database), dependencies=user)
-    app.include_router(today_api.create_router(settings, database), dependencies=user)
-    app.include_router(progress_api.create_router(database), dependencies=user)
+    app.include_router(titles_api.create_router(database, authenticator), dependencies=user)
+    app.include_router(
+        today_api.create_router(settings, database, authenticator), dependencies=user
+    )
+    app.include_router(progress_api.create_router(database, authenticator), dependencies=user)
     app.include_router(files_api.create_router(settings, database), dependencies=user)
     app.include_router(images_api.create_router(settings, database, renderer), dependencies=user)
     app.include_router(maintenance_api.create_router(settings, database), dependencies=admin)
     # Last of the catalogue routers: `/api/issues/{issue_id}` would otherwise
     # shadow `/api/issues/{issue_id}/progress` and the image routes for a client
     # that sent a trailing slash.
-    app.include_router(issues_api.create_router(database), dependencies=user)
+    app.include_router(issues_api.create_router(database, authenticator), dependencies=user)
     app.include_router(
-        opds_api.create_router(settings, database),
+        opds_api.create_router(settings, database, authenticator),
         dependencies=[Depends(authenticator.opds_user)],
     )
     app.mount("/", SPAStaticFiles(settings.static), name="spa")

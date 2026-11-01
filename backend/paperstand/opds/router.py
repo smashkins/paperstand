@@ -29,9 +29,10 @@ from collections.abc import Callable, Sequence
 from typing import Annotated, NamedTuple
 from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from paperstand import queries
+from paperstand.api.auth import Authenticator, Caller
 from paperstand.api.common import UNKNOWN_TITLE, catalogue
 from paperstand.api.today import local_today
 from paperstand.config import Settings
@@ -323,13 +324,22 @@ def xml(payload: bytes, media_type: str) -> Response:
 
 
 def create_router(
-    settings: Settings, database: Database | None, page_size: int | None = None
+    settings: Settings,
+    database: Database | None,
+    authenticator: Authenticator,
+    page_size: int | None = None,
 ) -> APIRouter:
     """Build the OPDS router.
 
     ``page_size`` is read here rather than defaulted in the signature so that a
     test can set :data:`PAGE_SIZE` to something small and exercise the first, a
     middle and the last page of a feed without a library of thousands.
+
+    No entry says where anybody got to — OPDS 1.2 has no element for it — but
+    every feed that lists issues still asks for them as the caller, so the
+    rows it reads are that reader's, exactly as the REST API's are. The caller
+    comes from a default rather than an `Annotated` hint, for the reason given
+    in `Authenticator.__init__`.
 
     Every feed answers ``HEAD`` as well as ``GET``: a client probes a stored
     catalogue before opening it, and the two methods have to agree about what
@@ -441,12 +451,14 @@ def create_router(
         return xml(atom.feed_bytes(feed), NAVIGATION)
 
     @router.api_route("/kind/{kind}", methods=["GET", "HEAD"])
-    def by_kind(request: Request, kind: Kind) -> Response:
+    def by_kind(
+        request: Request, kind: Kind, caller: Caller = Depends(authenticator.opds_user)
+    ) -> Response:
         """Every title of one kind, each leading to the feed of its issues."""
         connection = catalogue(database)
         frame = Frame(request, settings)
         updated = freshness(connection)
-        titles = queries.list_titles(connection, kind=kind, sort="name")
+        titles = queries.list_titles(connection, user_id=caller.account.id, kind=kind, sort="name")
         latest = queries.entry_facts(
             connection,
             [title.latest_issue.id for title in titles if title.latest_issue is not None],
@@ -475,14 +487,17 @@ def create_router(
         request: Request,
         title_id: str,
         page: Annotated[int, Query(ge=1)] = 1,
+        caller: Caller = Depends(authenticator.opds_user),
     ) -> Response:
         """One title's issues, newest first, fifty to a page."""
         connection = catalogue(database)
-        title = queries.get_title(connection, title_id)
+        user_id = caller.account.id
+        title = queries.get_title(connection, title_id, user_id=user_id)
         if title is None:
             raise HTTPException(status_code=404, detail=UNKNOWN_TITLE)
         issues, total = queries.list_issues(
             connection,
+            user_id=user_id,
             title=title_id,
             sort="date_desc",
             limit=size,
@@ -502,7 +517,7 @@ def create_router(
         )
 
     @router.api_route("/today", methods=["GET", "HEAD"])
-    def today(request: Request) -> Response:
+    def today(request: Request, caller: Caller = Depends(authenticator.opds_user)) -> Response:
         """The day's newspapers, then the latest issue of every magazine.
 
         The same fallback ``/api/today`` uses: a day with nothing on it shows
@@ -511,14 +526,15 @@ def create_router(
         empty shelf.
         """
         connection = catalogue(database)
+        user_id = caller.account.id
         wanted = local_today(settings).isoformat()
         shown: str | None = wanted
-        newspapers = queries.issues_on_date(connection, "newspaper", wanted)
+        newspapers = queries.issues_on_date(connection, "newspaper", wanted, user_id=user_id)
         if not newspapers:
             shown = queries.latest_date_on_or_before(connection, "newspaper", wanted)
             if shown is not None:
-                newspapers = queries.issues_on_date(connection, "newspaper", shown)
-        magazines = queries.latest_per_kind(connection, "magazine")
+                newspapers = queries.issues_on_date(connection, "newspaper", shown, user_id=user_id)
+        magazines = queries.latest_per_kind(connection, "magazine", user_id=user_id)
         # The subtitle names the day actually on the shelf, not the day that was
         # asked for: a reader looking at Saturday's paper on a Sunday should be
         # told so rather than left to wonder why the date on the cover is wrong.
@@ -535,7 +551,7 @@ def create_router(
         )
 
     @router.api_route("/recent", methods=["GET", "HEAD"])
-    def recent(request: Request) -> Response:
+    def recent(request: Request, caller: Caller = Depends(authenticator.opds_user)) -> Response:
         """What the last scans brought in."""
         connection = catalogue(database)
         return acquisition_feed(
@@ -546,14 +562,20 @@ def create_router(
             subtitle=None,
             self_path="/opds/recent",
             parent=("/opds", NAVIGATION),
-            issues=queries.recently_added(connection, RECENT_LIMIT),
+            issues=queries.recently_added(connection, RECENT_LIMIT, user_id=caller.account.id),
         )
 
     @router.api_route("/unsorted", methods=["GET", "HEAD"])
-    def unsorted(request: Request, page: Annotated[int, Query(ge=1)] = 1) -> Response:
+    def unsorted(
+        request: Request,
+        page: Annotated[int, Query(ge=1)] = 1,
+        caller: Caller = Depends(authenticator.opds_user),
+    ) -> Response:
         """The files the parser could not place, newest first."""
         connection = catalogue(database)
-        issues, total = queries.unsorted_issues(connection, limit=size, offset=(page - 1) * size)
+        issues, total = queries.unsorted_issues(
+            connection, user_id=caller.account.id, limit=size, offset=(page - 1) * size
+        )
         return paginated(
             connection=connection,
             request=request,
@@ -572,6 +594,7 @@ def create_router(
         request: Request,
         q: str = "",
         page: Annotated[int, Query(ge=1)] = 1,
+        caller: Caller = Depends(authenticator.opds_user),
     ) -> Response:
         """Issues matching ``q`` in their title, file name or derived title."""
         text = q.strip()
@@ -579,7 +602,7 @@ def create_router(
             raise HTTPException(status_code=400, detail=EMPTY_QUERY)
         connection = catalogue(database)
         issues, total = queries.search_issues(
-            connection, text, limit=size, offset=(page - 1) * size
+            connection, text, user_id=caller.account.id, limit=size, offset=(page - 1) * size
         )
         return paginated(
             connection=connection,

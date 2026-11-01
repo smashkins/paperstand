@@ -39,6 +39,7 @@ TABLES = {
     "titles",
     "issues",
     "reading_progress",
+    "legacy_progress",
     "scans",
     "meta",
     "users",
@@ -121,9 +122,13 @@ def test_reading_progress_survives_the_issue_disappearing(tmp_path: Path) -> Non
             "'T', '', 'D1', ?, ?)",
             (utc_now(), utc_now()),
         )
-        connection.execute(
-            "INSERT INTO reading_progress VALUES ('i', 12, 40, ?)",
+        user = connection.execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES ('reader', 'x', ?)",
             (utc_now(),),
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO reading_progress VALUES (?, 'i', 12, 40, ?)",
+            (user, utc_now()),
         )
         connection.execute("DELETE FROM issues WHERE id = 'i'")
 
@@ -244,7 +249,7 @@ def test_a_schema_1_database_migrates_to_schema_2_keeping_every_row(tmp_path: Pa
     assert user_version(connection) == SCHEMA_VERSION
     assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
-    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM legacy_progress").fetchone()["n"] == 1
 
     title = connection.execute("SELECT * FROM titles WHERE id = 't'").fetchone()
     assert title["name"] == "Corriere del Ponte"
@@ -355,7 +360,7 @@ def test_a_schema_2_database_migrates_to_schema_3_keeping_every_row(tmp_path: Pa
     assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM titles").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
-    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM legacy_progress").fetchone()["n"] == 1
 
     # The new column exists and carries no value for a row the migration did
     # not touch: `content_hash IS NULL` is how the scanner recognises a
@@ -451,7 +456,7 @@ def test_a_schema_3_database_migrates_to_schema_4_keeping_every_row(tmp_path: Pa
     assert connection.execute("SELECT count(*) AS n FROM libraries").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM titles").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM issues").fetchone()["n"] == 1
-    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 1
+    assert connection.execute("SELECT count(*) AS n FROM legacy_progress").fetchone()["n"] == 1
     assert connection.execute("SELECT count(*) AS n FROM scans").fetchone()["n"] == 1
 
     # The new columns exist and carry no value, or their default, for a row
@@ -523,15 +528,24 @@ def test_a_schema_4_database_migrates_to_schema_5_keeping_every_row(tmp_path: Pa
 
     assert user_version(connection) == SCHEMA_VERSION == 5
     assert get_meta(connection, "schema_version") == "5"
-    assert table_names(connection) >= {"users", "auth_tokens"}
-    for table in ("libraries", "titles", "issues", "reading_progress", "scans"):
+    assert table_names(connection) >= {"users", "auth_tokens", "legacy_progress"}
+    for table in ("libraries", "titles", "issues", "legacy_progress", "scans"):
         assert connection.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"] == 1
     # No account is needed for the migration, and none is invented by it.
     assert connection.execute("SELECT count(*) AS n FROM users").fetchone()["n"] == 0
-    # The shared progress row is exactly as it was: making it per user is a
-    # later step, not this one.
-    progress = connection.execute("SELECT * FROM reading_progress").fetchone()
+    # The shared progress row waits, exactly as it was, for the first
+    # administrator; the per-account table starts empty.
+    progress = connection.execute("SELECT * FROM legacy_progress").fetchone()
     assert (progress["issue_id"], progress["page"], progress["page_count"]) == ("i", 12, 40)
+    assert connection.execute("SELECT count(*) AS n FROM reading_progress").fetchone()["n"] == 0
+    columns = connection.execute("PRAGMA table_info(reading_progress)").fetchall()
+    assert [row["name"] for row in columns] == [
+        "user_id",
+        "issue_id",
+        "page",
+        "page_count",
+        "updated_at",
+    ]
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     database.close()
 
@@ -554,31 +568,41 @@ def test_schema_5_names_are_unique_without_regard_to_case(tmp_path: Path) -> Non
     database.close()
 
 
-def test_schema_5_tokens_go_with_their_account(tmp_path: Path) -> None:
+def test_schema_5_tokens_and_positions_go_with_their_account(tmp_path: Path) -> None:
     database = open_database(tmp_path / "paperstand.db")
     connection = database.connection
     with connection:
-        user = connection.execute(
-            "INSERT INTO users (username, password_hash, created_at) VALUES ('reader', 'x', ?)",
-            (utc_now(),),
-        ).lastrowid
+        user, other = (
+            connection.execute(
+                "INSERT INTO users (username, password_hash, created_at) VALUES (?, 'x', ?)",
+                (name, utc_now()),
+            ).lastrowid
+            for name in ("reader", "another reader")
+        )
         connection.execute(
             "INSERT INTO auth_tokens (token_hash, user_id, created_at, last_used_at) "
             "VALUES ('h', ?, ?, ?)",
             (user, utc_now(), utc_now()),
         )
+        for owner, page in ((user, 3), (other, 5)):
+            connection.execute(
+                "INSERT INTO reading_progress VALUES (?, 'i', ?, 40, ?)", (owner, page, utc_now())
+            )
     index_names = {
         str(row["name"])
         for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'auth_tokens'"
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND tbl_name IN ('auth_tokens', 'reading_progress')"
         )
     }
-    assert "auth_tokens_user" in index_names
+    assert {"auth_tokens_user", "reading_progress_recent"} <= index_names
 
     with connection:
         connection.execute("DELETE FROM users WHERE id = ?", (user,))
 
     assert connection.execute("SELECT count(*) AS n FROM auth_tokens").fetchone()["n"] == 0
+    left = connection.execute("SELECT user_id, page FROM reading_progress").fetchall()
+    assert [tuple(row) for row in left] == [(other, 5)]
     database.close()
 
 

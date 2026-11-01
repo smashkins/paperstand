@@ -13,7 +13,15 @@ from fastapi.testclient import TestClient
 from paperstand.api.progress import clamp
 from paperstand.api.today import local_today
 from paperstand.config import Settings
-from tests.conftest import SAMPLE_TODAY, quiet_settings, sample_issue_id
+from tests.conftest import (
+    SAMPLE_TODAY,
+    add_user,
+    app_of,
+    quiet_settings,
+    sample_issue_id,
+    schema_4_catalogue,
+    signed_in_client,
+)
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
@@ -251,6 +259,120 @@ def test_progress_on_an_unknown_issue_is_a_404(catalogue_client: TestClient) -> 
 )
 def test_the_clamp(page: int, page_count: int | None, expected: int) -> None:
     assert clamp(page, page_count) == expected
+
+
+# ------------------------------------------------------ progress per account
+
+
+@pytest.fixture
+def reader_client(catalogue_client: TestClient) -> TestClient:
+    """A second client over the same application, signed in as a reader.
+
+    Not entered as a context manager: that would run the application's
+    lifespan a second time, and its end would close the catalogue under the
+    administrator's client too.
+    """
+    return TestClient(app_of(catalogue_client), headers=add_user(catalogue_client, "reader"))
+
+
+def by_id(issues: list[dict[str, Any]], identifier: str) -> dict[str, Any]:
+    return next(issue for issue in issues if issue["id"] == identifier)
+
+
+def pages_seen(client: TestClient, identifier: str) -> dict[str, int | None]:
+    """The page of one issue as every response that embeds it shows it to ``client``.
+
+    ``None`` where the issue is there with ``progress: null``; a list the
+    issue is not on at all — continue reading, ``/api/progress`` — is also
+    ``None``, which is what "no position" means for those two.
+    """
+    detail = client.get(f"/api/issues/{identifier}").json()
+    title_id = detail["title_id"]
+    day = today(client, date=SAMPLE_TODAY.isoformat())
+    listed = client.get("/api/issues", params={"title": title_id, "limit": 200}).json()
+    title = client.get(f"/api/titles/{title_id}").json()
+    shelf = client.get("/api/titles", params={"kind": detail["kind"]}).json()
+    latest = [title["latest_issue"], by_id(shelf, title_id)["latest_issue"]]
+    # The issue has to be its title's latest for the two title views to embed it.
+    assert [issue["id"] for issue in latest] == [identifier, identifier]
+    progress_list = client.get("/api/progress").json()
+    own = client.get(f"/api/issues/{identifier}/progress")
+    embedded = {
+        "detail": detail["progress"],
+        "issues": by_id(listed["items"], identifier)["progress"],
+        "newspapers": by_id(day["newspapers"], identifier)["progress"],
+        "title": latest[0]["progress"],
+        "titles": latest[1]["progress"],
+        "continue_reading": next(
+            (issue["progress"] for issue in day["continue_reading"] if issue["id"] == identifier),
+            None,
+        ),
+        "progress_list": next(
+            (issue["progress"] for issue in progress_list if issue["id"] == identifier), None
+        ),
+    }
+    pages: dict[str, int | None] = {
+        where: progress["page"] if progress is not None else None
+        for where, progress in embedded.items()
+    }
+    pages["record"] = own.json()["page"] if own.status_code == 200 else None
+    return pages
+
+
+def everywhere(page: int | None) -> dict[str, int | None]:
+    return dict.fromkeys(
+        (
+            "detail",
+            "issues",
+            "newspapers",
+            "title",
+            "titles",
+            "continue_reading",
+            "progress_list",
+            "record",
+        ),
+        page,
+    )
+
+
+def test_each_account_sees_its_own_position_and_nobody_else_s(
+    catalogue_client: TestClient, reader_client: TestClient, catalogue_settings: Settings
+) -> None:
+    identifier = sample_issue_id(catalogue_settings.library, A_NEWSPAPER)
+    page_count = catalogue_client.get(f"/api/issues/{identifier}").json()["page_count"]
+    assert page_count >= 4, "continue reading needs a page between the first and the last"
+    progress = f"/api/issues/{identifier}/progress"
+
+    assert catalogue_client.put(progress, json={"page": 2}).status_code == 200
+    # The administrator has a position; the reader, so far, has none anywhere.
+    assert pages_seen(catalogue_client, identifier) == everywhere(2)
+    assert pages_seen(reader_client, identifier) == everywhere(None)
+    assert reader_client.get(progress).status_code == 404
+    assert reader_client.get("/api/progress").json() == []
+
+    assert reader_client.put(progress, json={"page": 3}).status_code == 200
+
+    assert pages_seen(catalogue_client, identifier) == everywhere(2)
+    assert pages_seen(reader_client, identifier) == everywhere(3)
+
+    # Forgetting is just as private: the reader's position stays.
+    assert catalogue_client.delete(progress).status_code == 204
+
+    assert pages_seen(catalogue_client, identifier) == everywhere(None)
+    assert pages_seen(reader_client, identifier) == everywhere(3)
+
+
+def test_an_upgraded_catalogue_s_positions_belong_to_the_bootstrapped_admin(
+    settings: Settings,
+) -> None:
+    """The single-user rows of schema 4 are the first administrator's, through the API too."""
+    identifier = "a1b2c3d4e5f60718"
+    schema_4_catalogue(settings.db_path, {identifier: 12})
+
+    with signed_in_client(settings) as client:
+        assert client.get(f"/api/issues/{identifier}/progress").json()["page"] == 12
+        second = add_user(client, "second", is_admin=True)
+        assert client.get(f"/api/issues/{identifier}/progress", headers=second).status_code == 404
 
 
 # --------------------------------------------------- Unsorted is not a title

@@ -9,7 +9,8 @@ see first:
   so the interface can label the shelf honestly. That is what makes the app
   usable before the morning's files have arrived, and on a Sunday.
 * **magazines** — the latest issue of every magazine title, newest first.
-* **continue_reading** — issues started and not finished, most recent first.
+* **continue_reading** — issues the caller started and did not finish, most
+  recent first. Every issue on every shelf carries the caller's own position.
 * **recently_added** — what the last scans brought in.
 
 "Today" is the day in ``TZ``, not the day in UTC: at 01:00 in Rome the answer is
@@ -22,9 +23,10 @@ import datetime as dt
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from paperstand import queries
+from paperstand.api.auth import Authenticator, Caller
 from paperstand.api.common import catalogue
 from paperstand.config import Settings
 from paperstand.db import Database
@@ -48,26 +50,34 @@ def local_today(settings: Settings) -> dt.date:
     return dt.datetime.now().astimezone().date()
 
 
-def create_router(settings: Settings, database: Database | None) -> APIRouter:
+def create_router(
+    settings: Settings, database: Database | None, authenticator: Authenticator
+) -> APIRouter:
     """Build the today router."""
     router = APIRouter(prefix="/api", tags=["catalogue"])
 
+    # The caller comes from a default rather than an `Annotated` hint, for the
+    # reason given in `Authenticator.__init__`.
     @router.get("/today")
     def today(
         date: Annotated[dt.date | None, Query(description="Defaults to today in TZ")] = None,
+        caller: Caller = Depends(authenticator.user),
     ) -> Today:
         """The day's newspapers, the latest magazines and what to read next."""
         connection = catalogue(database)
+        user_id = caller.account.id
         now = local_today(settings)
         day = date or now
         wanted = day.isoformat()
 
-        newspapers = queries.issues_on_date(connection, "newspaper", wanted)
+        newspapers = queries.issues_on_date(connection, "newspaper", wanted, user_id=user_id)
         newspapers_date: str | None = wanted if newspapers else None
         if not newspapers:
             fallback = queries.latest_date_on_or_before(connection, "newspaper", wanted)
             if fallback is not None:
-                newspapers = queries.issues_on_date(connection, "newspaper", fallback)
+                newspapers = queries.issues_on_date(
+                    connection, "newspaper", fallback, user_id=user_id
+                )
                 newspapers_date = fallback
 
         return Today(
@@ -75,9 +85,9 @@ def create_router(settings: Settings, database: Database | None) -> APIRouter:
             is_today=day == now,
             newspapers_date=newspapers_date,
             newspapers=newspapers,
-            magazines=queries.latest_per_kind(connection, "magazine"),
-            continue_reading=queries.continue_reading(connection, SHELF_LIMIT),
-            recently_added=queries.recently_added(connection, SHELF_LIMIT),
+            magazines=queries.latest_per_kind(connection, "magazine", user_id=user_id),
+            continue_reading=queries.continue_reading(connection, SHELF_LIMIT, user_id=user_id),
+            recently_added=queries.recently_added(connection, SHELF_LIMIT, user_id=user_id),
         )
 
     return router

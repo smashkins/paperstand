@@ -21,7 +21,7 @@ from paperstand.cli.parse import (
 )
 from paperstand.config import config_from_folders
 from paperstand.db import open_database, utc_now
-from tests.conftest import SampleLibrary, write_sample_config
+from tests.conftest import SampleLibrary, schema_4_catalogue, write_sample_config
 from tests.fixtures.filenames import IGNORED_PATHS, example_config_path
 
 LIBRARY_FILES: tuple[str, ...] = (
@@ -333,6 +333,32 @@ def test_users_add_then_list(
     try:
         assert accounts.authenticate(database.connection, "admin", "first password")
         assert accounts.authenticate(database.connection, "reader", "second password")
+    finally:
+        database.close()
+
+
+def test_the_first_admin_added_to_an_upgraded_catalogue_adopts_its_positions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recovery route gives the single-user positions away as the bootstrap does."""
+    data = tmp_path / "data"
+    schema_4_catalogue(data / "paperstand.db", {"a1b2c3d4e5f60718": 12})
+
+    def add(*args: str) -> int:
+        return run_users(monkeypatch, data, "add", *args, "--password-stdin", stdin="a password\n")
+
+    assert add("reader") == 0
+    assert add("admin", "--admin") == 0
+    assert add("other", "--admin") == 0
+
+    database = open_database(data / "paperstand.db")
+    try:
+        connection = database.connection
+        admin = accounts.find_user(connection, "admin")
+        assert admin is not None
+        rows = connection.execute("SELECT user_id, issue_id, page FROM reading_progress")
+        assert [tuple(row) for row in rows] == [(admin.id, "a1b2c3d4e5f60718", 12)]
+        assert connection.execute("SELECT count(*) FROM legacy_progress").fetchone()[0] == 0
     finally:
         database.close()
 

@@ -24,6 +24,7 @@ from pathlib import Path
 
 import pytest
 
+from paperstand import accounts
 from paperstand.__main__ import main
 from paperstand.cache import cover_paths
 from paperstand.cli.migrate import migrate
@@ -48,7 +49,7 @@ from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import scan_once
 from paperstand.scanner.walker import Walk
 from paperstand.schemas import MigrationRun
-from tests.conftest import SampleLibrary
+from tests.conftest import USER_PASSWORD, SampleLibrary
 from tests.test_cli_organize import _fingerprint
 from tests.test_organizer_inbox import _write_pdf
 
@@ -332,11 +333,12 @@ def test_a_rescan_after_apply_keeps_ids_covers_and_reading_progress(
         "SELECT cover_status FROM issues WHERE id = ?", (moved_id,)
     ).fetchone()
     assert before_row is not None
+    reader = accounts.create_user(database.connection, "reader", USER_PASSWORD)
     with database.transaction() as connection:
         connection.execute(
-            "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
-            "VALUES (?, 3, 10, '2026-03-17T00:00:00+00:00')",
-            (moved_id,),
+            "INSERT INTO reading_progress (user_id, issue_id, page, page_count, updated_at) "
+            "VALUES (?, ?, 3, 10, '2026-03-17T00:00:00+00:00')",
+            (reader.id, moved_id),
         )
     database.close()
 
@@ -364,7 +366,8 @@ def test_a_rescan_after_apply_keeps_ids_covers_and_reading_progress(
         "SELECT rel_path, cover_status FROM issues WHERE id = ?", (moved_id,)
     ).fetchone()
     progress_row = database.connection.execute(
-        "SELECT page FROM reading_progress WHERE issue_id = ?", (moved_id,)
+        "SELECT page FROM reading_progress WHERE user_id = ? AND issue_id = ?",
+        (reader.id, moved_id),
     ).fetchone()
     database.close()
 

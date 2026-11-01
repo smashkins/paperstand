@@ -42,7 +42,7 @@ from PIL import Image
 
 from paperstand import accounts
 from paperstand.config import Settings
-from paperstand.db import issue_id
+from paperstand.db import MIGRATIONS, issue_id
 from paperstand.main import create_app
 from paperstand.scanner import covers
 from paperstand.scanner.covers import TEXT_LIMIT, CoverError, CoverResult, cover_paths
@@ -381,6 +381,30 @@ def add_user(
         catalogue_connection(client), username, password, is_admin=is_admin
     )
     return bearer(issue(client, account.username))
+
+
+def schema_4_catalogue(path: Path, positions: dict[str, int]) -> None:
+    """A catalogue as the last schema before accounts left it, with reading positions.
+
+    Built by running the first four migrations, the way ``test_db.py`` builds
+    every older schema, with one shared ``reading_progress`` row for each
+    issue id in ``positions``. No issue is needed behind them: the table
+    never had a foreign key.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        for script in MIGRATIONS[:4]:
+            connection.executescript(script)
+        connection.execute("PRAGMA user_version = 4")
+        with connection:
+            connection.executemany(
+                "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
+                "VALUES (?, ?, 40, '2026-03-17T00:00:00+00:00')",
+                positions.items(),
+            )
+    finally:
+        connection.close()
 
 
 @contextmanager

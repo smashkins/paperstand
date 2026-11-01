@@ -26,12 +26,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from paperstand.api.auth import Authenticator
 from paperstand.config import Settings
 from paperstand.db import utc_now
 from paperstand.opds import atom
 from paperstand.opds import router as opds_router
 from paperstand.proxy import TrustedProxies
-from tests.conftest import quiet_settings, sample_issue_id, signed_in_client
+from tests.conftest import bearer, quiet_settings, sample_issue_id, signed_in_client
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 DC = "{http://purl.org/dc/terms/}"
@@ -972,10 +973,10 @@ def test_a_catalogue_with_nothing_in_it_still_serves_a_feed(tmp_path: Path) -> N
 
 
 def test_a_catalogue_that_could_not_be_opened_is_a_503(settings: Settings) -> None:
-    """The same answer every other catalogue endpoint gives."""
+    """The same answer every other catalogue endpoint gives, credential and all."""
     app = FastAPI()
-    app.include_router(opds_router.create_router(settings, None))
+    app.include_router(opds_router.create_router(settings, None, Authenticator(None)))
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=bearer("a token")) as client:
         for path in ("/opds", "/opds/today", "/opds/kind/newspaper"):
             assert client.get(path).status_code == 503, path

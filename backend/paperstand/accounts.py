@@ -326,10 +326,16 @@ def create_user(
     *,
     is_admin: bool = False,
 ) -> Account:
-    """Create an account; :class:`ValueError` or :class:`UsernameTaken` if it cannot be."""
+    """Create an account; :class:`ValueError` or :class:`UsernameTaken` if it cannot be.
+
+    The first administrator ever created also adopts the reading positions
+    of the single-user days — see :func:`_adopt_legacy_progress` — whether
+    it comes from the bootstrap or from ``paperstand users add --admin``.
+    """
     name = validate_username(username)
     password_hash = hash_password(validate_password(password))
     created_at = utc_now()
+    adopted = 0
     try:
         with connection:
             cursor = connection.execute(
@@ -337,16 +343,47 @@ def create_user(
                 "VALUES (?, ?, ?, ?)",
                 (name, password_hash, int(is_admin), created_at),
             )
+            assert cursor.lastrowid is not None
+            user_id = int(cursor.lastrowid)
+            if is_admin:
+                adopted = _adopt_legacy_progress(connection, user_id)
     except sqlite3.IntegrityError as error:
         raise UsernameTaken(f"the username {name!r} is taken") from error
-    assert cursor.lastrowid is not None
+    if adopted:
+        log.info("the administrator %r adopted %d reading position(s)", name, adopted)
     return Account(
-        id=int(cursor.lastrowid),
+        id=user_id,
         username=name,
         is_admin=is_admin,
         created_at=created_at,
         password_hash=password_hash,
     )
+
+
+def _adopt_legacy_progress(connection: sqlite3.Connection, user_id: int) -> int:
+    """Give ``legacy_progress`` to a new administrator, if it is the first one.
+
+    Called inside the transaction that inserted the account. Before accounts
+    there was one reader, and that reader is the person who sets the server up:
+    their positions go to the first administrator rather than to nobody. The
+    check for another administrator runs after the ``INSERT``, under the write
+    lock it took, so two processes creating the first administrator at the
+    same instant cannot both adopt. The table is emptied afterwards, which is
+    what keeps a later administrator from adopting anything at all. Returns
+    how many positions were adopted.
+    """
+    others = connection.execute(
+        "SELECT count(*) AS total FROM users WHERE is_admin = 1 AND id <> ?", (user_id,)
+    ).fetchone()
+    if int(others["total"]) > 0:
+        return 0
+    adopted = connection.execute(
+        "INSERT INTO reading_progress (user_id, issue_id, page, page_count, updated_at) "
+        "SELECT ?, issue_id, page, page_count, updated_at FROM legacy_progress",
+        (user_id,),
+    ).rowcount
+    connection.execute("DELETE FROM legacy_progress")
+    return int(adopted)
 
 
 def set_password(

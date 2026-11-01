@@ -39,7 +39,7 @@ from paperstand.accounts import (
     verify_password,
 )
 from paperstand.db import Database, open_database
-from tests.conftest import PRODUCTION_SCRYPT_N, quiet_settings
+from tests.conftest import PRODUCTION_SCRYPT_N, quiet_settings, schema_4_catalogue
 
 PASSWORD = "correct horse battery"
 
@@ -333,16 +333,27 @@ def test_the_last_admin_cannot_be_deleted(connection: sqlite3.Connection) -> Non
     assert get_user(connection, admin.id) is not None
 
 
-def test_deleting_an_account_takes_its_tokens_with_it(connection: sqlite3.Connection) -> None:
+def test_deleting_an_account_takes_its_tokens_and_positions_with_it(
+    connection: sqlite3.Connection,
+) -> None:
     admin = create_user(connection, "admin", PASSWORD, is_admin=True)
     reader = create_user(connection, "reader", PASSWORD)
     raw, _ = issue_token(connection, reader.id)
+    with connection:
+        for owner in (admin, reader):
+            connection.execute(
+                "INSERT INTO reading_progress (user_id, issue_id, page, updated_at) "
+                "VALUES (?, 'a1b2c3d4e5f60718', 4, '2026-03-17T00:00:00+00:00')",
+                (owner.id,),
+            )
 
     delete_user(connection, reader.id, acting_user_id=admin.id)
 
     assert get_user(connection, reader.id) is None
     assert resolve_token(connection, raw) is None
     assert connection.execute("SELECT count(*) FROM auth_tokens").fetchone()[0] == 0
+    assert positions(connection, reader.id) == {}
+    assert positions(connection, admin.id) == {"a1b2c3d4e5f60718": 4}
 
 
 def test_two_admins_demoting_each_other_at_once_leave_one(database: Database) -> None:
@@ -546,3 +557,83 @@ def test_a_password_bootstrap_cannot_use_is_logged_not_raised(
     errors = [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR]
     assert len(errors) == 1 and "at least 8 characters" in errors[0]
     assert list_users(database.connection) == []
+
+
+# ------------------------------------------------------ the single-user positions
+
+#: Where the one reader of a schema-4 catalogue had got to, by issue id.
+LEGACY_POSITIONS = {"a1b2c3d4e5f60718": 12, "0f1e2d3c4b5a6978": 3}
+
+
+def positions(connection: sqlite3.Connection, user_id: int) -> dict[str, int]:
+    """One account's positions, by issue id."""
+    rows = connection.execute(
+        "SELECT issue_id, page FROM reading_progress WHERE user_id = ?", (user_id,)
+    )
+    return {str(row["issue_id"]): int(row["page"]) for row in rows}
+
+
+def legacy_left(connection: sqlite3.Connection) -> int:
+    """How many single-user positions are still waiting for an owner."""
+    return int(connection.execute("SELECT count(*) FROM legacy_progress").fetchone()[0])
+
+
+@pytest.fixture
+def upgraded(tmp_path: Path) -> Iterator[Database]:
+    """A schema-4 catalogue with positions, opened — and so migrated — by this build."""
+    path = tmp_path / "upgraded" / "paperstand.db"
+    schema_4_catalogue(path, LEGACY_POSITIONS)
+    opened = open_database(path)
+    yield opened
+    opened.close()
+
+
+def test_the_bootstrapped_admin_adopts_the_single_user_positions(
+    upgraded: Database, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = quiet_settings(tmp_path, tmp_path, admin_password=PASSWORD)
+    connection = upgraded.connection
+    assert legacy_left(connection) == len(LEGACY_POSITIONS)
+
+    with caplog.at_level(logging.INFO, logger="paperstand"):
+        admin = bootstrap(settings, upgraded)
+
+    assert admin is not None
+    assert positions(connection, admin.id) == LEGACY_POSITIONS
+    assert legacy_left(connection) == 0
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("adopted 2 reading position(s)" in message for message in messages)
+
+    # The first administrator only: the next one starts with nothing, and
+    # takes nothing from the first.
+    second = create_user(connection, "second", PASSWORD, is_admin=True)
+    assert positions(connection, second.id) == {}
+    assert positions(connection, admin.id) == LEGACY_POSITIONS
+
+
+def test_a_reader_created_first_adopts_nothing(upgraded: Database) -> None:
+    """The positions wait for an administrator, however many readers come first."""
+    connection = upgraded.connection
+
+    reader = create_user(connection, "reader", PASSWORD)
+
+    assert positions(connection, reader.id) == {}
+    assert legacy_left(connection) == len(LEGACY_POSITIONS)
+
+    admin = create_user(connection, "admin", PASSWORD, is_admin=True)
+
+    assert positions(connection, admin.id) == LEGACY_POSITIONS
+    assert positions(connection, reader.id) == {}
+    assert legacy_left(connection) == 0
+
+
+def test_a_failed_account_adopts_nothing(upgraded: Database) -> None:
+    """A name that is taken rolls the whole transaction back, adoption and all."""
+    connection = upgraded.connection
+    create_user(connection, "Admin", PASSWORD)
+
+    with pytest.raises(UsernameTaken):
+        create_user(connection, "admin", PASSWORD, is_admin=True)
+
+    assert legacy_left(connection) == len(LEGACY_POSITIONS)
+    assert connection.execute("SELECT count(*) FROM reading_progress").fetchone()[0] == 0

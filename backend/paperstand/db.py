@@ -203,7 +203,14 @@ COMMIT;
 # stored only as the SHA-256 of itself: it is 256 random bits, so a fast hash
 # is enough, and a copy of the database hands nobody a working credential.
 # `last_used_at` is best effort, written at most once a minute per token.
-# Nothing here needs a user to exist, so the migration runs on any catalogue.
+#
+# Reading progress becomes per account: one position per user and issue, and
+# an account's positions go with it. There is still no foreign key to
+# `issues`, for the reason the V1 table gives. The single-user rows cannot be
+# given to anybody yet — no account exists while this script runs — so they
+# wait in `legacy_progress` until the first administrator is created, who
+# adopts them in the same transaction (`accounts.create_user`). Nothing here
+# needs a user to exist, so the migration runs on any catalogue.
 SCHEMA_V5 = """
 BEGIN;
 CREATE TABLE users (
@@ -222,6 +229,17 @@ CREATE TABLE auth_tokens (
     last_used_at TEXT NOT NULL
 );
 CREATE INDEX auth_tokens_user ON auth_tokens (user_id);
+-- The shared positions of schema 4, until the first administrator adopts them.
+ALTER TABLE reading_progress RENAME TO legacy_progress;
+CREATE TABLE reading_progress (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    issue_id   TEXT NOT NULL,             -- still no foreign key to issues, deliberately
+    page       INTEGER NOT NULL,
+    page_count INTEGER,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, issue_id)
+);
+CREATE INDEX reading_progress_recent ON reading_progress (user_id, updated_at DESC);
 COMMIT;
 """
 

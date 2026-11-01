@@ -1309,33 +1309,43 @@ class Scanner:
 
     @staticmethod
     def _migrate_progress(connection: sqlite3.Connection, losers: list[tuple[str, str]]) -> None:
-        """Hand a reader's position from a copy to the issue that won.
+        """Hand each reader's position from a copy to the issue that won.
 
         A file catalogued on its own and read, then joined by a better copy of
         the same issue, becomes a duplicate — and duplicates are hidden from
         every list, including "continue reading". Losing the bookmark to that is
         not something a reader would understand, so it moves to the winner.
 
-        Only onto a winner that has none: a position somebody actually set on
-        the issue that stayed is never overwritten by a copy's, and in that case
-        the copy keeps its own row, which costs nothing and is still there if the
-        two ever change places.
+        Each account's position moves on its own terms, because positions are
+        per account: only onto a winner where *that* reader has none. A
+        position somebody actually set on the issue that stayed is never
+        overwritten by their copy's, and in that case their copy keeps its own
+        row, which costs nothing and is still there if the two ever change
+        places — while another reader, with no position on the winner, has
+        theirs moved in the same pass.
         """
         for winner, loser in losers:
-            row = connection.execute(
-                "SELECT page, page_count, updated_at FROM reading_progress WHERE issue_id = ?",
+            rows = connection.execute(
+                "SELECT user_id, page, page_count, updated_at FROM reading_progress "
+                "WHERE issue_id = ?",
                 (loser,),
-            ).fetchone()
-            if row is None:
-                continue
-            cursor = connection.execute(
-                "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
-                "VALUES (?, ?, ?, ?) ON CONFLICT (issue_id) DO NOTHING",
-                (winner, row["page"], row["page_count"], row["updated_at"]),
-            )
-            if cursor.rowcount:
-                connection.execute("DELETE FROM reading_progress WHERE issue_id = ?", (loser,))
-                log.info("moved the reading position of %s onto %s", loser, winner)
+            ).fetchall()
+            moved = 0
+            for row in rows:
+                cursor = connection.execute(
+                    "INSERT INTO reading_progress "
+                    "(user_id, issue_id, page, page_count, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?) ON CONFLICT (user_id, issue_id) DO NOTHING",
+                    (row["user_id"], winner, row["page"], row["page_count"], row["updated_at"]),
+                )
+                if cursor.rowcount:
+                    connection.execute(
+                        "DELETE FROM reading_progress WHERE user_id = ? AND issue_id = ?",
+                        (row["user_id"], loser),
+                    )
+                    moved += 1
+            if moved:
+                log.info("moved %d reading position(s) of %s onto %s", moved, loser, winner)
 
     def _finish(self, result: ScanResult) -> None:
         """Close the ``scans`` row of a finished scan."""

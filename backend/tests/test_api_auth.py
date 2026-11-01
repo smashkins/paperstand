@@ -624,14 +624,26 @@ def test_an_admin_resetting_their_own_password_keeps_their_token(
     assert catalogue_client.get("/api/auth/me", headers=bearer(other_device)).status_code == 401
 
 
-def test_deleting_an_account_signs_it_out(catalogue_client: TestClient) -> None:
+def test_deleting_an_account_signs_it_out_and_forgets_where_it_got_to(
+    catalogue_client: TestClient, issue_id_: str
+) -> None:
     headers = add_user(catalogue_client, "reader")
     target = catalogue_client.get("/api/auth/me", headers=headers).json()
+    progress = f"/api/issues/{issue_id_}/progress"
+    assert catalogue_client.put(progress, json={"page": 2}, headers=headers).status_code == 200
+    assert catalogue_client.put(progress, json={"page": 3}).status_code == 200
 
     assert catalogue_client.delete(f"/api/users/{target['id']}").status_code == 204
 
     assert catalogue_client.get("/api/auth/me", headers=headers).status_code == 401
     assert catalogue_client.delete(f"/api/users/{target['id']}").status_code == 404
+    # The account's positions went with it; the administrator's did not.
+    me = catalogue_client.get("/api/auth/me").json()
+    owners = catalogue_connection(catalogue_client).execute(
+        "SELECT user_id FROM reading_progress WHERE issue_id = ?", (issue_id_,)
+    )
+    assert [row["user_id"] for row in owners] == [me["id"]]
+    assert catalogue_client.get(progress).json()["page"] == 3
 
 
 def test_nobody_deletes_themselves(catalogue_client: TestClient) -> None:

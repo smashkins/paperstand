@@ -16,9 +16,10 @@ from __future__ import annotations
 import datetime as dt
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from paperstand import queries
+from paperstand.api.auth import Authenticator, Caller
 from paperstand.api.common import UNKNOWN_ISSUE, catalogue
 from paperstand.db import Database
 from paperstand.queries import issue_from_row, pages_url_template
@@ -28,8 +29,13 @@ from paperstand.schemas import IssueDetail, IssuePage, IssueSort, Kind
 MAX_LIMIT = 200
 
 
-def create_router(database: Database | None) -> APIRouter:
-    """Build the issues router."""
+def create_router(database: Database | None, authenticator: Authenticator) -> APIRouter:
+    """Build the issues router.
+
+    Each issue carries the caller's position in it, so both routes take the
+    caller — from a default rather than an `Annotated` hint, for the reason
+    given in `Authenticator.__init__`.
+    """
     router = APIRouter(prefix="/api", tags=["catalogue"])
 
     @router.get("/issues")
@@ -46,6 +52,7 @@ def create_router(database: Database | None) -> APIRouter:
         include_duplicates: bool = False,
         missing: bool = False,
         unreadable: bool = False,
+        caller: Caller = Depends(authenticator.user),
     ) -> IssuePage:
         """A filtered, sorted page of issues, with the total behind it.
 
@@ -56,6 +63,7 @@ def create_router(database: Database | None) -> APIRouter:
         """
         items, total = queries.list_issues(
             catalogue(database),
+            user_id=caller.account.id,
             title=title,
             kind=kind,
             library=library,
@@ -72,10 +80,10 @@ def create_router(database: Database | None) -> APIRouter:
         return IssuePage(items=items, total=total)
 
     @router.get("/issues/{issue_id}")
-    def get_issue(issue_id: str) -> IssueDetail:
+    def get_issue(issue_id: str, caller: Caller = Depends(authenticator.user)) -> IssueDetail:
         """One issue, with what the parser made of it and its neighbours."""
         connection = catalogue(database)
-        row = queries.get_issue(connection, issue_id)
+        row = queries.get_issue(connection, issue_id, user_id=caller.account.id)
         if row is None:
             raise HTTPException(status_code=404, detail=UNKNOWN_ISSUE)
         previous, following = queries.neighbours(connection, row)
