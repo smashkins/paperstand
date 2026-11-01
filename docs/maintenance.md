@@ -9,6 +9,9 @@ top bar, next to the wrench icon, says how many of the first three there are rig
 are not counted in it, because a gap is information about a title's history, not something
 waiting to be fixed.
 
+Only administrators see it. For every other account the wrench icon, the badge and the link
+in Settings are not there, and `GET /api/maintenance` and its `/gaps` answer `403`.
+
 Settings keeps its own counters and its *Rescan now* button — nothing moved out of it — and
 carries a link card to this page with the same number. The two pages share the same button:
 asking for a scan from either one goes through the same request, and a scan already running

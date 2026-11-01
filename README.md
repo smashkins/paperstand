@@ -86,7 +86,7 @@ Create an empty `.paperstand-library` in the library root — `touch library/.pa
 — so Paperstand can tell an unmounted share from an empty library. See
 [The root marker](docs/folder-layout.md#the-root-marker).
 
-**2. Write a `.env`.** Copy [`.env.example`](.env.example) and set four things:
+**2. Write a `.env`.** Copy [`.env.example`](.env.example) and set five things:
 
 ```dotenv
 LIBRARY_PATH=./library      # where your PDFs are
@@ -94,6 +94,7 @@ DATA_PATH=./data            # where the server may write
 PUID=1000                   # `id -u` — so the files it writes belong to you
 PGID=1000                   # `id -g`
 TZ=Etc/UTC                  # what "today" means — set your own zone
+PAPERSTAND_ADMIN_PASSWORD=  # the first administrator's password, user `admin`
 ```
 
 **3. Start it.**
@@ -102,8 +103,9 @@ TZ=Etc/UTC                  # what "today" means — set your own zone
 docker compose up -d
 ```
 
-**4. Open `http://localhost:8080`.** The first scan starts by itself; the catalogue fills in
-as it goes and the covers arrive a few seconds later.
+**4. Open `http://localhost:8080` and sign in** as `admin`, with that password. The first
+scan starts by itself; the catalogue fills in as it goes and the covers arrive a few seconds
+later. Everyone else gets an account of their own from *Settings → Users*.
 
 **Optional: an inbox, instead of copying files into `library/` yourself.** Add
 `INBOX_PATH=./inbox` to `.env`, then start the second, off-by-default service:
@@ -122,6 +124,7 @@ only container that ever writes there, and all it ever adds is a file moved in t
 ```bash
 docker run -d --name paperstand -p 8080:8080 \
   -e PUID=1000 -e PGID=1000 -e TZ=Etc/UTC \
+  -e PAPERSTAND_ADMIN_PASSWORD='choose one' \
   -v /path/to/library:/library:ro \
   -v /path/to/data:/data \
   ghcr.io/smashkins/paperstand:latest
@@ -211,21 +214,30 @@ on your phone or e-reader can browse the same titles and download issues:
 http://<host>:8080/opds
 ```
 
-That is the only address a client needs; it discovers the shelves, the covers and the search
-box from the feed. Verified with **Panels** and **Chunky** on iOS, and **Moon+ Reader**,
+That is the only address a client needs, with your Paperstand user name and password; it
+discovers the shelves, the covers and the search box from the feed. Verified with **Panels** and **Chunky** on iOS, and **Moon+ Reader**,
 **Librera** and **KOReader** on Android and e-ink.
 
 [`docs/opds.md`](docs/opds.md) has the feed tree, per-client setup, and what to set when the
 covers do not appear (almost always a base-URL problem).
 
-## Reverse proxy and authentication
+## Accounts and reverse proxies
 
-**Paperstand has no authentication of its own.** Anyone who can reach the port can
-read the catalogue. Run it on a network you trust, or put a reverse proxy in front of it and
-let the proxy ask for a password — HTTP basic auth works with every OPDS client listed
-above, which is why it is the recommended shape. There is a worked example, with the
-`PAPERSTAND_TRUSTED_PROXIES` and `PAPERSTAND_BASE_URL` settings that go with it, in
-[`docs/opds.md`](docs/opds.md#putting-it-behind-a-password).
+**Paperstand has accounts of its own.** An administrator — the first one comes from
+`PAPERSTAND_ADMIN_USERNAME` and `PAPERSTAND_ADMIN_PASSWORD` — adds everyone else from
+*Settings → Users*. Every account sees the same catalogue and keeps its own reading position
+in every issue, so "continue reading" is yours; scanning, the maintenance view and the
+accounts themselves are for administrators. The web interface signs in with a form, an OPDS
+client with the same user name and password in its catalogue dialog.
+
+Anything reachable from outside the house still belongs behind a reverse proxy that speaks
+TLS, so that those passwords never cross a network in the clear. The proxy needs no password
+of its own any more, and must not ask for one: it would take the `Authorization` header the
+reading apps send to Paperstand. Worked examples, with the `PAPERSTAND_TRUSTED_PROXIES` and
+`PAPERSTAND_BASE_URL` settings that go with them, are in
+[`docs/opds.md`](docs/opds.md#on-the-internet); recovering a lost password and upgrading an
+installation from before accounts are in
+[`docs/configuration.md`](docs/configuration.md#accounts).
 
 ## FAQ
 
@@ -241,7 +253,7 @@ that only said "March 2026" is shown as March 2026, not as the first of the mont
 
 **How do I rescan?**
 It scans every 15 minutes by default, and once at start-up. *Settings → Rescan now* does it
-immediately, and so does `POST /api/scan`. A scan only looks at what changed, so a library
+immediately for an administrator, and so does `POST /api/scan`. A scan only looks at what changed, so a library
 that has not moved costs a directory walk.
 
 **Where is the cache, and how big does it get?**
@@ -266,7 +278,6 @@ Not there yet, in rough order of interest:
   instead of downloading the whole PDF. The endpoint it needs already exists.
 - **Search in the web interface.** It exists in the feed; the box in the top bar is disabled.
 - **Serving under a sub-path**, for a reverse proxy that cannot give Paperstand a hostname.
-- **Multiple users**, with a reading position each.
 - **Annotations and clippings.**
 
 ## Contributing
