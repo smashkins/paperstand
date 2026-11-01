@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from paperstand import accounts
 from paperstand.__main__ import main
 from paperstand.cli.parse import (
     format_table,
@@ -19,8 +20,8 @@ from paperstand.cli.parse import (
     resolve_library_root,
 )
 from paperstand.config import config_from_folders
-from paperstand.db import utc_now
-from tests.conftest import SampleLibrary, write_sample_config
+from paperstand.db import open_database, utc_now
+from tests.conftest import SampleLibrary, schema_4_catalogue, write_sample_config
 from tests.fixtures.filenames import IGNORED_PATHS, example_config_path
 
 LIBRARY_FILES: tuple[str, ...] = (
@@ -278,3 +279,188 @@ def test_retry_covers_resets_the_error_row_and_touches_the_trigger(
     assert "0 issue(s) reset to pending" in out
     assert "scan requested" not in out
     assert not trigger.exists()
+
+
+# ------------------------------------------------------------------------ users
+
+
+def run_users(
+    monkeypatch: pytest.MonkeyPatch, data: Path, *args: str, stdin: str | None = None
+) -> int:
+    """``paperstand users <args> --data <data>``, with ``stdin`` as standard input."""
+    if stdin is not None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
+    return main(["users", *args, "--data", str(data)])
+
+
+def prompts(monkeypatch: pytest.MonkeyPatch, *answers: str) -> None:
+    """Answer the interactive password prompts, in order."""
+    replies = iter(answers)
+    monkeypatch.setattr("getpass.getpass", lambda prompt="": next(replies))
+
+
+def test_users_add_then_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+
+    assert (
+        run_users(
+            monkeypatch,
+            data,
+            "add",
+            "admin",
+            "--admin",
+            "--password-stdin",
+            stdin="first password\n",
+        )
+        == 0
+    )
+    assert "created the administrator 'admin'" in capsys.readouterr().out
+    prompts(monkeypatch, "second password", "second password")
+    assert run_users(monkeypatch, data, "add", "Reader") == 0
+    assert "created the account 'Reader'" in capsys.readouterr().out
+
+    assert run_users(monkeypatch, data, "list") == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0].split() == ["id", "username", "admin", "created_at"]
+    assert lines[2].split()[1:3] == ["admin", "yes"]
+    assert lines[3].split()[1:3] == ["Reader", "no"]
+    assert "2 account(s)" in out
+
+    database = open_database(data / "paperstand.db")
+    try:
+        assert accounts.authenticate(database.connection, "admin", "first password")
+        assert accounts.authenticate(database.connection, "reader", "second password")
+    finally:
+        database.close()
+
+
+def test_the_first_admin_added_to_an_upgraded_catalogue_adopts_its_positions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recovery route gives the single-user positions away as the bootstrap does."""
+    data = tmp_path / "data"
+    schema_4_catalogue(data / "paperstand.db", {"a1b2c3d4e5f60718": 12})
+
+    def add(*args: str) -> int:
+        return run_users(monkeypatch, data, "add", *args, "--password-stdin", stdin="a password\n")
+
+    assert add("reader") == 0
+    assert add("admin", "--admin") == 0
+    assert add("other", "--admin") == 0
+
+    database = open_database(data / "paperstand.db")
+    try:
+        connection = database.connection
+        admin = accounts.find_user(connection, "admin")
+        assert admin is not None
+        rows = connection.execute("SELECT user_id, issue_id, page FROM reading_progress")
+        assert [tuple(row) for row in rows] == [(admin.id, "a1b2c3d4e5f60718", 12)]
+        assert connection.execute("SELECT count(*) FROM legacy_progress").fetchone()[0] == 0
+    finally:
+        database.close()
+
+
+def test_users_add_refuses_what_it_cannot_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    assert (
+        run_users(monkeypatch, data, "add", "reader", "--password-stdin", stdin="a good password\n")
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        run_users(monkeypatch, data, "add", "READER", "--password-stdin", stdin="a good password\n")
+        == 1
+    )
+    assert "is taken" in capsys.readouterr().err
+    assert (
+        run_users(
+            monkeypatch, data, "add", "rea:der", "--password-stdin", stdin="a good password\n"
+        )
+        == 1
+    )
+    assert "cannot contain ':'" in capsys.readouterr().err
+    assert run_users(monkeypatch, data, "add", "second", "--password-stdin", stdin="short\n") == 1
+    assert "at least 8 characters" in capsys.readouterr().err
+    assert run_users(monkeypatch, data, "add", "second", "--password-stdin", stdin="") == 1
+    assert "no password on standard input" in capsys.readouterr().err
+    prompts(monkeypatch, "one password", "another password")
+    assert run_users(monkeypatch, data, "add", "second") == 1
+    assert "differ" in capsys.readouterr().err
+
+    assert run_users(monkeypatch, data, "list") == 0
+    assert "1 account(s)" in capsys.readouterr().out
+
+
+def test_users_password_resets_and_signs_out_every_device(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    database = open_database(data / "paperstand.db")
+    try:
+        account = accounts.create_user(database.connection, "reader", "the old password")
+        raw, _ = accounts.issue_token(database.connection, account.id, "tablet")
+    finally:
+        database.close()
+
+    # Spaces are part of a password; only the line ending is dropped.
+    assert (
+        run_users(
+            monkeypatch,
+            data,
+            "password",
+            "Reader",
+            "--password-stdin",
+            stdin=" the new password \r\n",
+        )
+        == 0
+    )
+    assert "1 session(s) signed out" in capsys.readouterr().out
+
+    database = open_database(data / "paperstand.db")
+    try:
+        connection = database.connection
+        assert accounts.authenticate(connection, "reader", "the old password") is None
+        assert accounts.authenticate(connection, "reader", " the new password ") is not None
+        assert accounts.resolve_token(connection, raw) is None
+    finally:
+        database.close()
+
+    prompts(monkeypatch, "yet another one", "yet another one")
+    assert run_users(monkeypatch, data, "password", "reader") == 0
+    assert "0 session(s) signed out" in capsys.readouterr().out
+
+
+def test_users_password_refuses_nobody_and_a_bad_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = tmp_path / "data"
+    assert (
+        run_users(monkeypatch, data, "add", "reader", "--password-stdin", stdin="a good password\n")
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        run_users(
+            monkeypatch, data, "password", "nobody", "--password-stdin", stdin="a good password\n"
+        )
+        == 1
+    )
+    assert "no account is called 'nobody'" in capsys.readouterr().err
+    assert (
+        run_users(monkeypatch, data, "password", "reader", "--password-stdin", stdin="short\n") == 1
+    )
+    assert "at least 8 characters" in capsys.readouterr().err
+
+
+def test_users_without_a_subcommand_prints_its_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["users"]) == 1
+    assert "password" in capsys.readouterr().out

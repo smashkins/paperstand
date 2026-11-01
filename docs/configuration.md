@@ -186,6 +186,31 @@ The feed builds its URLs from the request, corrected by `X-Forwarded-Proto` and
 
 [`opds.md`](opds.md) has the worked examples.
 
+### Accounts
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PAPERSTAND_ADMIN_USERNAME` | `admin` | The name of the first administrator, created at startup when the database holds no account at all. |
+| `PAPERSTAND_ADMIN_PASSWORD` | unset | That administrator's password, at least eight characters. Read only while there is no account; once one exists it is ignored, and the log says it can be removed. |
+
+Every page, every API call and the OPDS feed need an account. Only `GET /api/health` — the
+container's health check — and signing in itself do not. The first account comes from these
+two variables: start the server once with both set, sign in, and add everyone else from
+*Settings → Users*. An administrator manages the accounts, starts scans and sees the
+maintenance view; every account reads the same catalogue and keeps a reading position of
+its own in every issue.
+
+A server started with no account and no password still comes up, says so in its log, and
+answers every request with `401` until an account exists. `paperstand users add`, under
+[The other commands](#the-other-commands), creates one while it runs.
+
+**Upgrading from a version without accounts.** Back up `<data>/paperstand.db` first. The
+upgrade changes the database's schema, and an older image refuses to open it afterwards, so
+going back means restoring that copy. The reading positions stored so far are handed to the
+first administrator created after the upgrade, whichever way it is created. A reverse proxy
+that asked for a password of its own in front of Paperstand has to stop: it would take the
+`Authorization` header that the apps and the OPDS readers now send to Paperstand itself.
+
 ### Container identity and time
 
 | Variable | Default | What it does |
@@ -372,6 +397,9 @@ of URLs that only work inside the container's network.
 | `paperstand scan [--library P] [--data P] [--config P]` | Scan once, in the foreground, print the counters and exit. Exit code 1 when the scan failed. |
 | `paperstand parse-report <directory> [--config P]` | One line per PDF: what it would be catalogued as, and which rule decided. |
 | `paperstand parse-explain <file> [--config P] [--library-root P]` | Every step the parser takes on one file. |
+| `paperstand users list [--data P]` | Every account, administrators marked. |
+| `paperstand users add <name> [--admin] [--password-stdin] [--data P]` | Create an account. Asks for the password twice, or reads it as one line from standard input. |
+| `paperstand users password <name> [--password-stdin] [--data P]` | Set a new password and sign that account out everywhere — the way back in when an administrator's password is lost. |
 | `paperstand --version` | The version. |
 
 `parse-report` and `parse-explain` touch neither the database nor the cache, so they are
@@ -380,6 +408,16 @@ safe against a running installation:
 ```bash
 docker compose exec paperstand paperstand parse-report /library/Newspapers
 docker compose exec paperstand paperstand parse-explain "/library/Newspapers/2026/03/17/a_file.pdf"
+```
+
+The `users` commands write the database, and are just as safe against a running server —
+but in the container they go through the entrypoint, so that they run as `PUID`/`PGID`:
+`run`, not `exec`, which would run them as root and leave files under `/data` the server
+cannot write.
+
+```bash
+docker compose run --rm paperstand users add reader
+docker compose run --rm paperstand users password admin
 ```
 
 [`folder-layout.md`](folder-layout.md) explains what the output means.

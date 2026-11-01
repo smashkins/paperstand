@@ -9,6 +9,13 @@ typed out by hand.
 
 The library is built once per session and copied per test, because several tests
 delete files, touch them or append to them.
+
+Every application a test builds through :func:`quiet_settings` bootstraps the
+administrator :data:`ADMIN_USERNAME`, and the client fixtures come out signed
+in as it, with a bearer token on every request — so a suite that is not about
+accounts keeps testing exactly what it tested before there were any. A test
+about who may do what makes more accounts with :func:`add_user`, or drops the
+header to be anonymous.
 """
 
 from __future__ import annotations
@@ -16,9 +23,11 @@ from __future__ import annotations
 import datetime as dt
 import importlib.util
 import shutil
+import sqlite3
 import sys
 from collections import Counter
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -27,11 +36,13 @@ from typing import Any
 import pymupdf
 import pytest
 import yaml
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from paperstand import accounts
 from paperstand.config import Settings
-from paperstand.db import issue_id
+from paperstand.db import MIGRATIONS, issue_id
 from paperstand.main import create_app
 from paperstand.scanner import covers
 from paperstand.scanner.covers import TEXT_LIMIT, CoverError, CoverResult, cover_paths
@@ -41,6 +52,13 @@ from paperstand.scanner.scanner import scan_once
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATOR_PATH = REPO_ROOT / "scripts" / "make_sample_library.py"
 EXAMPLE_CONFIG = REPO_ROOT / "paperstand.example.yml"
+
+#: The administrator every test application bootstraps, and its password.
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "an administrator's password"
+
+#: The password :func:`add_user` gives an account unless told otherwise.
+USER_PASSWORD = "a reader's password"
 
 #: Fixed "today", so that the generated library never moves under the tests.
 SAMPLE_TODAY = dt.date(2026, 3, 17)
@@ -122,6 +140,23 @@ def _fast_covers(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
     """
     if request.node.get_closest_marker("real_covers") is None:
         monkeypatch.setattr("paperstand.scanner.scanner.render_cover", _fast_render_cover)
+
+
+#: The production scrypt cost, read before any test has lowered it.
+PRODUCTION_SCRYPT_N = accounts.SCRYPT_N
+
+
+@pytest.fixture(autouse=True)
+def _cheap_passwords(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hash passwords at a token scrypt cost instead of the real one.
+
+    The real cost is tens of milliseconds a hash, on purpose, and would be paid
+    by every account a test creates and every sign-in it checks — the bootstrap
+    of each application a test builds included. The cost travels inside each
+    hash, so one made here verifies here exactly as a production one would;
+    `test_accounts.py` checks the production value on its own.
+    """
+    monkeypatch.setattr(accounts, "SCRYPT_N", 2**4)
 
 
 @dataclass(frozen=True)
@@ -254,6 +289,8 @@ def quiet_settings(library: Path, data: Path, **overrides: Any) -> Settings:
         "scan_on_start": False,
         "scan_interval": 0,
         "cover_workers": 2,
+        "admin_username": ADMIN_USERNAME,
+        "admin_password": ADMIN_PASSWORD,
     }
     values.update(overrides)
     return Settings(**values)
@@ -294,10 +331,93 @@ def catalogue_settings(
     return quiet_settings(sample_library.root, data)
 
 
+# ------------------------------------------------------------------ accounts
+
+
+def app_of(client: TestClient) -> FastAPI:
+    """The application behind a test client."""
+    app = client.app
+    assert isinstance(app, FastAPI)
+    return app
+
+
+def catalogue_connection(client: TestClient) -> sqlite3.Connection:
+    """The test thread's own connection to the catalogue the client is served from."""
+    database = app_of(client).state.database
+    assert database is not None, "the application has no catalogue"
+    connection: sqlite3.Connection = database.connection
+    return connection
+
+
+def bearer(token: str) -> dict[str, str]:
+    """The header that sends ``token``."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+def issue(client: TestClient, username: str = ADMIN_USERNAME) -> str:
+    """A fresh token for an existing account, issued straight from the catalogue."""
+    connection = catalogue_connection(client)
+    account = accounts.find_user(connection, username)
+    assert account is not None, f"no account called {username!r}"
+    token, _ = accounts.issue_token(connection, account.id, "tests")
+    return token
+
+
+def sign_in(client: TestClient, username: str = ADMIN_USERNAME) -> TestClient:
+    """Send a bearer token for ``username`` with every request ``client`` makes."""
+    client.headers["Authorization"] = f"Bearer {issue(client, username)}"
+    return client
+
+
+def add_user(
+    client: TestClient,
+    username: str,
+    *,
+    password: str = USER_PASSWORD,
+    is_admin: bool = False,
+) -> dict[str, str]:
+    """Create an account and return the headers that sign in as it."""
+    account = accounts.create_user(
+        catalogue_connection(client), username, password, is_admin=is_admin
+    )
+    return bearer(issue(client, account.username))
+
+
+def schema_4_catalogue(path: Path, positions: dict[str, int]) -> None:
+    """A catalogue as the last schema before accounts left it, with reading positions.
+
+    Built by running the first four migrations, the way ``test_db.py`` builds
+    every older schema, with one shared ``reading_progress`` row for each
+    issue id in ``positions``. No issue is needed behind them: the table
+    never had a foreign key.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        for script in MIGRATIONS[:4]:
+            connection.executescript(script)
+        connection.execute("PRAGMA user_version = 4")
+        with connection:
+            connection.executemany(
+                "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
+                "VALUES (?, ?, 40, '2026-03-17T00:00:00+00:00')",
+                positions.items(),
+            )
+    finally:
+        connection.close()
+
+
+@contextmanager
+def signed_in_client(settings: Settings, **kwargs: Any) -> Iterator[TestClient]:
+    """A client for a fresh application over ``settings``, signed in as the admin."""
+    with TestClient(create_app(settings), **kwargs) as test_client:
+        yield sign_in(test_client)
+
+
 @pytest.fixture
 def catalogue_client(catalogue_settings: Settings) -> Iterator[TestClient]:
     """Test client for an app serving the catalogued sample library."""
-    with TestClient(create_app(catalogue_settings)) as test_client:
+    with signed_in_client(catalogue_settings) as test_client:
         yield test_client
 
 
@@ -315,12 +435,12 @@ def sample_issue_id(root: Path, rel_path: str) -> str:
 @pytest.fixture
 def client(settings: Settings) -> Iterator[TestClient]:
     """Test client for an app without a frontend build."""
-    with TestClient(create_app(settings)) as test_client:
+    with signed_in_client(settings) as test_client:
         yield test_client
 
 
 @pytest.fixture
 def sample_client(sample_settings: Settings) -> Iterator[TestClient]:
     """Test client for an app serving the sample library."""
-    with TestClient(create_app(sample_settings)) as test_client:
+    with signed_in_client(sample_settings) as test_client:
         yield test_client

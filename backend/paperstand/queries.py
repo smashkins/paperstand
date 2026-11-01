@@ -20,6 +20,13 @@ take a flag rather than being written twice:
   Weekend edition never hides the daily it shares its date with.
 * **A further tie is broken by what arrived last.** Once the plain-issue
   preference is applied, the most recently added non-duplicate wins.
+
+And one that is not a flag at all: **an issue carries the caller's position
+and nobody else's.** :data:`ISSUE_FROM` joins ``reading_progress`` on the
+named parameter ``:user_id``, so every function that returns issues takes
+``user_id`` and binds it by name. ``None`` — for an internal caller with no
+account — matches nobody's row, and a call that forgets the binding is an
+error from sqlite3 rather than one reader's page shown to another.
 """
 
 from __future__ import annotations
@@ -84,10 +91,11 @@ ISSUE_COLUMNS = """
     p.updated_at AS progress_updated_at
 """
 
+#: Needs ``:user_id`` bound: whose position the ``progress_*`` columns are.
 ISSUE_FROM = """
 FROM issues i
 JOIN titles t ON t.id = i.title_id
-LEFT JOIN reading_progress p ON p.issue_id = i.id
+LEFT JOIN reading_progress p ON p.issue_id = i.id AND p.user_id = :user_id
 """
 
 ISSUE_SELECT = f"SELECT {ISSUE_COLUMNS} {ISSUE_FROM}"
@@ -292,6 +300,7 @@ def _title_from_row(row: sqlite3.Row, latest: Issue | None) -> Title:
 def list_titles(
     connection: sqlite3.Connection,
     *,
+    user_id: int | None,
     kind: str | None = None,
     library: str | None = None,
     sort: TitleSort = "name",
@@ -321,18 +330,20 @@ def list_titles(
     rows = connection.execute(
         f"{TITLE_SELECT} {clause} GROUP BY t.id HAVING count(i.id) > 0 {order}", params
     ).fetchall()
-    latest = latest_issue_per_title(connection, [str(row["id"]) for row in rows])
+    latest = latest_issue_per_title(connection, [str(row["id"]) for row in rows], user_id=user_id)
     return [_title_from_row(row, latest.get(str(row["id"]))) for row in rows]
 
 
-def get_title(connection: sqlite3.Connection, title_id: str) -> TitleDetail | None:
+def get_title(
+    connection: sqlite3.Connection, title_id: str, *, user_id: int | None
+) -> TitleDetail | None:
     """One title, with the years its issues fall in."""
     row = connection.execute(
         f"{TITLE_SELECT} WHERE t.id = :id GROUP BY t.id", {"id": title_id}
     ).fetchone()
     if row is None or row["id"] is None:
         return None
-    latest = latest_issue_per_title(connection, [title_id]).get(title_id)
+    latest = latest_issue_per_title(connection, [title_id], user_id=user_id).get(title_id)
     title = _title_from_row(row, latest)
     return TitleDetail(**title.model_dump(), years=title_years(connection, title_id))
 
@@ -464,6 +475,7 @@ def _issue_where(
 def list_issues(
     connection: sqlite3.Connection,
     *,
+    user_id: int | None,
     title: str | None = None,
     kind: str | None = None,
     library: str | None = None,
@@ -509,7 +521,7 @@ def list_issues(
         order = ISSUE_ORDER[sort]
     rows = connection.execute(
         f"{ISSUE_SELECT} {clause} ORDER BY {order} LIMIT :limit OFFSET :offset",
-        {**params, "limit": limit, "offset": offset},
+        {**params, "user_id": user_id, "limit": limit, "offset": offset},
     ).fetchall()
     return [issue_from_row(row) for row in rows], total
 
@@ -522,10 +534,12 @@ def issue_row(connection: sqlite3.Connection, issue_id: str) -> sqlite3.Row | No
     return row
 
 
-def get_issue(connection: sqlite3.Connection, issue_id: str) -> sqlite3.Row | None:
+def get_issue(
+    connection: sqlite3.Connection, issue_id: str, *, user_id: int | None
+) -> sqlite3.Row | None:
     """One joined issue row, or ``None`` when the id is unknown."""
     row: sqlite3.Row | None = connection.execute(
-        f"{ISSUE_SELECT} WHERE i.id = :id", {"id": issue_id}
+        f"{ISSUE_SELECT} WHERE i.id = :id", {"id": issue_id, "user_id": user_id}
     ).fetchone()
     return row
 
@@ -578,22 +592,29 @@ def _windowed(inner_where: str, partition_order: str, outer_order: str) -> str:
 
 
 def latest_issue_per_title(
-    connection: sqlite3.Connection, title_ids: list[str]
+    connection: sqlite3.Connection, title_ids: list[str], *, user_id: int | None
 ) -> dict[str, Issue]:
-    """The newest non-duplicate issue of each of ``title_ids``."""
+    """The newest non-duplicate issue of each of ``title_ids``.
+
+    The ids are bound by name, like ``:user_id``: one ``execute`` binds a
+    mapping or a sequence, never both.
+    """
     if not title_ids:
         return {}
-    placeholders = ", ".join("?" * len(title_ids))
+    params: dict[str, Any] = {f"t{index}": value for index, value in enumerate(title_ids)}
+    placeholders = ", ".join(f":{name}" for name in params)
     sql = _windowed(
         f"WHERE {VISIBLE} AND i.title_id IN ({placeholders})",
         LATEST_FIRST,
         "",
     )
-    rows = connection.execute(sql, title_ids).fetchall()
+    rows = connection.execute(sql, {**params, "user_id": user_id}).fetchall()
     return {str(row["title_id"]): issue_from_row(row) for row in rows}
 
 
-def latest_per_kind(connection: sqlite3.Connection, kind: str) -> list[Issue]:
+def latest_per_kind(
+    connection: sqlite3.Connection, kind: str, *, user_id: int | None
+) -> list[Issue]:
     """The newest issue of every real title of one kind, newest first.
 
     ``Unsorted`` is left out: it is the bucket the parser drops a file into when
@@ -607,11 +628,13 @@ def latest_per_kind(connection: sqlite3.Connection, kind: str) -> list[Issue]:
         LATEST_FIRST,
         "ORDER BY issue_date DESC, sort_name ASC",
     )
-    rows = connection.execute(sql, {"kind": kind}).fetchall()
+    rows = connection.execute(sql, {"kind": kind, "user_id": user_id}).fetchall()
     return [issue_from_row(row) for row in rows]
 
 
-def issues_on_date(connection: sqlite3.Connection, kind: str, date: str) -> list[Issue]:
+def issues_on_date(
+    connection: sqlite3.Connection, kind: str, date: str, *, user_id: int | None
+) -> list[Issue]:
     """One issue per real title of ``kind`` carrying exactly ``date``.
 
     A supplement filed on the same day as the plain issue never wins this
@@ -623,7 +646,7 @@ def issues_on_date(connection: sqlite3.Connection, kind: str, date: str) -> list
         "i.variant IS NULL DESC, i.added_at DESC, i.filename ASC",
         "ORDER BY sort_name ASC",
     )
-    rows = connection.execute(sql, {"kind": kind, "date": date}).fetchall()
+    rows = connection.execute(sql, {"kind": kind, "date": date, "user_id": user_id}).fetchall()
     return [issue_from_row(row) for row in rows]
 
 
@@ -642,11 +665,13 @@ def latest_date_on_or_before(connection: sqlite3.Connection, kind: str, date: st
     return str(row["latest"]) if row is not None and row["latest"] is not None else None
 
 
-def recently_added(connection: sqlite3.Connection, limit: int) -> list[Issue]:
+def recently_added(
+    connection: sqlite3.Connection, limit: int, *, user_id: int | None
+) -> list[Issue]:
     """The issues that joined the catalogue last."""
     rows = connection.execute(
         f"{ISSUE_SELECT} WHERE {VISIBLE} ORDER BY i.added_at DESC, i.id DESC LIMIT :limit",
-        {"limit": limit},
+        {"limit": limit, "user_id": user_id},
     ).fetchall()
     return [issue_from_row(row) for row in rows]
 
@@ -671,13 +696,13 @@ def count_unsorted(connection: sqlite3.Connection) -> int:
 
 
 def unsorted_issues(
-    connection: sqlite3.Connection, *, limit: int = 50, offset: int = 0
+    connection: sqlite3.Connection, *, user_id: int | None, limit: int = 50, offset: int = 0
 ) -> tuple[list[Issue], int]:
     """A page of the unplaced issues, newest first, and how many there are."""
     rows = connection.execute(
         f"{ISSUE_SELECT} {UNSORTED_WHERE} ORDER BY {ISSUE_ORDER['date_desc']} "
         "LIMIT :limit OFFSET :offset",
-        {"limit": limit, "offset": offset},
+        {"user_id": user_id, "limit": limit, "offset": offset},
     ).fetchall()
     return [issue_from_row(row) for row in rows], count_unsorted(connection)
 
@@ -736,7 +761,12 @@ def like_pattern(text: str) -> str:
 
 
 def search_issues(
-    connection: sqlite3.Connection, text: str, *, limit: int = 50, offset: int = 0
+    connection: sqlite3.Connection,
+    text: str,
+    *,
+    user_id: int | None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> tuple[list[Issue], int]:
     """Issues whose title, file name or derived title contains ``text``.
 
@@ -757,7 +787,7 @@ def search_issues(
     )
     rows = connection.execute(
         f"{ISSUE_SELECT} {clause} ORDER BY {ISSUE_ORDER['date_desc']} LIMIT :limit OFFSET :offset",
-        {**params, "limit": limit, "offset": offset},
+        {**params, "user_id": user_id, "limit": limit, "offset": offset},
     ).fetchall()
     return [issue_from_row(row) for row in rows], total
 
@@ -826,10 +856,17 @@ def last_scan_finished(connection: sqlite3.Connection) -> str | None:
 
 
 # ----------------------------------------------------------------- progress
+#
+# Every position belongs to one account, and each function here reads or
+# writes the rows of the ``user_id`` it is given and no other. The reads take
+# ``None`` like the rest of the module and find nothing for it; the writes
+# need a real account, since a row always has an owner.
 
 
-def continue_reading(connection: sqlite3.Connection, limit: int) -> list[Issue]:
-    """Issues started and not finished, most recently read first.
+def continue_reading(
+    connection: sqlite3.Connection, limit: int, *, user_id: int | None
+) -> list[Issue]:
+    """Issues this user started and did not finish, most recently read first.
 
     "Started and not finished" needs a page count to mean anything, so an issue
     the scanner has not opened yet never appears here however far into it the
@@ -842,13 +879,15 @@ def continue_reading(connection: sqlite3.Connection, limit: int) -> list[Issue]:
         "AND coalesce(i.page_count, p.page_count) IS NOT NULL "
         "AND p.page < coalesce(i.page_count, p.page_count) "
         "ORDER BY p.updated_at DESC, i.id DESC LIMIT :limit",
-        {"limit": limit},
+        {"limit": limit, "user_id": user_id},
     ).fetchall()
     return [issue_from_row(row) for row in rows]
 
 
-def issues_with_progress(connection: sqlite3.Connection, limit: int) -> list[Issue]:
-    """Every issue the reader has a position in, most recent first.
+def issues_with_progress(
+    connection: sqlite3.Connection, limit: int, *, user_id: int | None
+) -> list[Issue]:
+    """Every issue this user has a position in, most recent first.
 
     Duplicates and missing issues are excluded rather than made optional:
     this list is "where you were reading", and two rows for the same issue —
@@ -857,16 +896,19 @@ def issues_with_progress(connection: sqlite3.Connection, limit: int) -> list[Iss
     rows = connection.execute(
         f"{ISSUE_SELECT} WHERE p.issue_id IS NOT NULL AND {VISIBLE} "
         "ORDER BY p.updated_at DESC, i.id DESC LIMIT :limit",
-        {"limit": limit},
+        {"limit": limit, "user_id": user_id},
     ).fetchall()
     return [issue_from_row(row) for row in rows]
 
 
-def get_progress(connection: sqlite3.Connection, issue_id: str) -> ProgressRecord | None:
-    """The stored position in one issue."""
+def get_progress(
+    connection: sqlite3.Connection, issue_id: str, *, user_id: int | None
+) -> ProgressRecord | None:
+    """This user's stored position in one issue."""
     row = connection.execute(
-        "SELECT issue_id, page, page_count, updated_at FROM reading_progress WHERE issue_id = :id",
-        {"id": issue_id},
+        "SELECT issue_id, page, page_count, updated_at FROM reading_progress "
+        "WHERE user_id = :user_id AND issue_id = :id",
+        {"user_id": user_id, "id": issue_id},
     ).fetchone()
     if row is None:
         return None
@@ -879,22 +921,37 @@ def get_progress(connection: sqlite3.Connection, issue_id: str) -> ProgressRecor
 
 
 def set_progress(
-    connection: sqlite3.Connection, issue_id: str, page: int, page_count: int | None
+    connection: sqlite3.Connection,
+    issue_id: str,
+    page: int,
+    page_count: int | None,
+    *,
+    user_id: int,
 ) -> ProgressRecord:
-    """Write where the reader got to, replacing whatever was there."""
+    """Write where this user got to, replacing whatever they had there."""
     now = utc_now()
     with connection:
         connection.execute(
-            "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
-            "VALUES (?, ?, ?, ?) ON CONFLICT (issue_id) DO UPDATE SET "
+            "INSERT INTO reading_progress (user_id, issue_id, page, page_count, updated_at) "
+            "VALUES (:user_id, :id, :page, :page_count, :now) "
+            "ON CONFLICT (user_id, issue_id) DO UPDATE SET "
             "page = excluded.page, page_count = excluded.page_count, "
             "updated_at = excluded.updated_at",
-            (issue_id, page, page_count, now),
+            {
+                "user_id": user_id,
+                "id": issue_id,
+                "page": page,
+                "page_count": page_count,
+                "now": now,
+            },
         )
     return ProgressRecord(issue_id=issue_id, page=page, page_count=page_count, updated_at=now)
 
 
-def delete_progress(connection: sqlite3.Connection, issue_id: str) -> None:
-    """Forget where the reader got to."""
+def delete_progress(connection: sqlite3.Connection, issue_id: str, *, user_id: int) -> None:
+    """Forget where this user got to; anybody else's position stays."""
     with connection:
-        connection.execute("DELETE FROM reading_progress WHERE issue_id = ?", (issue_id,))
+        connection.execute(
+            "DELETE FROM reading_progress WHERE user_id = :user_id AND issue_id = :id",
+            {"user_id": user_id, "id": issue_id},
+        )

@@ -31,6 +31,10 @@ services:
       # needs it, and only when it cannot be worked out from the request — a
       # sub-path, another port, a name that exists in your DNS and nowhere else.
       PAPERSTAND_BASE_URL: ${PAPERSTAND_BASE_URL:-}
+      # The first administrator, created at the first start and never again:
+      # once any account exists both are ignored, and the password can go.
+      PAPERSTAND_ADMIN_USERNAME: ${PAPERSTAND_ADMIN_USERNAME:-admin}
+      PAPERSTAND_ADMIN_PASSWORD: ${PAPERSTAND_ADMIN_PASSWORD:-}
     restart: unless-stopped
     # The image carries its own HEALTHCHECK (GET /api/health every 30s), so
     # `docker compose ps` reports healthy without anything declared here.

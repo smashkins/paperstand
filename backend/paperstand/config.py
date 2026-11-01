@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    SecretStr,
     ValidationError,
     field_validator,
     model_validator,
@@ -50,7 +51,8 @@ class Settings(BaseSettings):
     The settings, in the order they are declared: ``library``, ``inbox``, ``data``,
     ``config``, ``static``, ``scan_on_start``, ``scan_interval``, ``missing_grace_days``,
     ``cover_workers``, ``render_workers``, ``page_cache_max_mb``, ``base_url``,
-    ``log_level``, ``trusted_proxies``, ``port``, ``host``, ``tz``.
+    ``log_level``, ``trusted_proxies``, ``admin_username``, ``admin_password``,
+    ``port``, ``host``, ``tz``.
     """
 
     model_config = SettingsConfigDict(
@@ -104,6 +106,27 @@ class Settings(BaseSettings):
     the port is reached directly. Behind a reverse proxy set it to the proxy's
     address, or to ``*`` when the proxy is the only thing that can reach the port.
     """
+
+    admin_username: str = "admin"
+    """Name of the administrator the first start creates, with ``admin_password``."""
+
+    admin_password: SecretStr | None = None
+    """Password of the first administrator, read only while no account exists.
+
+    Once any account does, the value is ignored — a warning says it can be
+    unset — so changing it later never changes anybody's password; that is
+    ``paperstand users password``. An empty value counts as unset, which is
+    what ``PAPERSTAND_ADMIN_PASSWORD=`` in a compose file means.
+    """
+
+    @field_validator("admin_password", mode="before")
+    @classmethod
+    def _blank_password_is_unset(cls, value: object) -> object:
+        if value is None or value == "":
+            return None
+        if isinstance(value, SecretStr) and not value.get_secret_value():
+            return None
+        return value
 
     port: int = Field(default=8080, validation_alias="PORT")
     host: str = "0.0.0.0"

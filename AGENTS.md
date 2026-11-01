@@ -23,13 +23,14 @@ cover-first web interface, an in-browser reader and an OPDS 1.2 feed.
 
 ```
 backend/paperstand/
-  api/         REST routers, one module per resource
-  cli/         parse-report, parse-explain, organize-plan, organize, migrate and retry-covers
+  api/         REST routers, one module per resource; auth.py checks every request's credentials
+  cli/         parse-report, parse-explain, organize-plan, organize, migrate, retry-covers and users
   opds/        Atom feed builder and the OPDS router
   organizer/   canonical naming, inbox pipeline, never-overwrite mover, run report
   parsing/     the parser: engine, primitives, and profiles/*.yml
   render/      page rasterisation and the page-cache eviction
   scanner/     walker, hashing, two-phase scanner, covers, scheduler
+  accounts.py  accounts, passwords, tokens and the rules that always keep an administrator
   config.py    Settings (environment) and PaperstandConfig (paperstand.yml)
   cache.py     the versioned layout of <data>/cache
   publication.py  publication.yml, the declaration that turns a folder into a title

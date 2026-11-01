@@ -49,6 +49,12 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RUF"]
 [tool.ruff.lint.isort]
 known-first-party = ["paperstand"]
 
+[tool.ruff.lint.flake8-bugbear]
+# A router that needs the caller takes it as `caller: Caller = Depends(...)`:
+# the dependency belongs to an object built in `create_app`, and with postponed
+# annotations FastAPI cannot resolve an `Annotated[...]` naming a local one.
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.ruff.format]
 quote-style = "double"
 

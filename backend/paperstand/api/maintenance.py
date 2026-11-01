@@ -58,7 +58,9 @@ def create_router(settings: Settings, database: Database | None) -> APIRouter:
         connection = catalogue(database)
         as_of = today or local_today(settings)
         results: list[TitleGaps] = []
-        for title in queries.list_titles(connection):
+        # Titles for their spans and counts only: `TitleGaps` carries no issue,
+        # and so nobody's position.
+        for title in queries.list_titles(connection, user_id=None):
             rows = queries.series_rows(connection, title.id)
             number = gaps.number_gaps(rows)
             dates = gaps.date_gaps(rows, title.frequency)

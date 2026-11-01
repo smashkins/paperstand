@@ -4,13 +4,19 @@ Asking for a scan is cheap and returns immediately: the endpoint opens the
 ``scans`` row, hands back its id with ``202 Accepted`` and lets a background
 thread do the work. A second request while that scan runs is a ``409``, with the
 id of the scan already in flight so that the caller can follow it instead.
+
+Starting a scan is an administrator's call; following one is anybody's. The
+router is included behind :attr:`~paperstand.api.auth.Authenticator.user`, and
+``POST /api/scan`` adds :attr:`~paperstand.api.auth.Authenticator.admin` on
+top — a ``403`` for a signed-in reader, resolved from the same credential.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
+from paperstand.api.auth import Authenticator
 from paperstand.logging import get_logger
 from paperstand.scanner.scheduler import ScanInProgress, ScanScheduler
 from paperstand.schemas import ScanAccepted, ScanStatus
@@ -20,11 +26,16 @@ log = get_logger(__name__)
 SCAN_UNAVAILABLE = "scanning is unavailable: the database could not be opened"
 
 
-def create_router(scheduler: ScanScheduler | None) -> APIRouter:
+def create_router(scheduler: ScanScheduler | None, authenticator: Authenticator) -> APIRouter:
     """Build the scan router."""
     router = APIRouter(prefix="/api", tags=["scan"])
 
-    @router.post("/scan", status_code=202, response_model=ScanAccepted)
+    @router.post(
+        "/scan",
+        status_code=202,
+        response_model=ScanAccepted,
+        dependencies=[Depends(authenticator.admin)],
+    )
     def start_scan() -> JSONResponse:
         """Start a scan, unless one is already running.
 

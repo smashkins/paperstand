@@ -80,14 +80,16 @@ not there yet, although the endpoint behind it already exists.
 
 ## Adding the catalogue in a client
 
-There is **no authentication**; see [Putting it behind a
-password](#putting-it-behind-a-password). Leave the user name and password fields empty
-everywhere, unless a reverse proxy in front of Paperstand is asking for them.
+The feed asks for a **Paperstand account**: put your user name and password into the fields
+the catalogue dialog offers. Every client below supports it, and sends them with every
+request — the shelves, the covers and the downloads alike, which are `/api/…` URLs that ask
+for the same account. Each account reads the same catalogue. Outside the house, use the
+`https://` address of a proxy in front of Paperstand; see [On the internet](#on-the-internet).
 
 ### iOS — Panels
 
 1. *Library* → *Add* → **Add OPDS Catalog**.
-2. *Address*: `http://<host>:8080/opds`. Leave *Username* and *Password* empty.
+2. *Address*: `http://<host>:8080/opds`. *Username* and *Password*: your Paperstand account.
 3. *Save*. The catalogue appears with its sections; an issue downloads with a tap and opens
    in the built-in reader.
 
@@ -160,12 +162,14 @@ forged host is a catalogue full of links pointing at somebody else's server.
 > uvicorn paperstand.main:app --no-proxy-headers --port 8080
 > ```
 
-## Putting it behind a password
+## On the internet
 
-Paperstand has no users and no authentication. Anything reachable from outside the house
-belongs behind a reverse proxy that asks for a password — and the password has to cover the
-**whole application**, not only `/opds`: the feed's acquisition links are `/api/…` URLs, and
-protecting the catalogue while leaving the PDFs open protects nothing.
+Every request to the feed — and to the covers and PDFs it links to — needs a Paperstand
+account, so a phone outside the house sends its password with every one of them. Put a
+reverse proxy that speaks TLS in front of Paperstand, so that the password never crosses a
+network in the clear, and let it pass the `Authorization` header through untouched. A proxy
+that asks for a password of its own takes that header for itself, and Paperstand never sees
+the account: drop any `basic_auth` or `auth_basic` an older setup had there.
 
 Both snippets assume Paperstand is listening on `paperstand:8080`.
 
@@ -173,11 +177,6 @@ Both snippets assume Paperstand is listening on `paperstand:8080`.
 
 ```caddyfile
 paperstand.example.org {
-    # caddy hash-password --plaintext 'the password'
-    basic_auth {
-        reader $2a$14$Zt1Q0Ry2ZQ0Q0y3s7yWQfeJ0m2sJ3wZ6h1O9r4YyR5xR0v2S8k3Wm
-    }
-
     reverse_proxy paperstand:8080
 }
 ```
@@ -196,10 +195,6 @@ server {
     ssl_certificate_key /etc/ssl/paperstand.key;
 
     location / {
-        # htpasswd -c /etc/nginx/paperstand.htpasswd reader
-        auth_basic           "Paperstand";
-        auth_basic_user_file /etc/nginx/paperstand.htpasswd;
-
         proxy_pass http://paperstand:8080;
         proxy_set_header Host              $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -212,18 +207,23 @@ server {
 }
 ```
 
-Every client listed above supports HTTP basic authentication: put the user name and the
-password into the fields the catalogue dialog offers, and use the `https://` address.
+nginx passes `Authorization` and the `Cookie` header on by default; nothing has to be added
+for the reading apps or the web interface to sign in. In a client, use the `https://`
+address with the same user name and password as on the local network.
 
 ## Checking it by hand
 
 ```bash
-curl -s localhost:8080/opds | head -40
-curl -sI localhost:8080/opds | grep -i content-type
-curl -s "localhost:8080/opds/titles/<id>?page=2" | head -40
-curl -s -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: example.org' \
+curl -s -u reader localhost:8080/opds | head -40
+curl -sI -u reader localhost:8080/opds | grep -i content-type
+curl -s -u reader "localhost:8080/opds/titles/<id>?page=2" | head -40
+curl -s -u reader -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: example.org' \
   localhost:8080/opds | grep -o 'https://example.org[^"]*' | head
+curl -sI localhost:8080/opds | grep -i www-authenticate     # without an account
 ```
 
-The last one only rewrites the URLs when the address `curl` is calling from is trusted —
+`-u reader` makes `curl` ask for the account's password; `-u reader:password` passes it on
+the command line, where it ends up in the shell's history.
+
+The fourth one only rewrites the URLs when the address `curl` is calling from is trusted —
 from the host itself that is `127.0.0.1`, which is the default.

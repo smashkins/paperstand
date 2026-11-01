@@ -23,6 +23,7 @@ import pytest
 import yaml
 from PIL import Image
 
+from paperstand import accounts
 from paperstand.config import Settings
 from paperstand.db import open_database
 from paperstand.scanner import covers
@@ -37,7 +38,14 @@ from paperstand.scanner.covers import (
 from paperstand.scanner.hashing import content_hash
 from paperstand.scanner.scanner import Scanner, ScanProgress, ScanResult, scan_once
 from paperstand.scanner.walker import MARKER_FILE
-from tests.conftest import SampleLibrary, quiet_settings, sample_issue_id, write_sample_config
+from tests.conftest import (
+    ADMIN_PASSWORD,
+    ADMIN_USERNAME,
+    SampleLibrary,
+    quiet_settings,
+    sample_issue_id,
+    write_sample_config,
+)
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
@@ -1598,22 +1606,53 @@ def test_an_unreadable_root_keeps_the_auto_discovered_libraries(
     assert len(query(settings, "SELECT id FROM libraries")) == libraries_before
 
 
-def set_progress(settings: Settings, identifier: str, page: int) -> None:
-    """Write a reading position without going through the API."""
+#: The account a position belongs to when a test does not name another.
+READER = "reader"
+
+
+def account_id(settings: Settings, username: str = READER) -> int:
+    """The id of the account ``username``, made on first use.
+
+    A bare row is enough: the scanner only needs the account to exist for the
+    foreign key of the positions it moves, and nobody signs in as it.
+    """
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO users (username, password_hash, created_at) "
+                "VALUES (?, 'x', '2026-03-17T00:00:00+00:00') ON CONFLICT (username) DO NOTHING",
+                (username,),
+            )
+        row = connection.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        return int(row[0])
+    finally:
+        connection.close()
+
+
+def set_progress(settings: Settings, identifier: str, page: int, user: str = READER) -> None:
+    """Write one account's reading position without going through the API."""
+    owner = account_id(settings, user)
     connection = sqlite3.connect(settings.db_path)
     try:
         connection.execute(
-            "INSERT INTO reading_progress (issue_id, page, page_count, updated_at) "
-            "VALUES (?, ?, 8, '2026-03-17T00:00:00+00:00')",
-            (identifier, page),
+            "INSERT INTO reading_progress (user_id, issue_id, page, page_count, updated_at) "
+            "VALUES (?, ?, ?, 8, '2026-03-17T00:00:00+00:00')",
+            (owner, identifier, page),
         )
         connection.commit()
     finally:
         connection.close()
 
 
-def progress_of(settings: Settings, identifier: str) -> int | None:
-    rows = query(settings, "SELECT page FROM reading_progress WHERE issue_id = ?", (identifier,))
+def progress_of(settings: Settings, identifier: str, user: str = READER) -> int | None:
+    """One account's position in one issue, or ``None``."""
+    rows = query(
+        settings,
+        "SELECT p.page FROM reading_progress p JOIN users u ON u.id = p.user_id "
+        "WHERE p.issue_id = ? AND u.username = ?",
+        (identifier, user),
+    )
     return int(rows[0]["page"]) if rows else None
 
 
@@ -1643,6 +1682,7 @@ def stage_a_copy(sample_library: SampleLibrary, data_dir: Path) -> tuple[Path, P
 def test_a_reading_position_follows_a_copy_onto_the_issue_that_wins(
     sample_library: SampleLibrary, data_dir: Path
 ) -> None:
+    """Every reader's position moves, each one still their own."""
     settings = quiet_settings(sample_library.root, data_dir)
     write_sample_config(settings.config_path)
     original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
@@ -1650,6 +1690,7 @@ def test_a_reading_position_follows_a_copy_onto_the_issue_that_wins(
     scan_once(settings)
     assert query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (loser,))[0][0] is None
     set_progress(settings, loser, 5)
+    set_progress(settings, loser, 2, user="another reader")
 
     shutil.move(str(parked), original)
     scan_once(settings)
@@ -1657,12 +1698,19 @@ def test_a_reading_position_follows_a_copy_onto_the_issue_that_wins(
     assert query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (loser,))[0][0] == winner
     assert progress_of(settings, winner) == 5
     assert progress_of(settings, loser) is None
+    assert progress_of(settings, winner, user="another reader") == 2
+    assert progress_of(settings, loser, user="another reader") is None
 
 
 def test_a_position_already_set_on_the_winner_is_never_overwritten(
     sample_library: SampleLibrary, data_dir: Path
 ) -> None:
-    """The copy keeps its own row rather than clobbering the one that stayed."""
+    """The copy keeps its own row rather than clobbering the one that stayed.
+
+    Per reader: one who already has a position on the winner keeps both of
+    theirs, and another who has none there still has theirs moved, in the
+    same scan.
+    """
     settings = quiet_settings(sample_library.root, data_dir)
     write_sample_config(settings.config_path)
     original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
@@ -1670,12 +1718,15 @@ def test_a_position_already_set_on_the_winner_is_never_overwritten(
     scan_once(settings)
     set_progress(settings, loser, 5)
     set_progress(settings, winner, 3)
+    set_progress(settings, loser, 7, user="another reader")
 
     shutil.move(str(parked), original)
     scan_once(settings)
 
     assert progress_of(settings, winner) == 3
     assert progress_of(settings, loser) == 5
+    assert progress_of(settings, winner, user="another reader") == 7
+    assert progress_of(settings, loser, user="another reader") is None
 
 
 def test_deleting_the_winner_s_progress_is_not_resurrected_by_a_later_scan(
@@ -1701,7 +1752,10 @@ def test_deleting_the_winner_s_progress_is_not_resurrected_by_a_later_scan(
     connection = sqlite3.connect(settings.db_path)
     try:
         with connection:
-            connection.execute("DELETE FROM reading_progress WHERE issue_id = ?", (winner,))
+            connection.execute(
+                "DELETE FROM reading_progress WHERE user_id = ? AND issue_id = ?",
+                (account_id(settings), winner),
+            )
     finally:
         connection.close()
     assert progress_of(settings, winner) is None
@@ -1709,6 +1763,73 @@ def test_deleting_the_winner_s_progress_is_not_resurrected_by_a_later_scan(
     scan_once(settings)
 
     assert progress_of(settings, winner) is None
+
+
+def set_legacy_progress(settings: Settings, identifier: str, page: int) -> None:
+    """Write a single-user position that no administrator has adopted yet."""
+    connection = sqlite3.connect(settings.db_path)
+    try:
+        with connection:
+            connection.execute(
+                "INSERT INTO legacy_progress (issue_id, page, page_count, updated_at) "
+                "VALUES (?, ?, 8, '2026-03-17T00:00:00+00:00')",
+                (identifier, page),
+            )
+    finally:
+        connection.close()
+
+
+def legacy_progress_of(settings: Settings, identifier: str) -> int | None:
+    """The unadopted position in one issue, or ``None``."""
+    rows = query(settings, "SELECT page FROM legacy_progress WHERE issue_id = ?", (identifier,))
+    return int(rows[0]["page"]) if rows else None
+
+
+def test_an_unadopted_position_follows_a_copy_onto_the_issue_that_wins(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """Scanned before any administrator exists, then adopted under the winner's id."""
+    settings = quiet_settings(sample_library.root, data_dir)
+    write_sample_config(settings.config_path)
+    original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
+
+    scan_once(settings)
+    set_legacy_progress(settings, loser, 5)
+
+    shutil.move(str(parked), original)
+    scan_once(settings)
+
+    assert query(settings, "SELECT duplicate_of FROM issues WHERE id = ?", (loser,))[0][0] == winner
+    assert legacy_progress_of(settings, winner) == 5
+    assert legacy_progress_of(settings, loser) is None
+
+    database = open_database(settings.db_path)
+    try:
+        accounts.create_user(database.connection, ADMIN_USERNAME, ADMIN_PASSWORD, is_admin=True)
+    finally:
+        database.close()
+
+    assert progress_of(settings, winner, user=ADMIN_USERNAME) == 5
+    assert progress_of(settings, loser, user=ADMIN_USERNAME) is None
+
+
+def test_an_unadopted_position_on_the_winner_is_never_overwritten(
+    sample_library: SampleLibrary, data_dir: Path
+) -> None:
+    """The copy's unadopted position stays where it is, as a reader's would."""
+    settings = quiet_settings(sample_library.root, data_dir)
+    write_sample_config(settings.config_path)
+    original, parked, loser, winner = stage_a_copy(sample_library, data_dir)
+
+    scan_once(settings)
+    set_legacy_progress(settings, loser, 5)
+    set_legacy_progress(settings, winner, 3)
+
+    shutil.move(str(parked), original)
+    scan_once(settings)
+
+    assert legacy_progress_of(settings, winner) == 3
+    assert legacy_progress_of(settings, loser) == 5
 
 
 # --------------------------------------------------------------------- progress

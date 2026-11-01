@@ -26,13 +26,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from paperstand.api.auth import Authenticator
 from paperstand.config import Settings
 from paperstand.db import utc_now
-from paperstand.main import create_app
 from paperstand.opds import atom
 from paperstand.opds import router as opds_router
 from paperstand.proxy import TrustedProxies
-from tests.conftest import quiet_settings, sample_issue_id
+from tests.conftest import bearer, quiet_settings, sample_issue_id, signed_in_client
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 DC = "{http://purl.org/dc/terms/}"
@@ -97,8 +97,8 @@ def local(url: str) -> str:
 
 @contextmanager
 def serving(settings: Settings) -> Iterator[TestClient]:
-    """A client for a fresh application over ``settings``."""
-    with TestClient(create_app(settings)) as client:
+    """A client for a fresh application over ``settings``, signed in."""
+    with signed_in_client(settings) as client:
         yield client
 
 
@@ -715,7 +715,7 @@ def test_the_base_url_setting_wins_over_the_request(
 def test_a_trusted_proxys_headers_build_the_urls(catalogue_settings: Settings) -> None:
     forwarded = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "nas.local"}
 
-    with TestClient(create_app(catalogue_settings), client=("127.0.0.1", 4321)) as client:
+    with signed_in_client(catalogue_settings, client=("127.0.0.1", 4321)) as client:
         response = client.get("/opds/today", headers=forwarded)
 
     hrefs = every_href(response.content)
@@ -753,7 +753,7 @@ def test_a_forwarded_host_that_could_not_be_one_is_ignored(
     catalogue_settings: Settings,
 ) -> None:
     """A trusted proxy is still not allowed to put anything at all in a URL."""
-    with TestClient(create_app(catalogue_settings), client=("127.0.0.1", 4321)) as client:
+    with signed_in_client(catalogue_settings, client=("127.0.0.1", 4321)) as client:
         response = client.get("/opds", headers={"X-Forwarded-Host": "nas.local/evil?"})
 
     assert all(link.startswith("http://testserver/") for link in every_href(response.content))
@@ -817,7 +817,7 @@ def test_a_forwarded_for_does_not_stop_the_host_being_applied(
         "X-Forwarded-For": "203.0.113.7, 127.0.0.1",
     }
 
-    with TestClient(create_app(catalogue_settings), client=("127.0.0.1", 4321)) as client:
+    with signed_in_client(catalogue_settings, client=("127.0.0.1", 4321)) as client:
         response = client.get("/opds/today", headers=forwarded)
 
     hrefs = every_href(response.content)
@@ -973,10 +973,10 @@ def test_a_catalogue_with_nothing_in_it_still_serves_a_feed(tmp_path: Path) -> N
 
 
 def test_a_catalogue_that_could_not_be_opened_is_a_503(settings: Settings) -> None:
-    """The same answer every other catalogue endpoint gives."""
+    """The same answer every other catalogue endpoint gives, credential and all."""
     app = FastAPI()
-    app.include_router(opds_router.create_router(settings, None))
+    app.include_router(opds_router.create_router(settings, None, Authenticator(None)))
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=bearer("a token")) as client:
         for path in ("/opds", "/opds/today", "/opds/kind/newspaper"):
             assert client.get(path).status_code == 503, path

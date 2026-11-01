@@ -1,4 +1,9 @@
-"""Tests for the SPA fallback mount."""
+"""Tests for the SPA fallback mount.
+
+Every client here is anonymous, on purpose: the frontend's files are public —
+the sign-in page has to load before anybody is signed in — and an unknown
+``/api`` path is still a plain ``404``, not a ``401``.
+"""
 
 from __future__ import annotations
 

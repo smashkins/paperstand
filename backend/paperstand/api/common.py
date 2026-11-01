@@ -29,11 +29,17 @@ UNKNOWN_ISSUE = "unknown issue"
 UNKNOWN_TITLE = "unknown title"
 MISSING_FILE = "the file is no longer in the library"
 
-#: How long the browser may keep something whose URL cannot change meaning.
-IMMUTABLE = "public, max-age=31536000, immutable"
+# Every one of these is `private`: everything under `/api` and `/opds` is
+# behind an account, and a shared cache between the server and its readers —
+# a proxy, a CDN in front of the NAS — must never hand what one signed-in
+# request fetched to the next one, signed in or not.
 
-#: What a versionless image URL gets: cache it, but check every time.
-REVALIDATE = "no-cache"
+#: How long the browser may keep something whose URL cannot change meaning.
+IMMUTABLE = "private, max-age=31536000, immutable"
+
+#: What a versionless image URL gets: cache it, but check every time. Also what
+#: every `/api` and `/opds` response that says nothing of its own is given.
+REVALIDATE = "private, no-cache"
 
 #: The PDF is private to the deployment and must be revalidated.
 PRIVATE = "private, max-age=0, must-revalidate"

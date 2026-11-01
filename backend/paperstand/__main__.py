@@ -176,6 +176,38 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="directory holding the database and the caches (default: PAPERSTAND_DATA)",
     )
+
+    users_command = subparsers.add_parser(
+        "users",
+        help="list the accounts, add one, or reset a password",
+    )
+    users_data = argparse.ArgumentParser(add_help=False)
+    users_data.add_argument(
+        "--data",
+        type=Path,
+        default=None,
+        help="directory holding the database and the caches (default: PAPERSTAND_DATA)",
+    )
+    users_password_source = argparse.ArgumentParser(add_help=False)
+    users_password_source.add_argument(
+        "--password-stdin",
+        action="store_true",
+        help="read the password as one line from standard input instead of prompting",
+    )
+    users_command.set_defaults(users_help=users_command.print_help)
+    users_subparsers = users_command.add_subparsers(dest="users_command")
+    users_subparsers.add_parser("list", parents=[users_data], help="list every account")
+    users_add = users_subparsers.add_parser(
+        "add", parents=[users_data, users_password_source], help="create an account"
+    )
+    users_add.add_argument("username", help="name to sign in with")
+    users_add.add_argument("--admin", action="store_true", help="make it an administrator")
+    users_password = users_subparsers.add_parser(
+        "password",
+        parents=[users_data, users_password_source],
+        help="reset an account's password and sign out its devices",
+    )
+    users_password.add_argument("username", help="account whose password to reset")
     return parser
 
 
@@ -309,8 +341,41 @@ def main(argv: Sequence[str] | None = None) -> int:
         if overrides:
             settings = Settings(**{**settings.model_dump(), **overrides})
         return retry_covers(settings.data, sys.stdout)
+    if args.command == "users":
+        return users(args)
     parser.print_help()
     return 1
+
+
+def users(args: argparse.Namespace) -> int:
+    """Dispatch ``users list``, ``users add`` and ``users password``."""
+    from paperstand.cli.users import users_add, users_list, users_password
+
+    command = args.users_command
+    if command is None:
+        args.users_help()
+        return 1
+    data = args.data if args.data is not None else get_settings().data
+    if command == "list":
+        return users_list(data, sys.stdout, sys.stderr)
+    if command == "add":
+        return users_add(
+            data,
+            args.username,
+            admin=args.admin,
+            password_stdin=args.password_stdin,
+            stdin=sys.stdin,
+            stream=sys.stdout,
+            err=sys.stderr,
+        )
+    return users_password(
+        data,
+        args.username,
+        password_stdin=args.password_stdin,
+        stdin=sys.stdin,
+        stream=sys.stdout,
+        err=sys.stderr,
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

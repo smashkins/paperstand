@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Accounts. Every page, API call and OPDS request now needs one; only `GET /api/health`
+  and signing in do not. The first administrator is created at the first start from
+  `PAPERSTAND_ADMIN_USERNAME` (default `admin`) and `PAPERSTAND_ADMIN_PASSWORD`, and adds
+  everyone else. Administrators manage the accounts, start scans and see the maintenance
+  view; every account reads the same catalogue. Native apps sign in for a token and send it
+  as `Authorization: Bearer`, the web interface keeps it in an `HttpOnly` cookie, and OPDS
+  clients send the same user name and password as HTTP basic authentication — on the feed
+  and on the covers and PDFs it links to. `GET /api/health` says `auth_required: true`.
+- `paperstand users list`, `users add` and `users password`, to create an account or reset a
+  lost password from the command line, while the server runs.
+
+### Changed
+
+- Reading progress belongs to the account that set it: "continue reading" and the position
+  in every issue are each reader's own. The positions stored before accounts go to the first
+  administrator.
+- Every `/api` and `/opds` response is marked `private`, images and PDFs included, so a
+  shared cache in front of the server never hands one account's response to another.
+- `POST /api/scan` and `/api/maintenance` are for administrators only; following a scan with
+  `GET /api/scan/status` is open to every account.
+
+### Upgrading
+
+- **The database schema changes (5), and an older image cannot open it afterwards.** Back
+  up `<data>/paperstand.db` before upgrading; going back means restoring that copy.
+- Set `PAPERSTAND_ADMIN_PASSWORD` before the first start of the new version, or create the
+  first administrator with `paperstand users add NAME --admin`: until an account exists
+  every request is refused.
+- A reverse proxy that asked for a password of its own has to stop: it would take the
+  `Authorization` header the reading apps now send to Paperstand. OPDS clients sign in with
+  a Paperstand account instead.
+
 ## [0.6.0] - 2026-09-17
 
 ### Added

@@ -21,9 +21,10 @@ from paperstand.api import libraries as libraries_api
 from paperstand.api import progress as progress_api
 from paperstand.api import titles as titles_api
 from paperstand.api import today as today_api
+from paperstand.api.auth import Authenticator
 from paperstand.config import Settings
 from paperstand.db import utc_now
-from tests.conftest import SAMPLE_TODAY, sample_issue_id
+from tests.conftest import SAMPLE_TODAY, bearer, sample_issue_id
 
 A_NEWSPAPER = "Newspapers/2026/03/17/Corriere_del_Ponte_17_Marzo_2026.pdf"
 
@@ -87,15 +88,21 @@ def test_stats_add_up_and_measure_the_caches(catalogue_client: TestClient) -> No
 
 
 def test_the_catalogue_is_unavailable_without_a_database(settings: Settings) -> None:
-    """A database that could not be opened is a 503, not a stack trace."""
-    application = FastAPI()
-    application.include_router(libraries_api.create_router(settings, None))
-    application.include_router(titles_api.create_router(None))
-    application.include_router(issues_api.create_router(None))
-    application.include_router(today_api.create_router(settings, None))
-    application.include_router(progress_api.create_router(None))
+    """A database that could not be opened is a 503, not a stack trace.
 
-    with TestClient(application) as offline:
+    A route that asks for the caller checks the credential against the
+    catalogue first, and with no catalogue to check it against that is the
+    same 503 — never a 401 that would sign a good client out.
+    """
+    application = FastAPI()
+    authenticator = Authenticator(None)
+    application.include_router(libraries_api.create_router(settings, None))
+    application.include_router(titles_api.create_router(None, authenticator))
+    application.include_router(issues_api.create_router(None, authenticator))
+    application.include_router(today_api.create_router(settings, None, authenticator))
+    application.include_router(progress_api.create_router(None, authenticator))
+
+    with TestClient(application, headers=bearer("a token")) as offline:
         for path in ("/api/libraries", "/api/stats", "/api/titles", "/api/issues", "/api/today"):
             assert offline.get(path).status_code == 503, path
 

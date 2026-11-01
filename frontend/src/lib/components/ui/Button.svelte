@@ -41,6 +41,8 @@
 		disabled?: boolean;
 		title?: string;
 		'aria-label'?: string;
+		/** For a button that shows or hides something next to it. */
+		'aria-expanded'?: boolean;
 		onclick?: (event: MouseEvent) => void;
 		class?: string;
 		children: Snippet;
@@ -53,6 +55,7 @@
 		disabled = false,
 		title,
 		'aria-label': ariaLabel,
+		'aria-expanded': ariaExpanded,
 		onclick,
 		class: klass = '',
 		children
@@ -69,6 +72,7 @@
 		{disabled}
 		{title}
 		aria-label={ariaLabel}
+		aria-expanded={ariaExpanded}
 		{onclick}
 		class={buttonClass(variant, klass)}
 	>

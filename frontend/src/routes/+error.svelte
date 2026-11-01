@@ -11,9 +11,9 @@
 	 * a `load` that threw where the route had no `ErrorState` of its own.
 	 *
 	 * A single page covers both because the difference to the reader is one line
-	 * of copy — a 404 is "that page is not part of Paperstand", anything else is
-	 * "something went wrong" — and both end the same way, with the road back to
-	 * Today. It sits inside the storefront layout, so the bar, the tabs and the
+	 * of copy — a 404 is "that page is not part of Paperstand", a 403 is "that
+	 * page is for administrators", anything else is "something went wrong" — and
+	 * all end the same way, with the road back to Today. It sits inside the storefront layout, so the bar, the tabs and the
 	 * locale are the ones the reader already had.
 	 *
 	 * The body always comes from the message catalogue. What reaches here is a
@@ -23,8 +23,13 @@
 	 * a disclosure, and only while developing.
 	 */
 	const notFound = $derived(page.status === 404);
-	const title = $derived(notFound ? m.not_found_title() : m.error_title());
-	const body = $derived(notFound ? m.not_found_body() : m.error_body());
+	const forbidden = $derived(page.status === 403);
+	const title = $derived(
+		notFound ? m.not_found_title() : forbidden ? m.admin_only_title() : m.error_title()
+	);
+	const body = $derived(
+		notFound ? m.not_found_body() : forbidden ? m.admin_only_body() : m.error_body()
+	);
 	const detail = $derived(dev ? (page.error?.message ?? null) : null);
 </script>
 
