@@ -14,6 +14,7 @@ from paperstand.db import (
     SCHEMA_V1,
     SCHEMA_V2,
     SCHEMA_V3,
+    SCHEMA_V4,
     SCHEMA_VERSION,
     Database,
     DatabaseError,
@@ -40,6 +41,8 @@ TABLES = {
     "reading_progress",
     "scans",
     "meta",
+    "users",
+    "auth_tokens",
 }
 
 
@@ -493,6 +496,89 @@ def test_schema_4_accepts_a_missing_since_and_a_missing_count(tmp_path: Path) ->
     scan = connection.execute("SELECT missing FROM scans").fetchone()
     assert scan["missing"] == 1
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+# -------------------------------------------------------------- schema 5 migration
+
+
+def _populated_schema_4(path: Path) -> None:
+    """A schema-4 database — the last one without accounts — with one row in
+    every table, the pattern of :func:`_populated_schema_3`, one version on."""
+    _populated_schema_3(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(SCHEMA_V4)
+        connection.execute("PRAGMA user_version = 4")
+    finally:
+        connection.close()
+
+
+def test_a_schema_4_database_migrates_to_schema_5_keeping_every_row(tmp_path: Path) -> None:
+    path = tmp_path / "paperstand.db"
+    _populated_schema_4(path)
+
+    database = open_database(path)
+    connection = database.connection
+
+    assert user_version(connection) == SCHEMA_VERSION == 5
+    assert get_meta(connection, "schema_version") == "5"
+    assert table_names(connection) >= {"users", "auth_tokens"}
+    for table in ("libraries", "titles", "issues", "reading_progress", "scans"):
+        assert connection.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"] == 1
+    # No account is needed for the migration, and none is invented by it.
+    assert connection.execute("SELECT count(*) AS n FROM users").fetchone()["n"] == 0
+    # The shared progress row is exactly as it was: making it per user is a
+    # later step, not this one.
+    progress = connection.execute("SELECT * FROM reading_progress").fetchone()
+    assert (progress["issue_id"], progress["page"], progress["page_count"]) == ("i", 12, 40)
+    assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    database.close()
+
+
+def test_schema_5_names_are_unique_without_regard_to_case(tmp_path: Path) -> None:
+    database = open_database(tmp_path / "paperstand.db")
+    connection = database.connection
+    insert = "INSERT INTO users (username, password_hash, created_at) VALUES (?, 'x', ?)"
+
+    with connection:
+        connection.execute(insert, ("reader", utc_now()))
+    with pytest.raises(sqlite3.IntegrityError), connection:
+        connection.execute(insert, ("READER", utc_now()))
+    with pytest.raises(sqlite3.IntegrityError), connection:
+        connection.execute(
+            "INSERT INTO users (username, password_hash, is_admin, created_at) "
+            "VALUES ('second', 'x', 2, ?)",
+            (utc_now(),),
+        )
+    database.close()
+
+
+def test_schema_5_tokens_go_with_their_account(tmp_path: Path) -> None:
+    database = open_database(tmp_path / "paperstand.db")
+    connection = database.connection
+    with connection:
+        user = connection.execute(
+            "INSERT INTO users (username, password_hash, created_at) VALUES ('reader', 'x', ?)",
+            (utc_now(),),
+        ).lastrowid
+        connection.execute(
+            "INSERT INTO auth_tokens (token_hash, user_id, created_at, last_used_at) "
+            "VALUES ('h', ?, ?, ?)",
+            (user, utc_now(), utc_now()),
+        )
+    index_names = {
+        str(row["name"])
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'auth_tokens'"
+        )
+    }
+    assert "auth_tokens_user" in index_names
+
+    with connection:
+        connection.execute("DELETE FROM users WHERE id = ?", (user,))
+
+    assert connection.execute("SELECT count(*) AS n FROM auth_tokens").fetchone()["n"] == 0
     database.close()
 
 

@@ -37,7 +37,7 @@ from paperstand.parsing.normalize import slugify
 log = get_logger(__name__)
 
 #: Version of the schema this build of Paperstand writes.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: How long a writer waits for a lock before giving up, in milliseconds.
 BUSY_TIMEOUT_MS = 10_000
@@ -198,8 +198,35 @@ ALTER TABLE scans ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
 COMMIT;
 """
 
+# Accounts. `username` compares without regard to (ASCII) case, so `Reader`
+# and `reader` cannot both exist and either spelling signs in. A token is
+# stored only as the SHA-256 of itself: it is 256 random bits, so a fast hash
+# is enough, and a copy of the database hands nobody a working credential.
+# `last_used_at` is best effort, written at most once a minute per token.
+# Nothing here needs a user to exist, so the migration runs on any catalogue.
+SCHEMA_V5 = """
+BEGIN;
+CREATE TABLE users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1)),
+    created_at    TEXT NOT NULL
+);
+CREATE TABLE auth_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash   TEXT NOT NULL UNIQUE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device       TEXT,
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT NOT NULL
+);
+CREATE INDEX auth_tokens_user ON auth_tokens (user_id);
+COMMIT;
+"""
+
 #: One entry per schema version, in order. Append; never edit a released one.
-MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4)
+MIGRATIONS: tuple[str, ...] = (SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5)
 
 
 class DatabaseError(RuntimeError):

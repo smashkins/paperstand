@@ -30,6 +30,7 @@ import yaml
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from paperstand import accounts
 from paperstand.config import Settings
 from paperstand.db import issue_id
 from paperstand.main import create_app
@@ -122,6 +123,23 @@ def _fast_covers(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
     """
     if request.node.get_closest_marker("real_covers") is None:
         monkeypatch.setattr("paperstand.scanner.scanner.render_cover", _fast_render_cover)
+
+
+#: The production scrypt cost, read before any test has lowered it.
+PRODUCTION_SCRYPT_N = accounts.SCRYPT_N
+
+
+@pytest.fixture(autouse=True)
+def _cheap_passwords(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hash passwords at a token scrypt cost instead of the real one.
+
+    The real cost is tens of milliseconds a hash, on purpose, and would be paid
+    by every account a test creates and every sign-in it checks — the bootstrap
+    of each application a test builds included. The cost travels inside each
+    hash, so one made here verifies here exactly as a production one would;
+    `test_accounts.py` checks the production value on its own.
+    """
+    monkeypatch.setattr(accounts, "SCRYPT_N", 2**4)
 
 
 @dataclass(frozen=True)

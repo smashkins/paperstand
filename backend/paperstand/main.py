@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from paperstand import __version__
+from paperstand.accounts import bootstrap
 from paperstand.api import files as files_api
 from paperstand.api import health as health_api
 from paperstand.api import images as images_api
@@ -73,6 +74,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings.log_level)
 
     database = open_catalogue(settings)
+    if database is not None:
+        bootstrap(settings, database)
     scheduler = ScanScheduler(settings, database) if database is not None else None
     renderer = PageRenderer(settings)
 
