@@ -1323,8 +1323,25 @@ class Scanner:
         row, which costs nothing and is still there if the two ever change
         places — while another reader, with no position on the winner, has
         theirs moved in the same pass.
+
+        The single-user positions still waiting in ``legacy_progress`` for the
+        first administrator move by the same rule, as one more reader's: a
+        catalogue upgraded without one may be scanned many times before an
+        account adopts them, and adoption copies each row under the id it
+        holds by then. Left on the copy's id, a position would be adopted onto
+        an issue no list shows — and a duplicate pointer that does not change
+        is never looked at again.
         """
         for winner, loser in losers:
+            legacy = connection.execute(
+                "INSERT INTO legacy_progress (issue_id, page, page_count, updated_at) "
+                "SELECT ?, page, page_count, updated_at FROM legacy_progress "
+                "WHERE issue_id = ? ON CONFLICT (issue_id) DO NOTHING",
+                (winner, loser),
+            )
+            if legacy.rowcount:
+                connection.execute("DELETE FROM legacy_progress WHERE issue_id = ?", (loser,))
+                log.info("moved the unadopted reading position of %s onto %s", loser, winner)
             rows = connection.execute(
                 "SELECT user_id, page, page_count, updated_at FROM reading_progress "
                 "WHERE issue_id = ?",
