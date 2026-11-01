@@ -762,3 +762,111 @@ def test_the_web_interface_itself_can_change_things_with_the_cookie(
     response = client.put(f"/api/issues/{issue_id_}/progress", json={"page": 2}, headers=headers)
 
     assert response.status_code == 200
+
+
+# A plain-http install gets no Fetch Metadata from the browser: the Origin decides.
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://elsewhere.example",
+        "http://testserver:8081",
+        "http://shelf.testserver",
+        "null",
+        "not an origin",
+        "http://testserver:port",
+    ],
+)
+def test_without_fetch_metadata_another_origin_cannot_change_anything_with_the_cookie(
+    catalogue_client: TestClient, issue_id_: str, origin: str
+) -> None:
+    client = anonymous(catalogue_client)
+    login(client, ADMIN_USERNAME, ADMIN_PASSWORD)
+    from_elsewhere = {"Origin": origin}
+
+    assert client.post("/api/scan", headers=from_elsewhere).status_code == 403
+    progress = client.put(
+        f"/api/issues/{issue_id_}/progress", json={"page": 2}, headers=from_elsewhere
+    )
+    assert progress.status_code == 403
+    assert client.post("/api/auth/logout", headers=from_elsewhere).status_code == 403
+    assert client.get("/api/auth/me", headers=from_elsewhere).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://testserver",
+        "HTTP://TestServer:80",
+        "https://testserver",
+        "https://testserver:443",
+        None,
+    ],
+)
+def test_without_fetch_metadata_the_servers_own_origin_can_change_things_with_the_cookie(
+    catalogue_client: TestClient, issue_id_: str, origin: str | None
+) -> None:
+    client = anonymous(catalogue_client)
+    login(client, ADMIN_USERNAME, ADMIN_PASSWORD)
+    headers = {"Origin": origin} if origin is not None else {}
+
+    response = client.put(f"/api/issues/{issue_id_}/progress", json={"page": 2}, headers=headers)
+
+    assert response.status_code == 200
+
+
+def test_the_origin_is_compared_with_the_host_the_trusted_proxy_was_asked_for(
+    proxied: TestClient, issue_id_: str
+) -> None:
+    login(proxied, ADMIN_USERNAME, ADMIN_PASSWORD)
+    forwarded = {"X-Forwarded-Proto": "https", "X-Forwarded-Host": "Paperstand.Example:443"}
+
+    def put(origin: str) -> int:
+        response = proxied.put(
+            f"/api/issues/{issue_id_}/progress",
+            json={"page": 2},
+            headers={**forwarded, "Origin": origin},
+        )
+        return int(response.status_code)
+
+    assert put("https://paperstand.example") == 200
+    assert put("http://testserver") == 403
+
+
+def test_without_fetch_metadata_the_base_url_can_change_things_with_the_cookie(
+    catalogue_settings: Settings, issue_id_: str
+) -> None:
+    settings = quiet_settings(
+        catalogue_settings.library,
+        catalogue_settings.data,
+        base_url="https://paperstand.example/reading/",
+    )
+    with TestClient(create_app(settings)) as client:
+        login(client, ADMIN_USERNAME, ADMIN_PASSWORD)
+
+        def put(origin: str) -> int:
+            response = client.put(
+                f"/api/issues/{issue_id_}/progress", json={"page": 2}, headers={"Origin": origin}
+            )
+            return int(response.status_code)
+
+        assert put("https://paperstand.example") == 200
+        assert put("http://testserver") == 200
+        assert put("https://elsewhere.example") == 403
+
+
+def test_a_bearer_or_basic_client_is_never_asked_where_it_came_from(
+    catalogue_client: TestClient, issue_id_: str
+) -> None:
+    token = issue(catalogue_client)
+    client = anonymous(catalogue_client)
+    from_elsewhere = {"Origin": "http://elsewhere.example"}
+
+    for credential in (bearer(token), basic(ADMIN_USERNAME, ADMIN_PASSWORD)):
+        response = client.put(
+            f"/api/issues/{issue_id_}/progress",
+            json={"page": 2},
+            headers={**from_elsewhere, **credential},
+        )
+        assert response.status_code == 200

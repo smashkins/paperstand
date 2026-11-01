@@ -45,6 +45,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
@@ -79,6 +80,9 @@ SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
 #: ``Sec-Fetch-Site`` values that mean the page itself, or the user, asked.
 SAME_ORIGIN = frozenset({"same-origin", "none"})
+
+#: The port a URL of each scheme means when it names none.
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 Credential = Literal["bearer", "cookie", "basic"]
 
@@ -192,9 +196,18 @@ class Authenticator:
     admin: Callable[..., Caller]
     """The caller when an administrator; a ``403`` when signed in as anybody else."""
 
-    def __init__(self, database: Database | None, *, cache_size: int = BASIC_CACHE_SIZE) -> None:
+    def __init__(
+        self,
+        database: Database | None,
+        *,
+        base_url: str | None = None,
+        cache_size: int = BASIC_CACHE_SIZE,
+    ) -> None:
         self.database = database
         self.basic_cache = BasicCache(cache_size)
+        #: The host and port of ``PAPERSTAND_BASE_URL``, which a cookie write
+        #: may also come from; see :func:`refuse_cross_site`.
+        self.base_authority = authority(base_url) if base_url else None
 
         def optional_user(request: Request) -> Caller | None:
             try:
@@ -260,7 +273,7 @@ class Authenticator:
             if cookie:
                 caller = self._token(connection, cookie, "cookie")
                 if caller is not None:
-                    refuse_cross_site(request)
+                    refuse_cross_site(request, self.base_authority)
                     return caller
             if basic:
                 account = self._basic(connection, basic)
@@ -297,19 +310,62 @@ class Authenticator:
         return account
 
 
-def refuse_cross_site(request: Request) -> None:
+def authority(url: str) -> str | None:
+    """The ``host[:port]`` of ``url``, in lower case, without its scheme's default port.
+
+    ``None`` for anything that has no scheme or no host — ``null`` among
+    them — or whose port is not a number.
+    """
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return None
+    scheme, host = parts.scheme.lower(), parts.hostname
+    if not scheme or not host:
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    if port is None or port == DEFAULT_PORTS.get(scheme):
+        return host
+    return f"{host}:{port}"
+
+
+def refuse_cross_site(request: Request, base_authority: str | None = None) -> None:
     """A ``403`` for a cookie-carrying request from another site that changes something.
 
     ``SameSite=Lax`` keeps the cookie off a cross-site ``POST``, but not off one
-    from a sibling subdomain, which is the *same site*: a page on another host
-    of the same domain could otherwise start a scan with the reader's cookie.
-    A browser says where a request came from in ``Sec-Fetch-Site``; bearer and
-    Basic clients never send the cookie and are never asked.
+    from a sibling origin — another port of the same host, another host of the
+    same domain — which is the *same site*: a page there could otherwise start
+    a scan with the reader's cookie.
+
+    A browser says where a request came from in ``Sec-Fetch-Site``, and when
+    the header is there it decides. Browsers send it to secure origins only,
+    though — https, or localhost — and the common install is plain http on the
+    local network. Without it, the ``Origin`` a browser puts on every write is
+    compared with where the request was sent: the host and port of
+    ``request.url``, already the trusted proxy's ``X-Forwarded-Host``, or those
+    of ``PAPERSTAND_BASE_URL`` (``base_authority``). The scheme is left out of
+    it: a sibling origin differs by host or port, and comparing schemes would
+    refuse the web interface itself behind a TLS proxy that is not trusted.
+    ``Origin: null``, or one that cannot be read, is refused. A request with
+    neither header is not from a browser, and goes through.
+
+    Bearer and Basic clients never send the cookie and are never asked.
     """
     if request.method in SAFE_METHODS:
         return
     site = request.headers.get("sec-fetch-site")
-    if site is not None and site.lower() not in SAME_ORIGIN:
+    if site is not None:
+        if site.lower() not in SAME_ORIGIN:
+            raise HTTPException(status_code=403, detail=CROSS_SITE)
+        return
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    claimed = authority(origin)
+    own = authority(f"{request.url.scheme}://{request.url.netloc}")
+    if claimed is None or claimed not in (own, base_authority):
         raise HTTPException(status_code=403, detail=CROSS_SITE)
 
 

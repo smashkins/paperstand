@@ -133,7 +133,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database = open_catalogue(settings)
     if database is not None:
         bootstrap(settings, database)
-    authenticator = Authenticator(database)
+    authenticator = Authenticator(database, base_url=settings.base_url)
     scheduler = ScanScheduler(settings, database) if database is not None else None
     renderer = PageRenderer(settings)
 
