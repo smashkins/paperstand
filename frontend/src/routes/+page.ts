@@ -1,4 +1,4 @@
-import { api } from '$lib/api/client';
+import { api, quiet } from '$lib/api/client';
 import type { PageLoad } from './$types';
 
 /**
@@ -10,5 +10,5 @@ import type { PageLoad } from './$types';
  * button — re-run this.
  */
 export const load: PageLoad = ({ fetch }) => {
-	return { today: api.today(undefined, { fetch }) };
+	return { today: quiet(api.today(undefined, { fetch })) };
 };

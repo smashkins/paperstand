@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, api, buildQuery, isUnsortedIssue, quiet } from './client';
+import { ApiError, api, buildQuery, isUnsortedIssue, onUnauthorized, quiet } from './client';
 
 /** A `fetch` that answers once with the given body and status. */
 function stubFetch(body: unknown, init: { status?: number; json?: boolean } = {}) {
@@ -118,6 +118,90 @@ describe('api', () => {
 		const secondFetch = stubFetch([]);
 		await api.maintenanceGaps({ today: '2026-04-16' }, { fetch: secondFetch });
 		expect(calledUrl(secondFetch)).toBe('/api/maintenance/gaps?today=2026-04-16');
+	});
+});
+
+describe('accounts', () => {
+	it('signs in with a JSON body and no device name', async () => {
+		const fetch = stubFetch({ token: 't', user: { id: 1, username: 'ada' } });
+		await api.login({ username: 'ada', password: 'correct horse', device: null }, { fetch });
+		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe('/api/auth/login');
+		expect(init.method).toBe('POST');
+		expect(JSON.parse(String(init.body))).toEqual({
+			username: 'ada',
+			password: 'correct horse',
+			device: null
+		});
+	});
+
+	it('changes your own password with PUT', async () => {
+		const fetch = vi.fn(async () => new Response(null, { status: 204 }));
+		await api.changePassword({ current_password: 'a', new_password: 'b' }, { fetch });
+		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe('/api/auth/password');
+		expect(init.method).toBe('PUT');
+	});
+
+	it('updates and deletes an account by id', async () => {
+		const fetch = stubFetch({ id: 3, username: 'bea', is_admin: true });
+		await api.updateUser(3, { is_admin: true }, { fetch });
+		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe('/api/users/3');
+		expect(init.method).toBe('PATCH');
+		expect(init.body).toBe('{"is_admin":true}');
+
+		const secondFetch = vi.fn(async () => new Response(null, { status: 204 }));
+		await api.deleteUser(3, { fetch: secondFetch });
+		const [secondUrl, secondInit] = secondFetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(secondUrl).toBe('/api/users/3');
+		expect(secondInit.method).toBe('DELETE');
+	});
+});
+
+describe('onUnauthorized', () => {
+	let remove: (() => void) | undefined;
+
+	afterEach(() => {
+		remove?.();
+		remove = undefined;
+	});
+
+	it('is told about a 401 from an ordinary call, which still throws', async () => {
+		const handler = vi.fn();
+		remove = onUnauthorized(handler);
+		const fetch = stubFetch({ detail: 'not signed in' }, { status: 401 });
+		const error = (await api.today(undefined, { fetch }).catch((r: unknown) => r)) as ApiError;
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(error).toBeInstanceOf(ApiError);
+		expect(error.status).toBe(401);
+	});
+
+	it('is not told about a refused sign-in, which is the form’s to say', async () => {
+		const handler = vi.fn();
+		remove = onUnauthorized(handler);
+		const fetch = stubFetch({ detail: 'wrong username or password' }, { status: 401 });
+		const error = (await api
+			.login({ username: 'ada', password: 'nope', device: null }, { fetch })
+			.catch((r: unknown) => r)) as ApiError;
+		expect(handler).not.toHaveBeenCalled();
+		expect(error.status).toBe(401);
+	});
+
+	it('is not told about any other refusal', async () => {
+		const handler = vi.fn();
+		remove = onUnauthorized(handler);
+		const fetch = stubFetch({ detail: 'only an administrator can do this' }, { status: 403 });
+		await expect(api.maintenance({ fetch })).rejects.toBeInstanceOf(ApiError);
+		expect(handler).not.toHaveBeenCalled();
+	});
+
+	it('hears nothing once removed', async () => {
+		const handler = vi.fn();
+		onUnauthorized(handler)();
+		const fetch = stubFetch({ detail: 'not signed in' }, { status: 401 });
+		await expect(api.me({ fetch })).rejects.toBeInstanceOf(ApiError);
+		expect(handler).not.toHaveBeenCalled();
 	});
 });
 

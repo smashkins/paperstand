@@ -7,6 +7,7 @@
 	import { locales, type Locale } from '$lib/paraglide/runtime';
 	import { attention } from '$lib/stores/attention.svelte';
 	import { locale } from '$lib/stores/locale.svelte';
+	import { session } from '$lib/stores/session.svelte';
 	import {
 		IMAGE_MODES,
 		SPREAD_MODES,
@@ -15,6 +16,7 @@
 		type SpreadMode
 	} from '$lib/stores/prefs.svelte';
 	import { THEMES, theme, type Theme } from '$lib/stores/theme.svelte';
+	import AccountSection from '$lib/components/settings/AccountSection.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorState from '$lib/components/ui/ErrorState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -146,6 +148,10 @@
 		<span class="tabular ml-auto text-muted">{formatNumber(attention.count, locale.intl)}</span>
 	{/if}
 </a>
+
+{#if session.user}
+	<AccountSection user={session.user} />
+{/if}
 
 {#await data.stats}
 	<Skeleton width="100%" height="200px" />

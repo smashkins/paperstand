@@ -37,6 +37,12 @@ export type UnsortedBucket = components['schemas']['UnsortedBucket'];
 export type OrganizerRun = components['schemas']['OrganizerRun'];
 export type OrganizerMove = components['schemas']['OrganizerMove'];
 export type OrganizerParked = components['schemas']['OrganizerParked'];
+export type User = components['schemas']['User'];
+export type LoginRequest = components['schemas']['LoginRequest'];
+export type LoginResponse = components['schemas']['LoginResponse'];
+export type PasswordChange = components['schemas']['PasswordChange'];
+export type UserCreate = components['schemas']['UserCreate'];
+export type UserUpdate = components['schemas']['UserUpdate'];
 export type Kind = Issue['kind'];
 export type DatePrecision = Issue['date_precision'];
 export type DateSource = Issue['date_source'];
@@ -109,6 +115,30 @@ export function quiet<T>(promise: Promise<T>): Promise<T> {
 	return promise;
 }
 
+/**
+ * The one call whose `401` is an answer rather than a session that ended: a
+ * wrong name or password, which the sign-in form says in place.
+ */
+const LOGIN_PATH = '/api/auth/login';
+
+let unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Hear about every `401` the API answers, except the sign-in's own.
+ *
+ * The layout registers the handler that takes the browser to the sign-in page;
+ * keeping the navigation out of here is what keeps this module free of `$app`
+ * imports, and so testable. The call that was refused still throws its
+ * `ApiError` — the handler is told, it does not swallow anything. Returns the
+ * function that removes the handler again.
+ */
+export function onUnauthorized(handler: () => void): () => void {
+	unauthorizedHandler = handler;
+	return () => {
+		if (unauthorizedHandler === handler) unauthorizedHandler = null;
+	};
+}
+
 /** Anything that can go into a query string; `undefined` and `null` are dropped. */
 type QueryValue = string | number | boolean | undefined | null;
 
@@ -157,7 +187,9 @@ async function request<T>(path: string, options: CallOptions = {}, init: Request
 		throw new ApiError(0, path, error instanceof Error ? error.message : undefined);
 	}
 	if (!response.ok) {
-		throw new ApiError(response.status, path, await readDetail(response));
+		const error = new ApiError(response.status, path, await readDetail(response));
+		if (response.status === 401 && path !== LOGIN_PATH) unauthorizedHandler?.();
+		throw error;
 	}
 	if (response.status === 204) return undefined as T;
 	try {
@@ -165,6 +197,11 @@ async function request<T>(path: string, options: CallOptions = {}, init: Request
 	} catch {
 		throw new ApiError(response.status, path, 'the response was not JSON');
 	}
+}
+
+/** A request carrying `body` as JSON. */
+function sendJson(method: 'POST' | 'PUT' | 'PATCH', body: unknown): RequestInit {
+	return { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 export interface TitleParams {
@@ -222,11 +259,11 @@ export const api = {
 		request<ProgressRecord[]>(`/api/progress${buildQuery({ limit })}`, options),
 
 	putProgress: (id: string, page: number, options?: CallOptions) =>
-		request<Progress>(`/api/issues/${encodeURIComponent(id)}/progress`, options, {
-			method: 'PUT',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ page })
-		}),
+		request<Progress>(
+			`/api/issues/${encodeURIComponent(id)}/progress`,
+			options,
+			sendJson('PUT', { page })
+		),
 
 	deleteProgress: (id: string, options?: CallOptions) =>
 		request<void>(`/api/issues/${encodeURIComponent(id)}/progress`, options, { method: 'DELETE' }),
@@ -244,5 +281,35 @@ export const api = {
 	maintenance: (options?: CallOptions) => request<MaintenanceSummary>('/api/maintenance', options),
 
 	maintenanceGaps: (params: MaintenanceGapsParams = {}, options?: CallOptions) =>
-		request<TitleGaps[]>(`/api/maintenance/gaps${buildQuery({ ...params })}`, options)
+		request<TitleGaps[]>(`/api/maintenance/gaps${buildQuery({ ...params })}`, options),
+
+	/**
+	 * Sign in. The server sets the session cookie itself, and the cookie is all
+	 * the browser needs: the token in the response is for native clients, and
+	 * the SPA never keeps it anywhere.
+	 */
+	login: (credentials: LoginRequest, options?: CallOptions) =>
+		request<LoginResponse>(LOGIN_PATH, options, sendJson('POST', credentials)),
+
+	logout: (options?: CallOptions) => request<void>('/api/auth/logout', options, { method: 'POST' }),
+
+	me: (options?: CallOptions) => request<User>('/api/auth/me', options),
+
+	/** Your own password; a `403` when `current_password` is wrong. */
+	changePassword: (change: PasswordChange, options?: CallOptions) =>
+		request<void>('/api/auth/password', options, sendJson('PUT', change)),
+
+	users: (options?: CallOptions) => request<User[]>('/api/users', options),
+
+	/** A `409` when the name is taken, whatever its case. */
+	createUser: (user: UserCreate, options?: CallOptions) =>
+		request<User>('/api/users', options, sendJson('POST', user)),
+
+	/** A `409` when the change would leave no administrator. */
+	updateUser: (id: number, update: UserUpdate, options?: CallOptions) =>
+		request<User>(`/api/users/${id}`, options, sendJson('PATCH', update)),
+
+	/** A `409` for yourself and for the last administrator. */
+	deleteUser: (id: number, options?: CallOptions) =>
+		request<void>(`/api/users/${id}`, options, { method: 'DELETE' })
 };

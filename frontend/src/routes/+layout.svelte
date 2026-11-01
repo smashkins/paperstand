@@ -1,10 +1,13 @@
 <script lang="ts">
 	import '../app.css';
-	import { onNavigate } from '$app/navigation';
+	import { goto, onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
+	import { onUnauthorized } from '$lib/api/client';
+	import { LOGIN_PATH, loginHref } from '$lib/login';
 	import { m } from '$lib/paraglide/messages.js';
 	import { locale } from '$lib/stores/locale.svelte';
 	import { prefs } from '$lib/stores/prefs.svelte';
+	import { session } from '$lib/stores/session.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { coverTransition } from '$lib/stores/transition.svelte';
 	import TopBar from '$lib/components/layout/TopBar.svelte';
@@ -13,11 +16,29 @@
 	let { children } = $props();
 
 	// The reader takes the whole screen; its own layout draws whatever chrome it
-	// needs, so the storefront's bar and tabs stay out of the way. An error
-	// under `/read/` is the exception: `+error.svelte` renders here, and a page
-	// whose only way out is the browser's back button is not one to strip the
-	// navigation from.
-	const chromeless = $derived(page.error === null && page.url.pathname.startsWith('/read/'));
+	// needs, so the storefront's bar and tabs stay out of the way. The sign-in
+	// page has nothing to navigate to yet, so it goes without them too. An error
+	// is the exception: `+error.svelte` renders here, and a page whose only way
+	// out is the browser's back button is not one to strip the navigation from.
+	const chromeless = $derived(
+		page.error === null &&
+			(page.url.pathname.startsWith('/read/') || page.url.pathname === LOGIN_PATH)
+	);
+
+	// A `401` once signed in means the session ended somewhere else: signed out
+	// on another device, a password changed, the account deleted. Back to the
+	// sign-in page, and back here after it. Before the first sign-in — and on
+	// the sign-in page itself — the root `load` is the one that redirects, so
+	// the burst of `401`s a signed-out page load produces is ignored here, and
+	// clearing the session first means only the first of them ever navigates.
+	$effect(() =>
+		onUnauthorized(() => {
+			if (session.user === null || page.url.pathname === LOGIN_PATH) return;
+			session.clear();
+			// eslint-disable-next-line svelte/no-navigation-without-resolve -- `loginHref` builds a resolved path
+			void goto(loginHref(`${page.url.pathname}${page.url.search}`), { invalidateAll: true });
+		})
+	);
 
 	locale.init();
 	prefs.init();
