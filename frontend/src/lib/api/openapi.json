@@ -66,6 +66,10 @@
 			"HealthResponse": {
 				"description": "What ``GET /api/health`` answers with.\n\n``last_scan`` has no default: the endpoint always passes it explicitly,\n``null`` or a record, so the client sees a field that is always present.",
 				"properties": {
+					"auth_required": {
+						"title": "Auth Required",
+						"type": "boolean"
+					},
 					"db_ok": {
 						"title": "Db Ok",
 						"type": "boolean"
@@ -125,7 +129,8 @@
 					"db_ok",
 					"last_scan",
 					"scanning",
-					"issue_count"
+					"issue_count",
+					"auth_required"
 				],
 				"title": "HealthResponse",
 				"type": "object"
@@ -685,6 +690,54 @@
 				"title": "Library",
 				"type": "object"
 			},
+			"LoginRequest": {
+				"description": "``POST /api/auth/login``.\n\nThe fields are deliberately not validated beyond their type: a name that\ncould never exist is the same ``401`` as a wrong password, not a ``422``\nthat says which half was wrong.",
+				"properties": {
+					"device": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Device"
+					},
+					"password": {
+						"title": "Password",
+						"type": "string"
+					},
+					"username": {
+						"title": "Username",
+						"type": "string"
+					}
+				},
+				"required": [
+					"username",
+					"password"
+				],
+				"title": "LoginRequest",
+				"type": "object"
+			},
+			"LoginResponse": {
+				"description": "A new token and who it signs in as. The same token is also set as the cookie.",
+				"properties": {
+					"token": {
+						"title": "Token",
+						"type": "string"
+					},
+					"user": {
+						"$ref": "#/components/schemas/User"
+					}
+				},
+				"required": [
+					"token",
+					"user"
+				],
+				"title": "LoginResponse",
+				"type": "object"
+			},
 			"MaintenanceSummary": {
 				"description": "What ``GET /api/maintenance`` answers with: the top-bar badge and the\npage's own header.",
 				"properties": {
@@ -920,6 +973,27 @@
 					"scan_requested"
 				],
 				"title": "OrganizerRun",
+				"type": "object"
+			},
+			"PasswordChange": {
+				"description": "``PUT /api/auth/password``: the caller's own password.",
+				"properties": {
+					"current_password": {
+						"title": "Current Password",
+						"type": "string"
+					},
+					"new_password": {
+						"maxLength": 1024,
+						"minLength": 8,
+						"title": "New Password",
+						"type": "string"
+					}
+				},
+				"required": [
+					"current_password",
+					"new_password"
+				],
+				"title": "PasswordChange",
 				"type": "object"
 			},
 			"Progress": {
@@ -2000,6 +2074,92 @@
 				"title": "UnsortedBucket",
 				"type": "object"
 			},
+			"User": {
+				"description": "One account, as every client sees it. The password hash never leaves the server.",
+				"properties": {
+					"created_at": {
+						"title": "Created At",
+						"type": "string"
+					},
+					"id": {
+						"title": "Id",
+						"type": "integer"
+					},
+					"is_admin": {
+						"title": "Is Admin",
+						"type": "boolean"
+					},
+					"username": {
+						"title": "Username",
+						"type": "string"
+					}
+				},
+				"required": [
+					"id",
+					"username",
+					"is_admin",
+					"created_at"
+				],
+				"title": "User",
+				"type": "object"
+			},
+			"UserCreate": {
+				"description": "``POST /api/users``.",
+				"properties": {
+					"is_admin": {
+						"default": false,
+						"title": "Is Admin",
+						"type": "boolean"
+					},
+					"password": {
+						"maxLength": 1024,
+						"minLength": 8,
+						"title": "Password",
+						"type": "string"
+					},
+					"username": {
+						"title": "Username",
+						"type": "string"
+					}
+				},
+				"required": [
+					"username",
+					"password"
+				],
+				"title": "UserCreate",
+				"type": "object"
+			},
+			"UserUpdate": {
+				"description": "``PATCH /api/users/{id}``: either field, both, or neither.",
+				"properties": {
+					"is_admin": {
+						"anyOf": [
+							{
+								"type": "boolean"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Is Admin"
+					},
+					"password": {
+						"anyOf": [
+							{
+								"maxLength": 1024,
+								"minLength": 8,
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Password"
+					}
+				},
+				"title": "UserUpdate",
+				"type": "object"
+			},
 			"ValidationError": {
 				"properties": {
 					"ctx": {
@@ -2068,6 +2228,126 @@
 	},
 	"openapi": "3.1.0",
 	"paths": {
+		"/api/auth/login": {
+			"post": {
+				"description": "Sign in: a new token, in the body for a native client and in the cookie for a browser.\n\nAn unknown name and a wrong password are the same ``401`` and take the\nsame time. The response is ``no-store``: it is the one that carries a\ntoken in its body.",
+				"operationId": "login_api_auth_login_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/LoginRequest"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/LoginResponse"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"401": {
+						"description": "wrong username or password"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Login",
+				"tags": [
+					"auth"
+				]
+			}
+		},
+		"/api/auth/logout": {
+			"post": {
+				"description": "Revoke the token or cookie this request was made with, and clear the cookie.\n\nBasic credentials have no token to revoke; the answer is a ``204`` all\nthe same.",
+				"operationId": "logout_api_auth_logout_post",
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Logout",
+				"tags": [
+					"auth"
+				]
+			}
+		},
+		"/api/auth/me": {
+			"get": {
+				"description": "The account this request is made as.",
+				"operationId": "me_api_auth_me_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/User"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "Me",
+				"tags": [
+					"auth"
+				]
+			}
+		},
+		"/api/auth/password": {
+			"put": {
+				"description": "Change the caller's own password, and sign out every other device.\n\nThe token this request was made with stays valid, so the device that\nchanged the password is the one that stays signed in.",
+				"operationId": "change_password_api_auth_password_put",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/PasswordChange"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"403": {
+						"description": "the current password is wrong"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Change Password",
+				"tags": [
+					"auth"
+				]
+			}
+		},
 		"/api/health": {
 			"get": {
 				"description": "Report the service, the library, the database and the last scan.",
@@ -3458,6 +3738,174 @@
 				"summary": "Today",
 				"tags": [
 					"catalogue"
+				]
+			}
+		},
+		"/api/users": {
+			"get": {
+				"description": "Every account, by name without regard to case.",
+				"operationId": "list_users_api_users_get",
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/User"
+									},
+									"title": "Response List Users Api Users Get",
+									"type": "array"
+								}
+							}
+						},
+						"description": "Successful Response"
+					}
+				},
+				"summary": "List Users",
+				"tags": [
+					"users"
+				]
+			},
+			"post": {
+				"description": "Create an account; a ``409`` when the name is taken, in any case.",
+				"operationId": "create_user_api_users_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UserCreate"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"201": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/User"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"409": {
+						"description": "The name is taken"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Create User",
+				"tags": [
+					"users"
+				]
+			}
+		},
+		"/api/users/{user_id}": {
+			"delete": {
+				"description": "Delete an account and its tokens; never your own, never the last administrator.",
+				"operationId": "delete_user_api_users__user_id__delete",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "user_id",
+						"required": true,
+						"schema": {
+							"title": "User Id",
+							"type": "integer"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"404": {
+						"description": "unknown user"
+					},
+					"409": {
+						"description": "Not allowed"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Delete User",
+				"tags": [
+					"users"
+				]
+			},
+			"patch": {
+				"description": "Promote, demote, or set a new password — which signs that account out everywhere.\n\nAn administrator resetting their own password this way keeps the token\nthey made the request with, as ``PUT /api/auth/password`` would.",
+				"operationId": "update_user_api_users__user_id__patch",
+				"parameters": [
+					{
+						"in": "path",
+						"name": "user_id",
+						"required": true,
+						"schema": {
+							"title": "User Id",
+							"type": "integer"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UserUpdate"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/User"
+								}
+							}
+						},
+						"description": "Successful Response"
+					},
+					"404": {
+						"description": "unknown user"
+					},
+					"409": {
+						"description": "No admin left"
+					},
+					"422": {
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						},
+						"description": "Validation Error"
+					}
+				},
+				"summary": "Update User",
+				"tags": [
+					"users"
 				]
 			}
 		}

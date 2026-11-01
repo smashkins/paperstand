@@ -4,6 +4,96 @@
  */
 
 export interface paths {
+	'/api/auth/login': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		get?: never;
+		put?: never;
+		/**
+		 * Login
+		 * @description Sign in: a new token, in the body for a native client and in the cookie for a browser.
+		 *
+		 *     An unknown name and a wrong password are the same ``401`` and take the
+		 *     same time. The response is ``no-store``: it is the one that carries a
+		 *     token in its body.
+		 */
+		post: operations['login_api_auth_login_post'];
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/auth/logout': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		get?: never;
+		put?: never;
+		/**
+		 * Logout
+		 * @description Revoke the token or cookie this request was made with, and clear the cookie.
+		 *
+		 *     Basic credentials have no token to revoke; the answer is a ``204`` all
+		 *     the same.
+		 */
+		post: operations['logout_api_auth_logout_post'];
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/auth/me': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		/**
+		 * Me
+		 * @description The account this request is made as.
+		 */
+		get: operations['me_api_auth_me_get'];
+		put?: never;
+		post?: never;
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/auth/password': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		get?: never;
+		/**
+		 * Change Password
+		 * @description Change the caller's own password, and sign out every other device.
+		 *
+		 *     The token this request was made with stays valid, so the device that
+		 *     changed the password is the one that stays signed in.
+		 */
+		put: operations['change_password_api_auth_password_put'];
+		post?: never;
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
 	'/api/health': {
 		parameters: {
 			query?: never;
@@ -418,6 +508,57 @@ export interface paths {
 		patch?: never;
 		trace?: never;
 	};
+	'/api/users': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		/**
+		 * List Users
+		 * @description Every account, by name without regard to case.
+		 */
+		get: operations['list_users_api_users_get'];
+		put?: never;
+		/**
+		 * Create User
+		 * @description Create an account; a ``409`` when the name is taken, in any case.
+		 */
+		post: operations['create_user_api_users_post'];
+		delete?: never;
+		options?: never;
+		head?: never;
+		patch?: never;
+		trace?: never;
+	};
+	'/api/users/{user_id}': {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		get?: never;
+		put?: never;
+		post?: never;
+		/**
+		 * Delete User
+		 * @description Delete an account and its tokens; never your own, never the last administrator.
+		 */
+		delete: operations['delete_user_api_users__user_id__delete'];
+		options?: never;
+		head?: never;
+		/**
+		 * Update User
+		 * @description Promote, demote, or set a new password — which signs that account out everywhere.
+		 *
+		 *     An administrator resetting their own password this way keeps the token
+		 *     they made the request with, as ``PUT /api/auth/password`` would.
+		 */
+		patch: operations['update_user_api_users__user_id__patch'];
+		trace?: never;
+	};
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -463,6 +604,8 @@ export interface components {
 		 *     ``null`` or a record, so the client sees a field that is always present.
 		 */
 		HealthResponse: {
+			/** Auth Required */
+			auth_required: boolean;
 			/** Db Ok */
 			db_ok: boolean;
 			/** Issue Count */
@@ -665,6 +808,31 @@ export interface components {
 			unsorted_count: number;
 		};
 		/**
+		 * LoginRequest
+		 * @description ``POST /api/auth/login``.
+		 *
+		 *     The fields are deliberately not validated beyond their type: a name that
+		 *     could never exist is the same ``401`` as a wrong password, not a ``422``
+		 *     that says which half was wrong.
+		 */
+		LoginRequest: {
+			/** Device */
+			device?: string | null;
+			/** Password */
+			password: string;
+			/** Username */
+			username: string;
+		};
+		/**
+		 * LoginResponse
+		 * @description A new token and who it signs in as. The same token is also set as the cookie.
+		 */
+		LoginResponse: {
+			/** Token */
+			token: string;
+			user: components['schemas']['User'];
+		};
+		/**
 		 * MaintenanceSummary
 		 * @description What ``GET /api/maintenance`` answers with: the top-bar badge and the
 		 *     page's own header.
@@ -772,6 +940,16 @@ export interface components {
 			 * @constant
 			 */
 			version: 1;
+		};
+		/**
+		 * PasswordChange
+		 * @description ``PUT /api/auth/password``: the caller's own password.
+		 */
+		PasswordChange: {
+			/** Current Password */
+			current_password: string;
+			/** New Password */
+			new_password: string;
 		};
 		/**
 		 * Progress
@@ -1140,6 +1318,45 @@ export interface components {
 			/** Title Id */
 			title_id: string;
 		};
+		/**
+		 * User
+		 * @description One account, as every client sees it. The password hash never leaves the server.
+		 */
+		User: {
+			/** Created At */
+			created_at: string;
+			/** Id */
+			id: number;
+			/** Is Admin */
+			is_admin: boolean;
+			/** Username */
+			username: string;
+		};
+		/**
+		 * UserCreate
+		 * @description ``POST /api/users``.
+		 */
+		UserCreate: {
+			/**
+			 * Is Admin
+			 * @default false
+			 */
+			is_admin: boolean;
+			/** Password */
+			password: string;
+			/** Username */
+			username: string;
+		};
+		/**
+		 * UserUpdate
+		 * @description ``PATCH /api/users/{id}``: either field, both, or neither.
+		 */
+		UserUpdate: {
+			/** Is Admin */
+			is_admin?: boolean | null;
+			/** Password */
+			password?: string | null;
+		};
 		/** ValidationError */
 		ValidationError: {
 			/** Context */
@@ -1172,6 +1389,122 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+	login_api_auth_login_post: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody: {
+			content: {
+				'application/json': components['schemas']['LoginRequest'];
+			};
+		};
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['LoginResponse'];
+				};
+			};
+			/** @description wrong username or password */
+			401: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
+				};
+			};
+		};
+	};
+	logout_api_auth_logout_post: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			204: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+		};
+	};
+	me_api_auth_me_get: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['User'];
+				};
+			};
+		};
+	};
+	change_password_api_auth_password_put: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody: {
+			content: {
+				'application/json': components['schemas']['PasswordChange'];
+			};
+		};
+		responses: {
+			/** @description Successful Response */
+			204: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description the current password is wrong */
+			403: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
+				};
+			};
+		};
+	};
 	health_api_health_get: {
 		parameters: {
 			query?: never;
@@ -2015,6 +2348,158 @@ export interface operations {
 				content: {
 					'application/json': components['schemas']['Today'];
 				};
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
+				};
+			};
+		};
+	};
+	list_users_api_users_get: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['User'][];
+				};
+			};
+		};
+	};
+	create_user_api_users_post: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path?: never;
+			cookie?: never;
+		};
+		requestBody: {
+			content: {
+				'application/json': components['schemas']['UserCreate'];
+			};
+		};
+		responses: {
+			/** @description Successful Response */
+			201: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['User'];
+				};
+			};
+			/** @description The name is taken */
+			409: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
+				};
+			};
+		};
+	};
+	delete_user_api_users__user_id__delete: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path: {
+				user_id: number;
+			};
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			/** @description Successful Response */
+			204: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description unknown user */
+			404: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description Not allowed */
+			409: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description Validation Error */
+			422: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['HTTPValidationError'];
+				};
+			};
+		};
+	};
+	update_user_api_users__user_id__patch: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path: {
+				user_id: number;
+			};
+			cookie?: never;
+		};
+		requestBody: {
+			content: {
+				'application/json': components['schemas']['UserUpdate'];
+			};
+		};
+		responses: {
+			/** @description Successful Response */
+			200: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content: {
+					'application/json': components['schemas']['User'];
+				};
+			};
+			/** @description unknown user */
+			404: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
+			};
+			/** @description No admin left */
+			409: {
+				headers: {
+					[name: string]: unknown;
+				};
+				content?: never;
 			};
 			/** @description Validation Error */
 			422: {

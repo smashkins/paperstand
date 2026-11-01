@@ -20,7 +20,14 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from paperstand.accounts import (
+    PASSWORD_MAX,
+    PASSWORD_MIN,
+    validate_password,
+    validate_username,
+)
 
 Kind = Literal["newspaper", "magazine"]
 DatePrecision = Literal["day", "month", "year", "none"]
@@ -338,6 +345,84 @@ class HealthResponse(BaseModel):
     last_scan: ScanRecord | None
     scanning: bool
     issue_count: int
+    auth_required: bool
+    """Always ``true``: every route but this one and the sign-in needs an
+    account. A client reads it to know it must ask for credentials — and an
+    anonymous caller sees ``library_path`` blank, since where the files live
+    on the server is not something to tell whoever asks."""
+
+
+class User(BaseModel):
+    """One account, as every client sees it. The password hash never leaves the server."""
+
+    id: int
+    username: str
+    is_admin: bool
+    created_at: str
+
+
+class LoginRequest(BaseModel):
+    """``POST /api/auth/login``.
+
+    The fields are deliberately not validated beyond their type: a name that
+    could never exist is the same ``401`` as a wrong password, not a ``422``
+    that says which half was wrong.
+    """
+
+    username: str
+    password: str
+    device: str | None = None
+    """A label for the token, such as the device's name; cut to 128 characters."""
+
+
+class LoginResponse(BaseModel):
+    """A new token and who it signs in as. The same token is also set as the cookie."""
+
+    token: str
+    user: User
+
+
+class PasswordChange(BaseModel):
+    """``PUT /api/auth/password``: the caller's own password."""
+
+    current_password: str
+    new_password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_new_password(cls, value: str) -> str:
+        return validate_password(value)
+
+
+class UserCreate(BaseModel):
+    """``POST /api/users``."""
+
+    username: str
+    """1 to 64 characters once trimmed, no ``:``, nothing invisible; stored trimmed."""
+    password: str = Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+    is_admin: bool = False
+
+    @field_validator("username")
+    @classmethod
+    def _check_username(cls, value: str) -> str:
+        return validate_username(value)
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, value: str) -> str:
+        return validate_password(value)
+
+
+class UserUpdate(BaseModel):
+    """``PATCH /api/users/{id}``: either field, both, or neither."""
+
+    password: str | None = Field(default=None, min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)
+    is_admin: bool | None = None
+
+    @field_validator("password")
+    @classmethod
+    def _check_password(cls, value: str | None) -> str | None:
+        return validate_password(value) if value is not None else None
 
 
 class OrganizerMove(BaseModel):

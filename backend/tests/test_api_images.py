@@ -59,7 +59,7 @@ def test_the_cached_images_are_served(
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/jpeg"
-    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["cache-control"] == "private, no-cache"
     assert response.headers["etag"].startswith(f'"{issue_id_}-{name}-')
     assert response.headers["etag"].endswith('"')
     assert image_of(response.content).width == width
@@ -71,7 +71,7 @@ def test_a_versioned_url_is_immutable(catalogue_client: TestClient, issue_id_: s
     response = catalogue_client.get(issue["cover_url"])
 
     assert response.status_code == 200
-    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
 
 
 @pytest.mark.parametrize("suffix", ["cover.jpg", "thumb.jpg", "pages/1.webp"])
@@ -150,7 +150,7 @@ def test_a_page_is_rendered_at_the_width_asked_for(
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/webp"
-    assert response.headers["cache-control"] == "no-cache"  # no ?v= on this URL
+    assert response.headers["cache-control"] == "private, no-cache"  # no ?v= on this URL
     assert response.headers["etag"].startswith(f'"{issue_id_}-')
     assert response.headers["etag"].endswith('-1-800"')
     image = image_of(response.content)
@@ -367,7 +367,7 @@ def test_every_url_carries_the_rendering_version(
     filled = issue["pages_url_template"].replace("{n}", "1").replace("{w}", "800")
     response = catalogue_client.get(filled)
     assert response.status_code == 200
-    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["cache-control"] == "private, max-age=31536000, immutable"
     assert f"v{PAGE_VERSION}" in response.headers["etag"]
 
 
@@ -382,9 +382,9 @@ def test_a_stale_page_version_is_served_but_never_immutable(
     )
     missing = catalogue_client.get(f"/api/issues/{issue_id_}/pages/1.webp", params={"w": 400})
 
-    assert current.headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert stale.headers["cache-control"] == "no-cache"
-    assert missing.headers["cache-control"] == "no-cache"
+    assert current.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert stale.headers["cache-control"] == "private, no-cache"
+    assert missing.headers["cache-control"] == "private, no-cache"
     assert stale.status_code == missing.status_code == 200
     assert stale.content == current.content
 
@@ -399,8 +399,8 @@ def test_a_stale_cover_version_is_served_but_never_immutable(
         f"/api/issues/{issue_id_}/cover.jpg", params={"v": COVER_VERSION + 1}
     )
 
-    assert matching.headers["cache-control"] == "public, max-age=31536000, immutable"
-    assert stale.headers["cache-control"] == "no-cache"
+    assert matching.headers["cache-control"] == "private, max-age=31536000, immutable"
+    assert stale.headers["cache-control"] == "private, no-cache"
 
 
 def test_touching_the_pdfs_mtime_changes_neither_the_url_nor_the_etag(

@@ -1,4 +1,8 @@
-"""Tests for ``GET /api/health``."""
+"""Tests for ``GET /api/health``.
+
+The fixtures' clients are signed in; the applications built here on purpose
+are not, which is what a container's health check is.
+"""
 
 from __future__ import annotations
 
@@ -28,16 +32,42 @@ def test_health_returns_expected_shape(client: TestClient, settings: Settings) -
         "last_scan": None,
         "scanning": False,
         "issue_count": 0,
+        "auth_required": True,
     }
 
 
+def test_health_answers_an_anonymous_caller_without_the_library_path(
+    client: TestClient,
+) -> None:
+    """A health check has no account: it gets everything but where the files are."""
+    response = client.get("/api/health", headers={"Authorization": ""})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["library_path"] == ""
+    assert payload["auth_required"] is True
+    assert payload["db_ok"] is True
+
+
+def test_health_treats_a_credential_that_names_nobody_as_anonymous(client: TestClient) -> None:
+    response = client.get("/api/health", headers={"Authorization": "Bearer not-a-token"})
+
+    assert response.status_code == 200
+    assert response.json()["library_path"] == ""
+
+
 def test_health_reports_a_missing_library_and_an_unusable_data_directory() -> None:
-    """Neither a missing mount nor an unwritable ``/data`` may stop the service."""
+    """Neither a missing mount nor an unwritable ``/data`` may stop the service.
+
+    Not even for a caller sending a credential the server has no catalogue to
+    check: health stays a ``200``, and anonymous.
+    """
     missing = Path("/paperstand/does/not/exist")
     settings = quiet_settings(missing, missing)
 
     with TestClient(create_app(settings)) as client:
         response = client.get("/api/health")
+        with_token = client.get("/api/health", headers={"Authorization": "Bearer some-token"})
 
     assert response.status_code == 200
     payload = response.json()
@@ -45,6 +75,9 @@ def test_health_reports_a_missing_library_and_an_unusable_data_directory() -> No
     assert payload["library_ok"] is False
     assert payload["db_ok"] is False
     assert payload["issue_count"] == 0
+    assert payload["library_path"] == ""
+    assert with_token.status_code == 200
+    assert with_token.json()["library_path"] == ""
 
 
 def test_health_reports_the_catalogue_and_the_last_scan(

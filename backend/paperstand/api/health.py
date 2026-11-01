@@ -4,15 +4,21 @@ The endpoint a container's health check calls, so it must answer under every
 circumstance the deployment can produce: no library mounted, an empty library, a
 database that could not be opened, a scan writing at that very moment. It reports
 what it finds and never fails.
+
+It is also the one catalogue route that needs no account — a health check has
+none — so it says ``auth_required`` for a client deciding whether to ask for
+credentials, and keeps the library's path on the server to callers who are
+signed in.
 """
 
 from __future__ import annotations
 
 import sqlite3
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from paperstand import __version__
+from paperstand.api.auth import Authenticator, Caller
 from paperstand.config import Settings
 from paperstand.db import Database, get_meta
 from paperstand.logging import get_logger
@@ -89,25 +95,28 @@ def create_router(
     settings: Settings,
     database: Database | None,
     scheduler: ScanScheduler | None,
+    authenticator: Authenticator,
 ) -> APIRouter:
     """Build the health router."""
     router = APIRouter(prefix="/api", tags=["system"])
 
+    # A default rather than an `Annotated` hint: see `Authenticator.__init__`.
     @router.get("/health")
-    def health() -> HealthResponse:
+    def health(caller: Caller | None = Depends(authenticator.optional_user)) -> HealthResponse:
         """Report the service, the library, the database and the last scan."""
         total = issue_count(database)
         marker = library_marker(settings, database)
         return HealthResponse(
             status="ok",
             version=__version__,
-            library_path=str(settings.library),
+            library_path=str(settings.library) if caller is not None else "",
             library_ok=settings.library.is_dir() and marker is not False,
             library_marker=marker,
             db_ok=total is not None,
             last_scan=last_scan(database),
             scanning=scheduler is not None and scheduler.running,
             issue_count=total or 0,
+            auth_required=True,
         )
 
     return router
