@@ -6,7 +6,9 @@ import type { PageLoad } from './$types';
  * Everything the maintenance view shows: four independent calls, each
  * rendering as soon as its own promise settles.
  */
-export const load: PageLoad = ({ fetch }) => {
+export const load: PageLoad = async ({ fetch, parent }) => {
+	// Maintenance's `+layout.ts` turns a non-administrator away before anything is asked.
+	await parent();
 	return {
 		summary: quiet(api.maintenance({ fetch })),
 		gaps: quiet(api.maintenanceGaps({}, { fetch })),

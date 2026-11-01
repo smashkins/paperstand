@@ -17,6 +17,7 @@
 	} from '$lib/stores/prefs.svelte';
 	import { THEMES, theme, type Theme } from '$lib/stores/theme.svelte';
 	import AccountSection from '$lib/components/settings/AccountSection.svelte';
+	import UsersSection from '$lib/components/settings/UsersSection.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorState from '$lib/components/ui/ErrorState.svelte';
 	import Icon from '$lib/components/ui/Icon.svelte';
@@ -138,16 +139,20 @@
 	{m.settings_title()}
 </h1>
 
-<a
-	href={resolve('/maintenance')}
-	class="flex items-center gap-3 rounded-cover border border-hairline bg-surface px-4 py-3 transition-colors hover:border-accent"
->
-	<Icon name="maintenance" size={16} />
-	<span class="font-medium">{m.nav_maintenance()}</span>
-	{#if attention.count !== null}
-		<span class="tabular ml-auto text-muted">{formatNumber(attention.count, locale.intl)}</span>
-	{/if}
-</a>
+<!-- Maintenance and the scanner's controls are an administrator's; the scan's
+     status stays for everybody. -->
+{#if session.isAdmin}
+	<a
+		href={resolve('/maintenance')}
+		class="flex items-center gap-3 rounded-cover border border-hairline bg-surface px-4 py-3 transition-colors hover:border-accent"
+	>
+		<Icon name="maintenance" size={16} />
+		<span class="font-medium">{m.nav_maintenance()}</span>
+		{#if attention.count !== null}
+			<span class="tabular ml-auto text-muted">{formatNumber(attention.count, locale.intl)}</span>
+		{/if}
+	</a>
+{/if}
 
 {#if session.user}
 	<AccountSection user={session.user} />
@@ -214,10 +219,12 @@
 		<div
 			class="flex flex-wrap items-center gap-4 rounded-cover border border-hairline bg-surface p-4"
 		>
-			<Button variant="primary" onclick={rescan} disabled={starting || scan?.running}>
-				<Icon name="refresh" size={14} />
-				{m.scan_rescan()}
-			</Button>
+			{#if session.isAdmin}
+				<Button variant="primary" onclick={rescan} disabled={starting || scan?.running}>
+					<Icon name="refresh" size={14} />
+					{m.scan_rescan()}
+				</Button>
+			{/if}
 
 			<div class="grid gap-1 text-[13px]">
 				{#if scan?.running && scan.current}
@@ -395,3 +402,7 @@
 		<p class="text-[13px] text-muted sm:col-span-2">{m.settings_reader_note()}</p>
 	</div>
 </section>
+
+{#if data.users}
+	<UsersSection initial={data.users} />
+{/if}
