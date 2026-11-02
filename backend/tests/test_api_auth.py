@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from paperstand import accounts
-from paperstand.api.auth import COOKIE_MAX_AGE, COOKIE_NAME, Authenticator
+from paperstand.api.auth import COOKIE_MAX_AGE, COOKIE_NAME, CROSS_SITE, Authenticator
 from paperstand.config import Settings
 from paperstand.main import create_app
 from tests.conftest import (
@@ -894,17 +894,68 @@ def test_without_fetch_metadata_the_base_url_can_change_things_with_the_cookie(
         assert put("https://elsewhere.example") == 403
 
 
-def test_a_bearer_or_basic_client_is_never_asked_where_it_came_from(
+# A browser that answered the `/opds` challenge sends Basic to the whole origin.
+
+
+@pytest.mark.parametrize(
+    "from_elsewhere",
+    [
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Sec-Fetch-Site": "same-site"},
+        {"Origin": "http://elsewhere.example"},
+        {"Origin": "null"},
+    ],
+)
+def test_another_site_cannot_change_anything_with_basic_credentials(
+    catalogue_client: TestClient, issue_id_: str, from_elsewhere: dict[str, str]
+) -> None:
+    client = anonymous(catalogue_client)
+    headers = {**from_elsewhere, **basic(ADMIN_USERNAME, ADMIN_PASSWORD)}
+
+    scan = client.post("/api/scan", headers=headers)
+    assert scan.status_code == 403
+    assert scan.json() == {"detail": CROSS_SITE}
+    progress = client.put(f"/api/issues/{issue_id_}/progress", json={"page": 2}, headers=headers)
+    assert progress.status_code == 403
+    # Reading is no harm, and the credentials still work for it.
+    assert client.get("/api/auth/me", headers=headers).status_code == 200
+    assert client.get("/opds", headers=headers).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Sec-Fetch-Site": "same-origin"},
+        {"Sec-Fetch-Site": "none"},
+        {"Origin": "http://testserver"},
+        {},
+    ],
+)
+def test_basic_credentials_change_things_from_the_servers_own_origin_or_outside_a_browser(
+    catalogue_client: TestClient, issue_id_: str, headers: dict[str, str]
+) -> None:
+    client = anonymous(catalogue_client)
+
+    response = client.put(
+        f"/api/issues/{issue_id_}/progress",
+        json={"page": 2},
+        headers={**headers, **basic(ADMIN_USERNAME, ADMIN_PASSWORD)},
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_bearer_client_is_never_asked_where_it_came_from(
     catalogue_client: TestClient, issue_id_: str
 ) -> None:
     token = issue(catalogue_client)
     client = anonymous(catalogue_client)
-    from_elsewhere = {"Origin": "http://elsewhere.example"}
+    elsewhere = ({"Origin": "http://elsewhere.example"}, {"Sec-Fetch-Site": "cross-site"})
 
-    for credential in (bearer(token), basic(ADMIN_USERNAME, ADMIN_PASSWORD)):
+    for from_elsewhere in elsewhere:
         response = client.put(
             f"/api/issues/{issue_id_}/progress",
             json={"page": 2},
-            headers={**from_elsewhere, **credential},
+            headers={**from_elsewhere, **bearer(token)},
         )
         assert response.status_code == 200

@@ -73,7 +73,7 @@ NOT_SIGNED_IN = "not signed in"
 WRONG_CREDENTIALS = "wrong username or password"
 WRONG_PASSWORD = "the current password is wrong"
 ADMIN_ONLY = "only an administrator can do this"
-CROSS_SITE = "a request from another site cannot use the session cookie to change anything"
+CROSS_SITE = "a request from another site cannot change anything"
 
 #: Methods that change nothing, and so need no protection from another site.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
@@ -205,8 +205,8 @@ class Authenticator:
     ) -> None:
         self.database = database
         self.basic_cache = BasicCache(cache_size)
-        #: The host and port of ``PAPERSTAND_BASE_URL``, which a cookie write
-        #: may also come from; see :func:`refuse_cross_site`.
+        #: The host and port of ``PAPERSTAND_BASE_URL``, which a write made with
+        #: the cookie or Basic may also come from; see :func:`refuse_cross_site`.
         self.base_authority = authority(base_url) if base_url else None
 
         def optional_user(request: Request) -> Caller | None:
@@ -253,8 +253,8 @@ class Authenticator:
         ``None`` when there is none at all, or none that is valid. A ``503``
         when there is one to check and no catalogue to check it against: a
         client holding a good token must not be told it was signed out
-        because the database could not be opened. A ``403`` for a cookie used
-        by another site to change something.
+        because the database could not be opened. A ``403`` for a cookie or a
+        Basic credential used by another site to change something.
         """
         scheme, _, value = request.headers.get("authorization", "").partition(" ")
         scheme = scheme.lower()
@@ -278,6 +278,7 @@ class Authenticator:
             if basic:
                 account = self._basic(connection, basic)
                 if account is not None:
+                    refuse_cross_site(request, self.base_authority)
                     return Caller(account=account, credential="basic", token_id=None)
         except sqlite3.Error as error:
             log.warning("cannot check a credential: %s", error)
@@ -332,12 +333,15 @@ def authority(url: str) -> str | None:
 
 
 def refuse_cross_site(request: Request, base_authority: str | None = None) -> None:
-    """A ``403`` for a cookie-carrying request from another site that changes something.
+    """A ``403`` for a write from another site made with the cookie or Basic credentials.
 
-    ``SameSite=Lax`` keeps the cookie off a cross-site ``POST``, but not off one
-    from a sibling origin — another port of the same host, another host of the
-    same domain — which is the *same site*: a page there could otherwise start
-    a scan with the reader's cookie.
+    Both are credentials a browser sends on its own. ``SameSite=Lax`` keeps the
+    cookie off a cross-site ``POST``, but not off one from a sibling origin —
+    another port of the same host, another host of the same domain — which is
+    the *same site*: a page there could otherwise start a scan with the
+    reader's cookie. Basic credentials have no such rule at all: a browser
+    that answered the ``/opds`` challenge sends them to the whole origin from
+    then on, with a form posted by any other site among the rest.
 
     A browser says where a request came from in ``Sec-Fetch-Site``, and when
     the header is there it decides. Browsers send it to secure origins only,
@@ -349,9 +353,11 @@ def refuse_cross_site(request: Request, base_authority: str | None = None) -> No
     it: a sibling origin differs by host or port, and comparing schemes would
     refuse the web interface itself behind a TLS proxy that is not trusted.
     ``Origin: null``, or one that cannot be read, is refused. A request with
-    neither header is not from a browser, and goes through.
+    neither header is not from a browser, and goes through: an OPDS reader
+    sending Basic is not asked to prove anything more.
 
-    Bearer and Basic clients never send the cookie and are never asked.
+    Bearer is never asked: a browser never adds that header on its own, so a
+    request that carries one was written by a client holding the token.
     """
     if request.method in SAFE_METHODS:
         return
