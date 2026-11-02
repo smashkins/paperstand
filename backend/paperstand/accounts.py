@@ -111,6 +111,10 @@ class SelfDelete(AccountError):
     """An administrator tried to delete their own account."""
 
 
+class PasswordChanged(AccountError):
+    """The account's password is no longer the one that was verified."""
+
+
 @dataclass(frozen=True)
 class Account:
     """One row of ``users``.
@@ -472,20 +476,49 @@ def _device(device: str | None) -> str | None:
 
 
 def issue_token(
-    connection: sqlite3.Connection, user_id: int, device: str | None = None
+    connection: sqlite3.Connection,
+    user_id: int,
+    device: str | None = None,
+    *,
+    password_hash: str | None = None,
 ) -> tuple[str, int]:
-    """A new token for an account: the raw value, shown once, and its row id."""
+    """A new token for an account: the raw value, shown once, and its row id.
+
+    ``password_hash`` is the hash a sign-in has just verified a password
+    against. When it is given, the token is inserted only if the account
+    still has that very hash, checked by the ``INSERT`` itself under the
+    write lock. A password reset revokes every token of the account, and one
+    that lands while the sign-in is verifying — scrypt takes tens of
+    milliseconds — would otherwise be followed by a token for the old
+    password, valid for good. :class:`PasswordChanged` when the hash is no
+    longer the account's; :class:`UnknownUser` when there is no account.
+    """
     raw = secrets.token_urlsafe(TOKEN_BYTES)
     now = utc_now()
+    row = (token_hash(raw), user_id, _device(device), now, now)
     try:
         with connection:
-            cursor = connection.execute(
-                "INSERT INTO auth_tokens (token_hash, user_id, device, created_at, last_used_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (token_hash(raw), user_id, _device(device), now, now),
-            )
+            if password_hash is None:
+                cursor = connection.execute(
+                    "INSERT INTO auth_tokens "
+                    "(token_hash, user_id, device, created_at, last_used_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    row,
+                )
+            else:
+                cursor = connection.execute(
+                    "INSERT INTO auth_tokens "
+                    "(token_hash, user_id, device, created_at, last_used_at) "
+                    "SELECT ?, ?, ?, ?, ? WHERE EXISTS "
+                    "(SELECT 1 FROM users WHERE id = ? AND password_hash = ?)",
+                    (*row, user_id, password_hash),
+                )
     except sqlite3.IntegrityError as error:
         raise UnknownUser(f"no account has the id {user_id}") from error
+    if cursor.rowcount == 0:
+        if get_user(connection, user_id) is None:
+            raise UnknownUser(f"no account has the id {user_id}")
+        raise PasswordChanged(f"the password of account {user_id} changed since it was verified")
     assert cursor.lastrowid is not None
     return raw, int(cursor.lastrowid)
 

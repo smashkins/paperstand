@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import re
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -413,6 +414,43 @@ def test_an_unknown_name_and_a_wrong_password_are_the_same_401(
     assert "www-authenticate" not in unknown.headers
     assert "set-cookie" not in unknown.headers
     assert client.post("/api/auth/login", json={"username": "admin"}).status_code == 422
+
+
+@pytest.mark.parametrize("change", ["reset", "delete"])
+def test_a_sign_in_overtaken_by_a_reset_or_a_deletion_gets_no_token(
+    catalogue_client: TestClient, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    """The account changes after the password verified and before the token is stored."""
+    client = anonymous(catalogue_client)
+    account = accounts.create_user(catalogue_connection(client), "reader", USER_PASSWORD)
+    authenticate = accounts.authenticate
+
+    def overtaken(
+        connection: sqlite3.Connection, username: str, password: str
+    ) -> accounts.Account | None:
+        verified = authenticate(connection, username, password)
+        if change == "reset":
+            accounts.set_password(connection, account.id, "a reset password")
+        else:
+            accounts.delete_user(connection, account.id, acting_user_id=None)
+        return verified
+
+    monkeypatch.setattr(accounts, "authenticate", overtaken)
+    response = client.post(
+        "/api/auth/login", json={"username": "reader", "password": USER_PASSWORD}
+    )
+    monkeypatch.undo()
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "wrong username or password"}
+    assert "www-authenticate" not in response.headers
+    assert "set-cookie" not in response.headers
+    tokens = catalogue_connection(client).execute(
+        "SELECT count(*) FROM auth_tokens WHERE user_id = ?", (account.id,)
+    )
+    assert tokens.fetchone()[0] == 0
+    if change == "reset":
+        login(client, "reader", "a reset password")
 
 
 def test_logout_revokes_the_token_it_was_made_with(catalogue_client: TestClient) -> None:

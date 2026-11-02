@@ -419,7 +419,15 @@ def create_router(authenticator: Authenticator, database: Database | None) -> AP
         account = accounts.authenticate(connection, body.username, body.password)
         if account is None:
             raise HTTPException(status_code=401, detail=WRONG_CREDENTIALS)
-        token, _ = accounts.issue_token(connection, account.id, body.device)
+        # A password reset, or the account deleted, while the password was being
+        # verified is a wrong password too: the token is issued only against the
+        # hash that was checked, so the reset cannot be outlived.
+        try:
+            token, _ = accounts.issue_token(
+                connection, account.id, body.device, password_hash=account.password_hash
+            )
+        except (accounts.PasswordChanged, accounts.UnknownUser) as error:
+            raise HTTPException(status_code=401, detail=WRONG_CREDENTIALS) from error
         set_session_cookie(response, request, token)
         response.headers["Cache-Control"] = "no-store"
         return LoginResponse(token=token, user=user_model(account))

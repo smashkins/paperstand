@@ -17,6 +17,7 @@ from pydantic import SecretStr
 from paperstand import accounts
 from paperstand.accounts import (
     LastAdmin,
+    PasswordChanged,
     SelfDelete,
     UnknownUser,
     UsernameTaken,
@@ -420,6 +421,31 @@ def test_a_token_that_names_nobody_resolves_to_nothing(connection: sqlite3.Conne
     assert resolve_token(connection, "not-a-token") is None
     with pytest.raises(UnknownUser):
         issue_token(connection, 42)
+
+
+def test_a_token_is_issued_only_against_the_password_hash_still_stored(
+    connection: sqlite3.Connection,
+) -> None:
+    """A reset that lands while a sign-in is verifying is not outlived by that sign-in."""
+    account = create_user(connection, "reader", PASSWORD)
+    verified = authenticate(connection, "reader", PASSWORD)
+    assert verified is not None
+
+    set_password(connection, account.id, "a reset password")
+
+    with pytest.raises(PasswordChanged):
+        issue_token(connection, account.id, "tablet", password_hash=verified.password_hash)
+    assert connection.execute("SELECT count(*) FROM auth_tokens").fetchone()[0] == 0
+    with pytest.raises(UnknownUser):
+        issue_token(connection, 42, password_hash=verified.password_hash)
+
+    current = get_user(connection, account.id)
+    assert current is not None
+    raw, token_id = issue_token(connection, account.id, password_hash=current.password_hash)
+    resolved = resolve_token(connection, raw)
+    assert resolved is not None
+    assert resolved.token_id == token_id
+    assert resolved.account == current
 
 
 def test_a_device_label_is_cleaned_and_bounded(connection: sqlite3.Connection) -> None:
